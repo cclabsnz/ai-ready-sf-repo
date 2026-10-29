@@ -1,5 +1,5 @@
 @IsTest
-private class CaseAccountSummaryController_Test {
+private with sharing class CaseAccountSummaryController_Test {
 
     private static User agent() {
         Profile p = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];

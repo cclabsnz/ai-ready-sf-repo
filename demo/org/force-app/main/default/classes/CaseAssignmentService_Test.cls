@@ -1,5 +1,5 @@
 @IsTest
-private class CaseAssignmentService_Test {
+private with sharing class CaseAssignmentService_Test {
 
     private static User newUser(String lastName, Boolean active) {
         Profile p = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];

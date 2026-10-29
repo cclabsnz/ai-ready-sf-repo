@@ -28,6 +28,7 @@ CORE_NAMES = sorted([
     "CaseEscalationService", "CaseEscalationService_Test",
     "CaseTriggerHandler", "CaseTriggerHandler_Test",
     "EscalationNotifier", "EscalationNotifier_Test",
+    "LegacyCaseMerge", "LegacyCaseMerge_Test",
     "CaseTrigger", "caseAccountSummary", "caseEscalationPanel",
     "Case_Escalate_Premium", "Case_Agent_Console",
     "Service_Level__c", "Escalation_Level__c", "Escalation_Reason__c", "Premium_SLA_Hours__c",
@@ -37,7 +38,7 @@ CORE_NAMES = sorted([
 CORE_FILES = [
     "classes/CaseAccountSummaryController.cls", "classes/CaseAssignmentService.cls",
     "classes/CaseEscalationService.cls", "classes/CaseTriggerHandler.cls",
-    "classes/EscalationNotifier.cls", "triggers/CaseTrigger.trigger",
+    "classes/EscalationNotifier.cls", "classes/LegacyCaseMerge.cls", "triggers/CaseTrigger.trigger",
     "lwc/caseAccountSummary/caseAccountSummary.js", "lwc/caseEscalationPanel/caseEscalationPanel.js",
     "flows/Case_Escalate_Premium.flow-meta.xml", "flexipages/Case_Agent_Console.flexipage-meta.xml",
     "objects/Account/fields/Service_Level__c.field-meta.xml",
@@ -230,7 +231,11 @@ def case_apex_follows_rules():
             while loop_depths and depth <= loop_depths[-1]:
                 loop_depths.pop()
     metas = [t for p, t in files.items() if p.startswith("classes/") and p.endswith("-meta.xml")]
-    assert all("<apiVersion>62.0</apiVersion>" in t for t in metas)
+    old = {p: t for p, t in files.items() if p.startswith("classes/") and p.endswith("-meta.xml")
+           and "<apiVersion>62.0</apiVersion>" not in t}
+    assert sorted(re.search(r"<apiVersion>(.*?)<", t).group(1) for t in old.values()) == ["48.0", "52.0"], old
+    assert all(not p.endswith("_Test.cls-meta.xml") for p in old), old
+    assert len(metas) > len(old)
 
 
 def case_api_version_is_a_parameter():

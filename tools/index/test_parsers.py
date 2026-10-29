@@ -610,6 +610,37 @@ def case_demo_core_chain():
     assert all(n.get("parseError") is not True for n in idx["nodes"].values())
 
 
+def case_sharing_read_from_code_not_comments():
+    idx = index_dir(files={
+        f"{CLS}/A.cls": "// without sharing was the old way\npublic with sharing class A {\n}\n",
+        f"{CLS}/B.cls": "/* with sharing */\npublic class B {\n}\n",
+        f"{CLS}/C.cls": "public with sharing class C {\n    String s = 'without sharing';\n}\n",
+        f"{CLS}/D.cls": "public without sharing class D {\n}\n",
+    })
+    with open(os.path.join(idx, "metadata.json")) as fh:
+        nodes = json.load(fh)["nodes"]
+    assert nodes["A"]["sharing"] == "with sharing", nodes["A"]
+    assert nodes["B"]["sharing"] == "inherited/unspecified", nodes["B"]
+    assert nodes["C"]["sharing"] == "with sharing", nodes["C"]
+    assert nodes["D"]["sharing"] == "without sharing", nodes["D"]
+
+
+def case_demo_signs_of_age():
+    idx = build_root("demo/org")
+    assert idx["nodes"]["LegacyCaseMerge"]["sharing"] == "without sharing"
+    assert idx["nodes"]["LegacyCaseMerge"]["apiVersion"] == "45.0"
+    low = query_root("demo/org", "below-api-floor", "58")
+    assert {"LegacyCaseMerge"} <= {i["api"] for i in low["items"]} and len(low["items"]) >= 3
+    assert sorted(i["apiVersion"] for i in low["items"]) == ["45.0", "48.0", "52.0"], low
+    # The legacy class is the only one that is not `with sharing`, and it touches no core component.
+    classes = {k: v for k, v in idx["nodes"].items() if v["type"] == "ApexClass"}
+    others = {k: v["sharing"] for k, v in classes.items() if k != "LegacyCaseMerge"}
+    assert set(others.values()) == {"with sharing"}, {k: s for k, s in others.items() if s != "with sharing"}
+    assert not [e for e in idx["edges"] if e["from"] == "LegacyCaseMerge" and e["to"].split(".")[0] in
+                {"Case", "CaseEscalationService", "CaseTriggerHandler", "EscalationNotifier",
+                 "CaseAssignmentService", "CaseAccountSummaryController"}]
+
+
 def main():
     failures = 0
     for name, fn in sorted((n, f) for n, f in globals().items() if n.startswith("case_") and callable(f)):

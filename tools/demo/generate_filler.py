@@ -19,7 +19,10 @@ import sys
 from xml.sax.saxutils import escape
 
 DEFAULT_SEED = 2026
-API_VERSION = "62.0"  # per-class parameter of apex_class / apex_meta; Task 7 adds older classes
+API_VERSION = "62.0"  # default; apex_class / apex_meta take a per-class version
+# Deliberate signs of age: service topics whose service class (not its test) is pinned to an old API
+# version. Chosen by topic name, so the choice never depends on the random draw.
+LEGACY_API_VERSIONS = {"RenewalOutlook": "48.0", "ContractTerm": "52.0"}
 BASE = "force-app/main/default"
 MD = "http://soap.sforce.com/2006/04/metadata"
 HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -652,7 +655,8 @@ def generate(seed):
             bounded = rule_kind(num, ftypes[num]) == "range"
             high = rng.choice([60, 80, 90] if bounded else [100, 500, 1000, 5000, 25000])
             services.append({"obj": obj, "cls": topic + rng.choice(SUFFIXES), "topic": topic,
-                             "num": num, "txt": txt, "high": high, "api_version": API_VERSION})
+                             "num": num, "txt": txt, "high": high,
+                             "api_version": LEGACY_API_VERSIONS.get(topic, API_VERSION)})
     lwc_for = {}
     picked = rng.sample(range(len(services)), LWC_COUNT)
     for i in sorted(picked):
@@ -664,7 +668,7 @@ def generate(seed):
                       MED=s["high"] // 2, TOPICWORDS=words(s["topic"]), NUMWORDS=words(s["num"]),
                       LWC=lwc, REQ=REQUIRED_INIT[s["obj"]])
         apex_class(files, s["cls"], fill(SERVICE_TEMPLATE, **tokens), s["api_version"])
-        apex_class(files, s["cls"] + "_Test", fill(TEST_TEMPLATE, **tokens), s["api_version"])
+        apex_class(files, s["cls"] + "_Test", fill(TEST_TEMPLATE, **tokens))
     for s in services:
         name = lwc_for.get(s["cls"])
         if not name:

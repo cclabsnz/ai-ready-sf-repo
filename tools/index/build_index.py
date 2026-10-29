@@ -166,13 +166,13 @@ def build(root, namespaces):
                     api_version = text(mel, "apiVersion")
             src = read_src(path)
             apex_sources[api] = (r, src)
-            sharing = "without sharing" if re.search(r"\bwithout\s+sharing\b", src) else (
-                "with sharing" if re.search(r"\bwith\s+sharing\b", src) else "inherited/unspecified")
+            code = blank_apex(src)  # sharing is read from code only, never from comments or strings
+            sharing = "without sharing" if re.search(r"\bwithout\s+sharing\b", code) else (
+                "with sharing" if re.search(r"\bwith\s+sharing\b", code) else "inherited/unspecified")
             nodes[api] = {"type": kind, "path": r, "apiVersion": api_version,
                           "sharing": sharing, "isTest": "@isTest" in src or "@IsTest" in src}
             if meta_bad:
                 nodes[api]["parseError"] = True
-            code = blank_apex(src)
             if kind == "ApexClass":
                 nodes[api]["invocable"] = re.search(r"@InvocableMethod\b", code, re.I) is not None
                 nodes[api]["auraEnabledMethods"] = sorted(set(re.findall(

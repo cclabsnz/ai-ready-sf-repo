@@ -1,5 +1,5 @@
 @IsTest
-private class CaseEscalationService_Test {
+private with sharing class CaseEscalationService_Test {
 
     private static User agentWith(String permissionSetName) {
         Profile p = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];
