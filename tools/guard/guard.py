@@ -13,6 +13,8 @@ Policy:
   - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
   - Outside advise, every Bash command must also be on the mode's bash_allow list.
   - WebFetch only to the allowlist.
+  - Tripwire: while the guard, settings, CI or CODEOWNERS differ from HEAD, or .git/config or .git/hooks/ differ
+    from the baseline a human recorded with --rebaseline, every write and non-read-only Bash call is blocked.
   - Mode advise blocks every write and every Bash call except read-only
     ones (the kill switch). The committed .claude/settings.json is the
     ceiling: committed advise beats any local AI_FRAMEWORK_MODE.
@@ -22,10 +24,12 @@ including an unreadable policy, blocks (exit 2): the hook runner treats
 every other exit code as a warning and would let the call through.
 """
 import glob
+import hashlib
 import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 
 MODES = ("advise", "normal", "build", "maintain")
@@ -88,6 +92,244 @@ def resolve_mode(committed, local):
             block(f"unknown AI_FRAMEWORK_MODE {local!r}; expected one of {MODES}. Failing closed.")
         return local or "normal"
     return "advise"  # build and maintain are personal; a committed one is not trusted
+
+
+BASELINE = "ai-guard-baseline"
+GIT_CONFIG_MARK = ".git config (unreadable include or hooksPath value)"
+GIT_STATE_MARK = ".git config/hooks (differ from the baseline, or no baseline)"
+REBASELINE_MSG = ("git config or hooks differ from the baseline a human recorded, or there is none. A human must review "
+                  ".git/config, its includes and the hooks, then run in a terminal: python3 tools/guard/guard.py --rebaseline")
+# Keys that git itself rewrites when a remote is added or an upstream is set; everything else in the config is hashed.
+CONFIG_IGNORED = {"remote": {"url", "pushurl", "fetch"}, "branch": {"remote", "merge", "rebase"}}
+SECTION_LINE = re.compile(r'\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]\s*([#;].*)?$')
+KEY_LINE = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?$", re.S)
+MAX_INCLUDE_DEPTH = 10
+UNSAFE_PATH_VALUE = re.compile(r'["\\#;]')
+
+
+class ConfigDoubt(ValueError):
+    """A config line the guard cannot read the way git does."""
+
+
+CONFIG_MSG = ("an include.path, includeIf path or core.hooksPath in the git config uses quotes, backslashes or comments, "
+              "which the guard cannot read the way git does. A human must simplify that line, then run in a terminal: "
+              "python3 tools/guard/guard.py --rebaseline")
+
+
+def git_dirs(root):
+    """(gitdir, commondir) of the work tree at root, read from .git without running git. Raises OSError."""
+    dot = os.path.join(root, ".git")
+    if os.path.isdir(dot):
+        gitdir = dot
+    else:
+        with open(dot, encoding="utf-8") as f:  # a linked worktree: ".git" is a file
+            first = f.readline().strip()
+        if not first.startswith("gitdir:"):
+            raise OSError("unrecognised .git file")
+        gitdir = os.path.realpath(os.path.join(root, first[len("gitdir:"):].strip()))
+        if not os.path.isdir(gitdir):
+            raise OSError("gitdir is not a directory")
+    try:
+        with open(os.path.join(gitdir, "commondir"), encoding="utf-8") as f:
+            common = os.path.realpath(os.path.join(gitdir, f.read().strip()))
+    except FileNotFoundError:
+        common = gitdir
+    return gitdir, common
+
+
+def config_entries(path):
+    """(section, subsection, key, value) for every key line of a git config file. ValueError when a line is doubtful."""
+    with open(path, encoding="utf-8", errors="surrogateescape") as f:
+        raw = f.read().split("\n")
+    out, section, sub, i = [], None, "", 0
+    while i < len(raw):
+        line = raw[i].rstrip("\r")
+        i += 1
+        while (len(line) - len(line.rstrip("\\"))) & 1 and i < len(raw):  # an odd run of backslashes continues the line
+            line = line[:-1] + raw[i].rstrip("\r")
+            i += 1
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        m = SECTION_LINE.match(line)
+        if m:
+            section, sub = m.group(1).lower(), m.group(2) or ""
+            if m.group(2) is None and "." in section:  # the old [section.subsection] spelling
+                section, sub = section.split(".", 1)
+            continue
+        m = KEY_LINE.match(line)
+        if not m or section is None:
+            raise ValueError(f"cannot parse {path}: {line!r}")
+        out.append((section, sub, m.group(1).lower(), (m.group(2) or "").strip()))
+    return out
+
+
+def git_state_digest(root):
+    """(digest, gitdir): SHA-256 over the common .git/config, the files it includes, every hooks file (default dir and
+    core.hooksPath) and the .git pointer of a linked worktree. Raises OSError or ValueError when it cannot be computed."""
+    gitdir, common = git_dirs(root)
+    h = hashlib.sha256()
+
+    def feed(tag, data):
+        h.update(tag.encode("utf-8", "surrogateescape") + b"\0" + hashlib.sha256(data).digest())
+
+    hook_dirs = [os.path.join(common, "hooks")]
+
+    def scan(path, depth):
+        if depth > MAX_INCLUDE_DEPTH:
+            raise ValueError("config includes nested too deeply")
+        for section, sub, key, value in config_entries(path):
+            if key in CONFIG_IGNORED.get(section, ()):
+                continue
+            feed("cfg", "\0".join((section, sub, key, value)).encode("utf-8", "surrogateescape"))
+            is_include = key == "path" and section in ("include", "includeif")
+            if (is_include or (section == "core" and key == "hookspath")) and UNSAFE_PATH_VALUE.search(value):
+                raise ConfigDoubt(f"{section}.{key} value {value!r}")  # git strips quotes and comments anywhere in the value
+            if is_include:
+                target = os.path.expanduser(value.strip('"'))
+                target = os.path.normpath(os.path.join(os.path.dirname(path), target))
+                if os.path.isfile(target):
+                    with open(target, "rb") as f:
+                        feed("include " + value, f.read())
+                    scan(target, depth + 1)
+                else:
+                    feed("include " + value, b"missing")
+            elif section == "core" and key == "hookspath":
+                hook_dirs.append(os.path.normpath(os.path.join(root, os.path.expanduser(value.strip('"')))))
+
+    scan(os.path.join(common, "config"), 0)
+    if os.path.isfile(os.path.join(root, ".git")):
+        with open(os.path.join(root, ".git"), "rb") as f:
+            feed("gitfile", f.read())
+    for n, hooks in enumerate(hook_dirs):  # the dirs are named by position: absolute paths differ between symlinked spellings
+        feed(f"hooks-dir {n}", b"")
+        if not os.path.isdir(hooks):
+            continue  # a missing hooks directory counts as empty
+        for base, dirs, names in os.walk(hooks, onerror=lambda e: (_ for _ in ()).throw(e)):
+            dirs.sort()
+            for name in sorted(names):
+                path = os.path.join(base, name)
+                with open(path, "rb") as f:
+                    feed("hook " + os.path.relpath(path, hooks).replace("\\", "/"), f.read())
+    return h.hexdigest(), gitdir
+
+
+def git_state_problem(root):
+    """None when the git config and hooks match the recorded baseline, else "unverifiable" or "baseline"."""
+    try:
+        digest, gitdir = git_state_digest(root)
+    except ConfigDoubt:
+        return "config"
+    except (OSError, ValueError):
+        return "unverifiable"
+    try:
+        with open(os.path.join(gitdir, BASELINE), encoding="ascii") as f:
+            recorded = f.read().strip()
+    except (OSError, ValueError):
+        return "baseline"
+    return None if recorded == digest else "baseline"
+
+
+def git_env():
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def run_git(root, *args):
+    cmd = ["git", "-C", root, "-c", "core.fsmonitor=false"] + list(args)
+    return subprocess.run(cmd, capture_output=True, timeout=60, stdin=subprocess.DEVNULL, env=git_env())
+
+
+def tripwire_dirty(root, paths):
+    """Files that differ from HEAD (or from the .git baseline), [] when clean, None when that cannot be verified."""
+    problem = git_state_problem(root)
+    if problem == "unverifiable":
+        return None
+    if problem == "config":
+        return [GIT_CONFIG_MARK]
+    if problem:
+        # Not asking git: a planted core.fsmonitor in .git/config runs code on `git status`.
+        return [GIT_STATE_MARK]
+    try:
+        p = run_git(root, "status", "--porcelain", "--untracked-files=all", "--no-renames", "--", *paths)
+        if p.returncode != 0:
+            return None
+        dirty = [line[3:] for line in p.stdout.decode("utf-8", "replace").splitlines() if len(line) > 3]
+        # skip-worktree and assume-unchanged hide edits from `git status`
+        q = run_git(root, "ls-files", "-v", "--", *paths)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if q.returncode != 0:
+        return None
+    for line in q.stdout.decode("utf-8", "replace").splitlines():
+        if line[:1] and (line[0].islower() or line[0] == "S"):
+            dirty.append(f"{line[2:]} (skip-worktree or assume-unchanged)")
+    return dirty
+
+
+def tripwire_reason(root, policy):
+    """None when the guard's files are clean, else the message that blocks writes and non-read-only Bash."""
+    dirty = tripwire_dirty(root, policy["tripwire_paths"])
+    if dirty is None:
+        return "cannot verify guard files (not a git checkout?); commit or revert them to continue."
+    if dirty == [GIT_CONFIG_MARK]:
+        return CONFIG_MSG
+    if dirty == [GIT_STATE_MARK]:
+        return REBASELINE_MSG
+    if dirty:
+        return f"guard files changed since the last commit: {', '.join(dirty)}; commit or revert them to continue."
+    return None
+
+
+def git_block_reason(root, cmd):
+    """Reason to refuse a Bash command that runs git while the git config or hooks cannot be trusted, else None.
+    Even read-only git runs whatever core.fsmonitor or a hook names."""
+    segments = parse_bash(cmd)
+    if segments is None or not any(command_base(command_words(seg)) == "git" for seg in segments):
+        return None
+    problem = git_state_problem(root)
+    if problem == "unverifiable":
+        return "cannot verify .git (not a git checkout?), so git is not run from here."
+    if problem == "config":
+        return "git is blocked: " + CONFIG_MSG
+    if problem:
+        return "git is blocked: " + REBASELINE_MSG
+    return None
+
+
+def guard_token_reason(cmd):
+    """Reason when a parsed (unquoted) word names guard.py or is --rebaseline, else None. Backs up the blocked_commands
+    regexes, which see the raw text: guard''.py and --rebasel''ine slip past them."""
+    for seg in parse_bash(cmd) or []:
+        for word in command_words(seg):
+            if word == "--rebaseline" or command_base([word]) == "guard.py":
+                return "the guard's own script and --rebaseline are for a human at a terminal. Write numbered steps for a human to run instead."
+    return None
+
+
+def write_baseline(root):
+    digest, gitdir = git_state_digest(root)
+    with open(os.path.join(gitdir, BASELINE), "w", encoding="ascii") as f:
+        f.write(digest + "\n")
+
+
+def rebaseline(start):
+    """Human-run: record the current git config and hooks as the baseline. Needs a terminal, so the hook cannot reach it."""
+    try:
+        interactive = sys.stdin.isatty()
+    except (OSError, ValueError):
+        interactive = False
+    if not interactive:
+        block("--rebaseline must be run by a human in a terminal, not through a hook or a script.")
+    try:
+        p = subprocess.run(["git", "-C", start, "rev-parse", "--show-toplevel"], capture_output=True, timeout=60,
+                           stdin=subprocess.DEVNULL, env=git_env())
+        if p.returncode != 0 or not p.stdout.strip():
+            block(f"--rebaseline: {start} is not inside a git work tree.")
+        write_baseline(os.path.realpath(p.stdout.decode("utf-8", "surrogateescape").strip()))
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        block(f"--rebaseline failed: {e}")
+    sys.stdout.write(f"baseline recorded in the git directory ({BASELINE})\n")
+    sys.exit(0)
 
 
 def active_scope(root):
@@ -981,6 +1223,10 @@ def bash_write_block_reason(cmd, mode, policy, scope, root, cwd):
 
 def main():
     policy = load_policy(POLICY_PATH)
+    if len(sys.argv) > 1:
+        if sys.argv[1:] != ["--rebaseline"]:
+            block("unknown arguments; the only one is --rebaseline.")
+        rebaseline(project_dir())
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -995,6 +1241,15 @@ def main():
         for pat in policy["blocked_commands"]:
             if re.search(pat, cmd):
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
+        reason = guard_token_reason(cmd) or git_block_reason(root, cmd)
+        if reason:
+            block(reason)
+        cwd = payload.get("cwd")
+        cwd = root if cwd is None else (os.path.realpath(cwd) if isinstance(cwd, str) else None)
+        if advise_block_reason(cmd, policy["bash_groups"]["read_only"], root, cwd):
+            reason = tripwire_reason(root, policy)
+            if reason:
+                block(reason)
         if mode == "advise":
             patterns = [p for g in policy["modes"]["advise"]["bash_allow"] for p in policy["bash_groups"][g]]
             cwd = payload.get("cwd")
@@ -1021,6 +1276,9 @@ def main():
         rel = rel_path(root, path)
         if rel is None:
             block(f"write to {path!r} is on a different drive from the repo.")
+        reason = tripwire_reason(root, policy)
+        if reason:
+            block(reason)
         reason = write_block_reason(rel, mode, policy, active_scope(root))
         if reason:
             block(reason)

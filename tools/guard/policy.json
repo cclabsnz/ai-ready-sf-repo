@@ -8,7 +8,9 @@
     "\\bwget\\b",
     "\\bssh\\b",
     "\\bscp\\b",
-    "\\bInvoke-WebRequest\\b"
+    "\\bInvoke-WebRequest\\b",
+    "(?<![A-Za-z0-9_])guard\\.py",
+    "--rebaseline"
   ],
   "unknown_writers": [
     "sh",
@@ -86,6 +88,12 @@
     "developer.salesforce.com",
     "releasenotes.docs.salesforce.com",
     "docs.ncino.com"
+  ],
+  "tripwire_paths": [
+    "tools/guard",
+    ".claude/settings.json",
+    ".github",
+    "CODEOWNERS"
   ],
   "always_blocked_writes": [
     "tools/guard/",

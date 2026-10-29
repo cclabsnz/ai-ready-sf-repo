@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import importlib.util
 import tempfile
 from dataclasses import dataclass, field, replace
 
@@ -35,6 +36,13 @@ class Case:
     # What Task 4 (write-target checks alone) expected, for a case whose result Task 5's allowlist changed.
     # The "no allowlist" pass in main() re-runs every older Bash case against this.
     legacy: int | None = None
+    git: bool = True  # False: no git init and no commit, so the tripwire cannot verify anything
+    git_append: dict[str, str] = field(default_factory=dict)  # text appended to .git/ files after the baseline is recorded
+    pre_git: dict[str, str] = field(default_factory=dict)  # the same, before the baseline (so it is part of it)
+    pre_remove: tuple[str, ...] = ()  # .git/ paths removed before the baseline
+    after: tuple[tuple[str, ...], ...] = ()  # git commands run in the project after the dirty files are written
+    worktree: bool = False  # run from a linked worktree, whose .git is a file
+    env: dict[str, str] = field(default_factory=dict)  # extra environment for the guard
 
 
 def bash(cmd):
@@ -429,7 +437,7 @@ ALLOWLIST_CASES = [
     Case("normal: evals runner allowed", bash("python3 tools/evals/run_skill.py x"), 0),
     Case("normal: test_guard allowed", bash("python3 tools/guard/test_guard.py"), 0),
     Case("normal: scan_data allowed", bash("python3 tools/guard/scan_data.py"), 0),
-    Case("normal: guard.py itself is not a framework script", bash("python3 tools/guard/guard.py"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: guard.py itself is not a framework script", bash("python3 tools/guard/guard.py"), 2, stderr_has="blocked pattern"),
     Case("normal: skill script dir must be lowercase", bash("python3 framework/skills/Story/scripts/w.py"), 2, stderr_has=NOT_ON_LIST),
     Case("normal: arbitrary workspace script blocked", bash("python3 ai-context/x/y.py"), 2, stderr_has=NOT_ON_LIST),
     Case("normal: pnpm exec blocked", bash("pnpm exec eslint ."), 2, stderr_has=NOT_ON_LIST),
@@ -677,7 +685,7 @@ FIX_CASES = [
 # Fix round 2 (re-review New-1 .. New-5).
 FIX2_CASES = [
     # New-1: pnpm tools need "exec".
-    Case("New-1: bare pnpm prettier --write", bash("pnpm prettier --write tools/guard/guard.py"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-1: bare pnpm prettier --write", bash("pnpm prettier --write tools/guard/guard.py"), 2, env_mode="build", stderr_has="blocked pattern"),
     Case("New-1: bare pnpm eslint --fix", bash("pnpm eslint --fix tools/guard/x.js"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
     Case("New-1: bare pnpm jest", bash("pnpm jest"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
     Case("New-1: bare pnpm sfdx-lwc-jest", bash("pnpm sfdx-lwc-jest"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
@@ -832,6 +840,116 @@ FIX4_CASES = [Case(f"R4: {cmd}", bash(cmd), 2, env_mode="build") for cmd in (
 )]
 
 # A payload the guard ALLOWS, so exit 2 can only come from the wrapper's fail-closed branch.
+TRIPWIRE_CASES = [
+    Case("tripwire: edited guard blocks writes", write("ai-context/x.md"), 2, dirty=("tools/guard/guard.py",), stderr_has="commit or revert"),
+    Case("tripwire: new file in tools/guard blocks", write("ai-context/x.md"), 2, dirty=("tools/guard/evil.py",)),
+    Case("tripwire: edited settings blocks maintain", write("docs/x.md"), 2, env_mode="maintain", dirty=(".claude/settings.json",)),
+    Case("tripwire: edited workflow blocks", bash("make docs"), 2, env_mode="maintain", dirty=(".github/workflows/ci.yml",)),
+    Case("tripwire: edited workflow blocks an allowed bash command", bash("git add docs/x"), 2, env_mode="maintain",
+         dirty=(".github/workflows/ci.yml",), stderr_has="commit or revert"),
+    Case("tripwire: read-only bash still allowed", bash("git status"), 0, dirty=("tools/guard/guard.py",)),
+    Case("tripwire: read-only bash allowed in advise too", bash("ls"), 0, env_mode="advise", dirty=("tools/guard/guard.py",)),
+    Case("tripwire: dirty file elsewhere does not trip", write("ai-context/x.md"), 0, dirty=("docs/x.md",)),
+    Case("tripwire: CODEOWNERS blocks writes", write("ai-context/x.md"), 2, dirty=("CODEOWNERS",)),
+    Case("tripwire: names the dirty file", write("ai-context/x.md"), 2, dirty=("tools/guard/evil.py",), stderr_has="tools/guard/evil.py"),
+    Case("tripwire: webfetch is not a write", fetch("https://help.salesforce.com/x"), 0, dirty=("tools/guard/guard.py",)),
+    Case("tripwire: changed .git/config blocks", write("ai-context/x.md"), 2, dirty=(".git/config",), stderr_has="rebaseline"),
+    Case("tripwire: changed .git/config blocks bash", bash("git add docs/x"), 2, env_mode="maintain", dirty=(".git/config",)),
+    Case("tripwire: new git hook blocks", write("ai-context/x.md"), 2, dirty=(".git/hooks/pre-commit",)),
+    Case("tripwire: edited sample hook blocks", write("ai-context/x.md"), 2, dirty=(".git/hooks/pre-commit.sample",)),
+    Case("tripwire: missing baseline blocks", write("ai-context/x.md"), 2, files={".git/ai-guard-baseline": None}, stderr_has="rebaseline"),
+    Case("tripwire: unreadable baseline blocks", write("ai-context/x.md"), 2, files={".git/ai-guard-baseline": "garbage"}),
+    Case("tripwire: outside a git checkout fails closed", write("ai-context/x.md"), 2, git=False, stderr_has="cannot verify"),
+    Case("tripwire: outside a git checkout still allows read-only bash", bash("ls"), 0, git=False),
+    Case("tripwire: clean tree allows writes", write("ai-context/x.md"), 0),
+]
+FSMON = "[core]\n\tfsmonitor = touch PWNED; false\n"
+REMOTE = '[remote "origin"]\n\turl = https://example.com/x.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n'
+UPSTREAM = '[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n\trebase = true\n'
+REBASELINE_CASES = [
+    # C1: even read-only git runs a planted core.fsmonitor, so no git while .git cannot be trusted
+    Case("C1: git status with a planted fsmonitor blocked", bash("git status"), 2, git_append={".git/config": FSMON}, stderr_has="rebaseline"),
+    Case("C1: git diff with a planted fsmonitor blocked", bash("git diff"), 2, git_append={".git/config": FSMON}, stderr_has="rebaseline"),
+    Case("C1: git log in advise with a planted fsmonitor blocked", bash("git log"), 2, env_mode="advise", git_append={".git/config": FSMON}),
+    Case("C1: git status in maintain with a planted fsmonitor blocked", bash("git status"), 2, env_mode="maintain", git_append={".git/config": FSMON}),
+    Case("C1: git after ls in a chain blocked", bash("ls && git status"), 2, git_append={".git/config": FSMON}),
+    Case("C1: ls with a planted fsmonitor still allowed", bash("ls"), 0, git_append={".git/config": FSMON}),
+    Case("C1: git status with no baseline blocked", bash("git status"), 2, files={".git/ai-guard-baseline": None}, stderr_has="rebaseline"),
+    Case("C1: git status outside a checkout blocked", bash("git status"), 2, git=False, stderr_has="cannot verify"),
+    Case("C1: git status in a clean checkout allowed", bash("git status"), 0),
+    # C2: the assistant cannot run guard.py at all
+    Case("C2: rebaseline in maintain blocked", bash("python3 tools/guard/guard.py --rebaseline"), 2, env_mode="maintain"),
+    Case("C2: rebaseline via py -3 in maintain blocked", bash("py -3 tools/guard/guard.py --rebaseline"), 2, env_mode="maintain"),
+    Case("C2: rebaseline in build blocked", bash("python3 tools/guard/guard.py --rebaseline"), 2, env_mode="build"),
+    Case("C2: rebaseline in normal blocked", bash("python3 tools/guard/guard.py --rebaseline"), 2),
+    Case("C2: rebaseline after another script blocked", bash("python3 tools/evil.py && python3 tools/guard/guard.py --rebaseline"), 2, env_mode="maintain"),
+    Case("C2: rebaseline from inside tools/guard blocked", bash("cd tools/guard && python3 guard.py --rebaseline"), 2, env_mode="maintain"),
+    Case("C2: rebaseline through a glob blocked", bash("python3 tools/guard/gu?rd.py --rebaseline"), 2, env_mode="maintain"),
+    Case("C2: rebaseline in advise blocked", bash("python3 tools/guard/guard.py --rebaseline"), 2, env_mode="advise"),
+    Case("C2: any run of guard.py blocked", bash("python3 tools/guard/guard.py"), 2, env_mode="maintain"),
+    Case("C2: test_guard.py is not guard.py", bash("python3 tools/guard/test_guard.py"), 0),
+    # I1: a linked worktree has a .git file
+    Case("I1: worktree clean write allowed", write("ai-context/x.md"), 0, worktree=True),
+    Case("I1: worktree read-only git allowed", bash("git status"), 0, worktree=True),
+    Case("I1: worktree edited guard blocks", write("ai-context/x.md"), 2, worktree=True, dirty=("tools/guard/guard.py",), stderr_has="commit or revert"),
+    Case("I1: worktree with a changed common config blocks git", bash("git status"), 2, worktree=True, git_append={".git/config": FSMON}),
+    Case("I1: worktree with a changed common config blocks writes", write("ai-context/x.md"), 2, worktree=True, git_append={".git/config": FSMON},
+         stderr_has="rebaseline"),
+    # I2: includes and hooksPath are part of the baseline
+    Case("I2: include target unchanged allowed", write("ai-context/x.md"), 0,
+         files={"docs/inc.cfg": "[x]\n\ta = 1\n"}, pre_git={".git/config": "[include]\n\tpath = ../docs/inc.cfg\n"}),
+    Case("I2: changed include target blocks", write("ai-context/x.md"), 2, dirty=("docs/inc.cfg",), stderr_has="rebaseline",
+         files={"docs/inc.cfg": "[x]\n\ta = 1\n"}, pre_git={".git/config": "[include]\n\tpath = ../docs/inc.cfg\n"}),
+    Case("I2: changed includeIf target blocks", write("ai-context/x.md"), 2, dirty=("docs/inc.cfg",),
+         files={"docs/inc.cfg": "[x]\n\ta = 1\n"}, pre_git={".git/config": '[includeIf "gitdir:/"]\n\tpath = ../docs/inc.cfg\n'}),
+    Case("I2: include target created later blocks", write("ai-context/x.md"), 2, git_append={".git/config": "[include]\n\tpath = ../docs/new.cfg\n"}),
+    Case("I2: hooksPath file unchanged allowed", write("ai-context/x.md"), 0,
+         files={".husky/pre-commit": "x"}, pre_git={".git/config": "[core]\n\thooksPath = .husky\n"}),
+    Case("I2: changed file under hooksPath blocks", write("ai-context/x.md"), 2, dirty=(".husky/pre-commit",),
+         files={".husky/pre-commit": "x"}, pre_git={".git/config": "[core]\n\thooksPath = .husky\n"}),
+    Case("I2: new file under hooksPath blocks", write("ai-context/x.md"), 2, dirty=(".husky/post-commit",),
+         files={".husky/pre-commit": "x"}, pre_git={".git/config": "[core]\n\thooksPath = .husky\n"}),
+    Case("I2: unparseable config fails closed", write("ai-context/x.md"), 2, git_append={".git/config": "[core\n"}, stderr_has="cannot verify"),
+    # I3: the keys git rewrites itself do not trip the wire
+    Case("I3: adding a remote url allowed", write("ai-context/x.md"), 0, git_append={".git/config": REMOTE}),
+    Case("I3: setting an upstream allowed", write("ai-context/x.md"), 0, git_append={".git/config": REMOTE + UPSTREAM}),
+    Case("I3: remote uploadpack blocks", write("ai-context/x.md"), 2, git_append={".git/config": '[remote "x"]\n\tuploadpack = evil\n'}),
+    Case("I3: remote receivepack blocks", write("ai-context/x.md"), 2, git_append={".git/config": REMOTE + "\treceivepack = evil\n"}),
+    Case("I3: other branch keys block", write("ai-context/x.md"), 2, git_append={".git/config": '[branch "main"]\n\tpushremote = evil\n'}),
+    # minors
+    Case("missing hooks directory counts as empty", write("ai-context/x.md"), 0, pre_remove=(".git/hooks",)),
+    Case("skip-worktree on a dirty guard file blocks", write("ai-context/x.md"), 2, dirty=("tools/guard/.keep",), stderr_has="skip-worktree",
+         after=(("update-index", "--skip-worktree", "tools/guard/.keep"),)),
+    Case("assume-unchanged on a dirty workflow blocks", write("ai-context/x.md"), 2, dirty=(".github/workflows/.keep",), stderr_has="assume-unchanged",
+         after=(("update-index", "--assume-unchanged", ".github/workflows/.keep"),)),
+    Case("GIT_DIR in the environment does not blind the tripwire", write("ai-context/x.md"), 0, env={"GIT_DIR": "/nonexistent"}),
+    Case("GIT_DIR in the environment does not hide a dirty file", write("ai-context/x.md"), 2, dirty=("tools/guard/guard.py",), env={"GIT_DIR": "/nonexistent"}),
+]
+ROUND2_CASES = [
+    Case("C2: quoted guard.py token blocked", bash("python3 tools/guard/guard''.py --rebasel''ine"), 2, env_mode="maintain"),
+    Case("C2: split-quoted guard.py token blocked", bash('python3 tools/guard/gu"ard".py'), 2, env_mode="maintain"),
+    Case("C2: quoted --rebaseline blocked", bash("python3 tools/x.py --rebasel''ine"), 2, env_mode="maintain"),
+    Case("C2: backslashed --rebaseline blocked", bash("python3 tools/x.py \\-\\-rebaseline"), 2, env_mode="maintain"),
+    Case("C2: quoted guard.py in build blocked", bash("cat tools/guard/guard''.py"), 2, env_mode="build"),
+]
+for _name, _cfg in (
+        ("trailing comment", "path = ../ai-context/k.cfg ; note"),
+        ("quoted with hash comment", 'path = "../ai-context/k.cfg"#x'),
+        ("partly quoted", 'path = ../ai-context/"k.cfg"'),
+        ("backslash", "path = ..\\ai-context\\k.cfg"),
+        ("hash comment", "path = ../ai-context/k.cfg # note")):
+    for _tool, _payload in (("write", write("ai-context/x.md")), ("git status", bash("git status"))):
+        ROUND2_CASES.append(Case(f"I2: include.path {_name} fails closed ({_tool})", _payload, 2, files={"ai-context/k.cfg": "[core]\n\tfsmonitor = x\n"},
+                                 git_append={".git/config": f"[include]\n\t{_cfg}\n"}, stderr_has="simplify"))
+for _tool, _payload in (("write", write("ai-context/x.md")), ("git status", bash("git status"))):
+    ROUND2_CASES += [
+        Case(f"I2: includeIf path with a comment fails closed ({_tool})", _payload, 2,
+             git_append={".git/config": '[includeIf "gitdir:/"]\n\tpath = ../ai-context/k.cfg ; note\n'}, stderr_has="simplify"),
+        Case(f"I2: hooksPath with a comment fails closed ({_tool})", _payload, 2,
+             git_append={".git/config": "[core]\n\thooksPath = ai-context/hk ; husky\n"}, stderr_has="simplify"),
+        Case(f"I2: quoted hooksPath fails closed ({_tool})", _payload, 2,
+             git_append={".git/config": '[core]\n\thooksPath = "ai-context/hk"\n'}, stderr_has="simplify"),
+    ]
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
 # The guard allows this payload when its policy is present, so exit 2 can only come from the missing file.
 NO_POLICY_CASE = Case("missing policy fails closed", bash("git status"), 2, stderr_has="policy")
@@ -864,13 +982,51 @@ def put(project, rel, text):
         f.write(text)
 
 
-def make_project(committed_mode, files):
-    """A throwaway committed git repo shaped like the real one."""
+WORKTREE = "guard-wt"
+_GUARD_MODULE = []
+
+
+def guard_module():
+    """guard.py loaded as a module, only to record baselines: the CLI needs a terminal, which a harness has no use for."""
+    if not _GUARD_MODULE:
+        spec = importlib.util.spec_from_file_location("guard_under_test", os.path.join(HERE, "guard.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GUARD_MODULE.append(mod)
+    return _GUARD_MODULE[0]
+
+
+def git_base(project):
+    """Where the real .git lives: the project, or the main checkout when project is a linked worktree."""
+    return os.path.dirname(project) if os.path.basename(project) == WORKTREE else project
+
+
+def real_path(project, rel):
+    base = git_base(project) if rel.startswith(".git/") else project
+    return os.path.join(base, *rel.split("/"))
+
+
+def drop(project):
+    shutil.rmtree(git_base(project), ignore_errors=True)
+
+
+def append(project, rel, text):
+    path = real_path(project, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+def make_project(committed_mode, files, git_init=True, pre_git=None, pre_remove=(), worktree=False):
+    """A throwaway committed git repo shaped like the real one, with its .git baseline recorded."""
     project = tempfile.mkdtemp(prefix="guard-proj-")
     try:
-        subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
+        if git_init:
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
         put(project, ".claude/settings.json", json.dumps({"env": {"AI_FRAMEWORK_MODE": committed_mode}}))
         for rel, text in files.items():
+            if rel.startswith(".git/"):
+                continue  # applied after the baseline exists
             if text is None:  # None means the file must be absent
                 os.remove(os.path.join(project, *rel.split("/")))
             else:
@@ -879,24 +1035,37 @@ def make_project(committed_mode, files):
             os.makedirs(os.path.join(project, *d.split("/")), exist_ok=True)
         for keep in ("tools/guard/.keep", ".github/workflows/.keep"):
             put(project, keep, "")
-        git(project, "add", "-A")
-        git(project, "commit", "-q", "-m", "init")
+        if git_init:
+            git(project, "add", "-A")
+            git(project, "commit", "-q", "-m", "init")
+            for rel, text in (pre_git or {}).items():
+                append(project, rel, text)
+            for rel in pre_remove:
+                path = real_path(project, rel)
+                shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+            if worktree:
+                git(project, "worktree", "add", "-q", os.path.join(project, WORKTREE))
+                project = os.path.join(project, WORKTREE)
+            guard_module().write_baseline(project)
+        for rel, text in files.items():
+            if rel.startswith(".git/"):
+                if text is None:
+                    os.remove(real_path(project, rel))
+                else:
+                    put(git_base(project), rel, text)
     except BaseException:
-        shutil.rmtree(project, ignore_errors=True)
+        shutil.rmtree(git_base(project), ignore_errors=True)
         raise
     return project
 
 
 def make_dirty(project, dirty):
     for rel in dirty:
-        path = os.path.join(project, *rel.split("/"))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write("dirty\n")
+        append(project, rel, "dirty\n")
 
 
-def case_env(project, env_mode):
-    env = dict(os.environ)
+def case_env(project, env_mode, extra=None):
+    env = dict(os.environ, **(extra or {}))
     env.pop("AI_FRAMEWORK_MODE", None)
     env["CLAUDE_PROJECT_DIR"] = project
     if env_mode is not None:
@@ -939,19 +1108,23 @@ def guard_copy(policy):
 
 
 def run_case(case):
-    project = make_project(case.committed_mode, case.files)
+    project = make_project(case.committed_mode, case.files, case.git, case.pre_git, case.pre_remove, case.worktree)
     copy = None
     try:
+        for rel, text in case.git_append.items():
+            append(project, rel, text)
         make_dirty(project, case.dirty)
+        for args in case.after:
+            git(project, *args)
         payload = case.payload
         if isinstance(payload, dict) and isinstance(payload.get("cwd"), str):
             payload = dict(payload, cwd=payload["cwd"].replace("@PROJECT@", os.path.realpath(project)))
         wrapper = WRAPPER
         if case.policy:
             copy, wrapper = guard_copy(case.policy)
-        return send(wrapper, payload, case_env(project, case.env_mode), project)
+        return send(wrapper, payload, case_env(project, case.env_mode, case.env), project)
     finally:
-        shutil.rmtree(project, ignore_errors=True)
+        drop(project)
         if copy:
             shutil.rmtree(copy, ignore_errors=True)
 
@@ -1059,6 +1232,74 @@ def run_bad_stderr(case, kind):
         shutil.rmtree(project, ignore_errors=True)
 
 
+def run_tty(args, cwd, env):
+    """Run args with a pseudo-terminal as stdin: what a human at a keyboard looks like to isatty()."""
+    master, slave = os.openpty()
+    try:
+        return subprocess.run(args, stdin=slave, cwd=cwd, env=env, capture_output=True).returncode
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def check_rebaseline_cli():
+    """--rebaseline needs a terminal and a git work tree; the hook cannot supply either."""
+    ok = True
+    guard = [sys.executable, "-I", os.path.join(HERE, "guard.py")]
+
+    def check(name, got, want):
+        nonlocal ok
+        good = got == want
+        print(f"[{'PASS' if good else 'FAIL'}] --rebaseline {name}: exit {got} (want {want})")
+        ok = ok and good
+
+    for name, git_init, args, tty, sub, want in (
+            ("without a terminal", True, ["--rebaseline"], False, "", 2),
+            ("with a terminal in a work tree", True, ["--rebaseline"], True, "", 0),
+            ("with a terminal from a subdirectory", True, ["--rebaseline"], True, "ai-context", 0),
+            ("with a terminal outside a work tree", False, ["--rebaseline"], True, "", 2),
+            ("with an unknown argument", True, ["--rebaseline", "x"], True, "", 2)):
+        if tty and os.name == "nt":
+            print(f"[SKIP] --rebaseline {name}: needs a pty (POSIX only)")
+            continue
+        project = make_project("normal", {}, git_init)
+        try:
+            env = dict(os.environ)
+            env.pop("CLAUDE_PROJECT_DIR", None)
+            if not sub:
+                env["CLAUDE_PROJECT_DIR"] = project
+            cwd = os.path.join(project, sub) if sub else project
+            baseline = os.path.join(project, ".git", "ai-guard-baseline")
+            if git_init:
+                os.remove(baseline)
+            if tty:
+                code = run_tty(guard + args, cwd, env)
+            else:
+                code = subprocess.run(guard + args, stdin=subprocess.DEVNULL, cwd=cwd, env=env, capture_output=True).returncode
+            check(name, code, want)
+            if want == 0:
+                check(name + " wrote the baseline", os.path.exists(baseline), True)
+        finally:
+            shutil.rmtree(project, ignore_errors=True)
+    return ok
+
+
+def check_fsmonitor_not_run():
+    """A planted core.fsmonitor must not run, whichever Bash command or write the guard is asked about."""
+    ok = True
+    for payload in (bash("git status"), bash("git diff"), write("ai-context/x.md")):
+        project = make_project("normal", {})
+        try:
+            append(project, ".git/config", FSMON)
+            send(WRAPPER, payload, case_env(project, None), project)
+            ran = os.path.exists(os.path.join(project, "PWNED"))
+            print(f"[{'FAIL' if ran else 'PASS'}] planted fsmonitor not run by the guard for {payload['tool_name']}")
+            ok = ok and not ran
+        finally:
+            shutil.rmtree(project, ignore_errors=True)
+    return ok
+
+
 def report(case, code, err):
     ok = code == case.want and case.stderr_has in err
     note = "" if ok else f" stderr: {err.strip()!r}"
@@ -1068,9 +1309,11 @@ def report(case, code, err):
 
 def main():
     results = []
-    for case in CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + list(no_allowlist_variants(CASES)):
+    for case in CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES + ROUND2_CASES + list(no_allowlist_variants(CASES)):
         results.append(report(case, *run_case(case)))
     results.append(check_settings_deny())
+    results.append(check_rebaseline_cli())
+    results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
     results.append(report(NO_POLICY_CASE, *run_without_policy(NO_POLICY_CASE)))
     skipped = 0
