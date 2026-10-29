@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Quote_Total_Not_Negative</fullName>
+    <active>true</active>
+    <description>Keeps quote total on Opportunity records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Quote_Total__c)), Quote_Total__c &lt; 0)</errorConditionFormula>
+    <errorDisplayField>Quote_Total__c</errorDisplayField>
+    <errorMessage>Quote Total cannot be negative.</errorMessage>
+</ValidationRule>

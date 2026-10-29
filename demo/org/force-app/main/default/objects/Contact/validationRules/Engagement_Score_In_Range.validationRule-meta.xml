@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Engagement_Score_In_Range</fullName>
+    <active>true</active>
+    <description>Keeps engagement score on Contact records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Engagement_Score__c)), OR(Engagement_Score__c &lt; 0, Engagement_Score__c &gt; 100))</errorConditionFormula>
+    <errorDisplayField>Engagement_Score__c</errorDisplayField>
+    <errorMessage>Engagement Score must be between 0 and 100.</errorMessage>
+</ValidationRule>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Health_Score_In_Range</fullName>
+    <active>true</active>
+    <description>Keeps health score on Account records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Health_Score__c)), OR(Health_Score__c &lt; 0, Health_Score__c &gt; 100))</errorConditionFormula>
+    <errorDisplayField>Health_Score__c</errorDisplayField>
+    <errorMessage>Health Score must be between 0 and 100.</errorMessage>
+</ValidationRule>

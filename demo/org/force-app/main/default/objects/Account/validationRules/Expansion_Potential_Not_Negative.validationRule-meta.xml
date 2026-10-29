@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Expansion_Potential_Not_Negative</fullName>
+    <active>true</active>
+    <description>Keeps expansion potential on Account records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Expansion_Potential__c)), Expansion_Potential__c &lt; 0)</errorConditionFormula>
+    <errorDisplayField>Expansion_Potential__c</errorDisplayField>
+    <errorMessage>Expansion Potential cannot be negative.</errorMessage>
+</ValidationRule>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Last_Touch_Date_Not_Ancient</fullName>
+    <active>true</active>
+    <description>Keeps last touch date on Contact records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Last_Touch_Date__c)), Last_Touch_Date__c &lt; DATE(2000, 1, 1))</errorConditionFormula>
+    <errorDisplayField>Last_Touch_Date__c</errorDisplayField>
+    <errorMessage>Last Touch Date cannot be before the year 2000.</errorMessage>
+</ValidationRule>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Lead_Fit_Score_In_Range</fullName>
+    <active>true</active>
+    <description>Keeps lead fit score on Lead records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Lead_Fit_Score__c)), OR(Lead_Fit_Score__c &lt; 0, Lead_Fit_Score__c &gt; 100))</errorConditionFormula>
+    <errorDisplayField>Lead_Fit_Score__c</errorDisplayField>
+    <errorMessage>Lead Fit Score must be between 0 and 100.</errorMessage>
+</ValidationRule>

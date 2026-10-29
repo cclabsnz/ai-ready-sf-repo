@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Follow_Up_Priority__c</fullName>
+    <description>Follow Up Priority on Lead records, kept for pipeline and engagement reporting.</description>
+    <externalId>false</externalId>
+    <label>Follow Up Priority</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+</CustomField>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Follow_Up_Date_Not_Ancient</fullName>
+    <active>true</active>
+    <description>Keeps follow up date on Lead records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Follow_Up_Date__c)), Follow_Up_Date__c &lt; DATE(2000, 1, 1))</errorConditionFormula>
+    <errorDisplayField>Follow_Up_Date__c</errorDisplayField>
+    <errorMessage>Follow Up Date cannot be before the year 2000.</errorMessage>
+</ValidationRule>

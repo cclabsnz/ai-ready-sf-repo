@@ -1,0 +1,12 @@
+<template>
+    <lightning-card title="Trial Follow Up Badge" icon-name="standard:lead">
+        <div class="slds-p-horizontal_small">
+            <template lwc:if={hasBand}>
+                <p class="slds-text-heading_small">{band}</p>
+            </template>
+            <template lwc:else>
+                <p class="slds-text-color_weak">No band available.</p>
+            </template>
+        </div>
+    </lightning-card>
+</template>

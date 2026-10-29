@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Meeting_Cadence_Days_Not_Negative</fullName>
+    <active>true</active>
+    <description>Keeps meeting cadence days on Contact records within a sensible range.</description>
+    <errorConditionFormula>AND(NOT(ISBLANK(Meeting_Cadence_Days__c)), Meeting_Cadence_Days__c &lt; 0)</errorConditionFormula>
+    <errorDisplayField>Meeting_Cadence_Days__c</errorDisplayField>
+    <errorMessage>Meeting Cadence Days cannot be negative.</errorMessage>
+</ValidationRule>
