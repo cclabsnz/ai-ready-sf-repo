@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WRAPPER = os.path.join(HERE, "guard.cmd" if os.name == "nt" else "guard.sh")
@@ -30,6 +31,10 @@ class Case:
     dirty: tuple[str, ...] = ()
     files: dict[str, str | None] = field(default_factory=dict)
     stderr_has: str = ""
+    policy: dict = field(default_factory=dict)  # deep-merged into a copy of policy.json; the guard runs from that copy
+    # What Task 4 (write-target checks alone) expected, for a case whose result Task 5's allowlist changed.
+    # The "no allowlist" pass in main() re-runs every older Bash case against this.
+    legacy: int | None = None
 
 
 def bash(cmd):
@@ -43,6 +48,30 @@ def write(path, tool="Write"):
 def fetch(url):
     return {"tool_name": "WebFetch", "tool_input": {"url": url}}
 
+
+ORG_META = {"sf": {"mode_level": {"normal": "org-metadata"}, "allowed_orgs": ["dev1"]}}
+ORG_DATA = {"sf": {"mode_level": {"normal": "org-data"}, "allowed_orgs": ["dev1"]}}
+# Every mode allows every command: leaves only the write-target checks (Task 4) and the sf checks.
+OPEN = {"bash_groups": {"any": ["(?s).*"]},
+        "modes": {m: {"bash_allow": ["any"]} for m in ("normal", "build", "maintain")}}
+
+
+def expand_prefixes(pattern):
+    """Command prefixes an always_blocked pattern stands for: the trailing ( .*)? dropped, each (a|b) group expanded."""
+    out = [pattern.removesuffix("( .*)?")]
+    while any("(" in s for s in out):
+        nxt = []
+        for s in out:
+            m = re.search(r"\(([^()]*)\)", s)
+            nxt += [s[: m.start()] + alt + s[m.end():] for alt in m.group(1).split("|")] if m else [s]
+        out = nxt
+    return out
+
+
+def sf_deny_prefixes():
+    """Derived from policy.json so the settings deny list cannot drift from it."""
+    with open(os.path.join(HERE, "policy.json"), encoding="utf-8") as f:
+        return [p for pat in json.load(f)["sf"]["always_blocked"] for p in expand_prefixes(pat)]
 
 CASES = [
     Case("sf org login is blocked", bash("sf org login web -a uat"), 2),
@@ -207,16 +236,16 @@ CASES = [
     Case("maintain: install -d force-app blocked", bash("install -d force-app/new"), 2, env_mode="maintain"),
     Case("maintain: ln into force-app blocked", bash("ln -s ../docs/a force-app/a"), 2, env_mode="maintain"),
     Case("maintain: ln is an unknown writer even into docs", bash("ln -s ../demo/a docs/a"), 2, env_mode="maintain"),
-    Case("maintain: chmod mode is not a path", bash("chmod 755 docs/x.sh"), 0, env_mode="maintain"),
+    Case("maintain: chmod is off the allowlist", bash("chmod 755 docs/x.sh"), 2, env_mode="maintain", stderr_has="allowlist", legacy=0),
     Case("maintain: chmod +x on force-app blocked", bash("chmod +x force-app/x.sh"), 2, env_mode="maintain"),
     Case("maintain: chmod -x on force-app blocked", bash("chmod -x force-app/x.sh"), 2, env_mode="maintain"),
-    Case("maintain: chown owner is not a path", bash("chown me docs/x"), 0, env_mode="maintain"),
+    Case("maintain: chown is off the allowlist", bash("chown me docs/x"), 2, env_mode="maintain", stderr_has="allowlist", legacy=0),
     Case("maintain: chmod --reference unknown", bash("chmod --reference=docs/a force-app/x"), 2, env_mode="maintain"),
     Case("maintain: truncate -s on force-app blocked", bash("truncate -s 0 force-app/x"), 2, env_mode="maintain"),
-    Case("maintain: truncate -s on docs allowed", bash("truncate -s 0 docs/x"), 0, env_mode="maintain"),
+    Case("maintain: truncate is off the allowlist", bash("truncate -s 0 docs/x"), 2, env_mode="maintain", stderr_has="allowlist", legacy=0),
     Case("maintain: touch -d value is not a path", bash("touch -d yesterday docs/x"), 0, env_mode="maintain"),
     Case("maintain: dd of= force-app blocked", bash("dd if=docs/a of=force-app/a"), 2, env_mode="maintain"),
-    Case("maintain: dd of= docs allowed", bash("dd if=docs/a of=docs/b"), 0, env_mode="maintain"),
+    Case("maintain: dd is off the allowlist", bash("dd if=docs/a of=docs/b"), 2, env_mode="maintain", stderr_has="allowlist", legacy=0),
     Case("maintain: rm -- force-app blocked", bash("rm -f -- force-app/x"), 2, env_mode="maintain"),
     Case("maintain: path-qualified rm blocked", bash("/bin/rm force-app/x"), 2, env_mode="maintain"),
     Case("maintain: env prefix does not hide the command", bash("X=1 rm force-app/x"), 2, env_mode="maintain"),
@@ -263,12 +292,12 @@ CASES = [
     Case("maintain: uniq with output file blocked", bash("uniq a force-app/x"), 2, env_mode="maintain"),
     Case("maintain: unbalanced quote blocked", bash("echo 'x"), 2, env_mode="maintain"),
     Case("maintain: subshell blocked", bash("(touch force-app/x)"), 2, env_mode="maintain"),
-    Case("maintain: tee -a docs allowed", bash("echo a | tee -a docs/x"), 0, env_mode="maintain"),
+    Case("maintain: tee is off the allowlist", bash("echo a | tee -a docs/x"), 2, env_mode="maintain", stderr_has="allowlist", legacy=0),
     Case("maintain: tee to two files, one forbidden, blocked", bash("echo a | tee docs/x force-app/y"), 2, env_mode="maintain"),
     Case("maintain: mv within docs allowed", bash("mv docs/a docs/b"), 0, env_mode="maintain"),
     Case("maintain: cp from force-app into docs allowed", bash("cp force-app/main/default/classes/A.cls docs/A.cls"), 0, env_mode="maintain"),
     Case("normal: touch in docs blocked", bash("touch docs/x"), 2),
-    Case("normal: touch in ai-context allowed", bash("touch ai-context/x"), 0),
+    Case("normal: touch is off the allowlist", bash("touch ai-context/x"), 2, stderr_has="allowlist", legacy=0),
     Case("normal: sh -c blocked", bash("sh -c 'ls'"), 2),
     Case("normal: sed -i on force-app blocked", bash("sed -i s/a/b/ force-app/x"), 2),
     Case("build: no scope blocks force-app redirect", bash("echo a > force-app/x"), 2, env_mode="build", stderr_has="no active story scope"),
@@ -289,7 +318,7 @@ CASES = [
          files={"tools/guard/guard.py": "x"}),
     Case("A: glob rm matching CODEOWNERS blocked", bash("rm docs/*"), 2, env_mode="maintain", files={"docs/CODEOWNERS": "x", "docs/a.md": "x"}),
     Case("A: glob rm matching only ordinary files allowed", bash("rm docs/*"), 0, env_mode="maintain", files={"docs/a.md": "x"}),
-    Case("I: rm -rf ai-context/tmp/* allowed in normal", bash("rm -rf ai-context/tmp/*"), 0, files={"ai-context/tmp/a": "x"}),
+    Case("I: rm is off the normal allowlist", bash("rm -rf ai-context/tmp/*"), 2, files={"ai-context/tmp/a": "x"}, stderr_has="allowlist", legacy=0),
     # B: expansion in non-target words.
     Case("B: $T carries -t", bash("T=-t; cp $T tools/guard ai-context/e"), 2),
     Case("B: unassigned $T in cp blocked", bash("cp $T tools/guard ai-context/e"), 2),
@@ -343,7 +372,7 @@ CASES = [
     Case("E: ditto blocked", bash("ditto ai-context/e tools/guard/guard.py"), 2),
     Case("E: plutil blocked", bash("plutil -convert xml1 tools/guard/policy.json"), 2),
     Case("E: python -W then -c blocked", bash("python3 -W ignore -c 'print(1)'"), 2),
-    Case("E: test builtin [ is not a glob", bash("[ -f docs/a ] && ls"), 0),
+    Case("E: test builtin [ is off the allowlist", bash("[ -f docs/a ] && ls"), 2, stderr_has="allowlist", legacy=0),
     # F: copy into a directory.
     Case("F: cp CODEOWNERS into docs/sub/ blocked", bash("cp ai-context/CODEOWNERS docs/sub/"), 2, env_mode="maintain", files={"ai-context/CODEOWNERS": "x"}),
     Case("F: cp CODEOWNERS into an existing dir blocked", bash("cp ai-context/CODEOWNERS docs"), 2, env_mode="maintain",
@@ -367,11 +396,11 @@ CASES = [
     Case("H: sed e command blocked", bash("sed 'e id' ai-context/e"), 2),
     Case("H: sed -f script blocked", bash("sed -f ai-context/s.sed ai-context/e"), 2),
     Case("H: sed -e w blocked", bash("sed -n -e 'w tools/guard/x' ai-context/e"), 2),
-    Case("H: w inside a regex is not a command", bash("sed 's/we/x/' ai-context/e"), 0),
-    Case("H: w inside an address regex is not a command", bash("sed -n '/w/p' ai-context/e"), 0),
-    Case("I: BSD sed -i .bak allowed in ai-context", bash("sed -i .bak 's/a/b/' ai-context/x"), 0),
+    Case("H: w inside a regex is not a command (sed is off the normal allowlist)", bash("sed 's/we/x/' ai-context/e"), 2, stderr_has="allowlist", legacy=0),
+    Case("H: w inside an address regex is not a command (sed is off the normal allowlist)", bash("sed -n '/w/p' ai-context/e"), 2, stderr_has="allowlist", legacy=0),
+    Case("I: BSD sed -i .bak in ai-context (sed is off the normal allowlist)", bash("sed -i .bak 's/a/b/' ai-context/x"), 2, stderr_has="allowlist", legacy=0),
     Case("I: BSD sed -i .bak on force-app blocked", bash("sed -i .bak 's/a/b/' force-app/x"), 2),
-    Case("I: GNU sed -i.bak allowed in ai-context", bash("sed -i.bak 's/a/b/' ai-context/x"), 0),
+    Case("I: GNU sed -i.bak in ai-context (sed is off the normal allowlist)", bash("sed -i.bak 's/a/b/' ai-context/x"), 2, stderr_has="allowlist", legacy=0),
     Case("I: sed -i with script word that is not a suffix is GNU", bash("sed -i 1d force-app/x"), 2),
     Case("I: advise echo '' allowed", bash("echo ''"), 0, env_mode="advise"),
     Case("N1: sed -i suffix with / blocked", bash("sed -i.bak/x 's/a/b/' docs/a.md"), 2, env_mode="maintain"),
@@ -386,6 +415,421 @@ CASES = [
     Case("N2: label with trailing command (t) blocked", bash("sed -n 't a w tools/guard/x' docs/a.md"), 2, env_mode="maintain"),
     Case("N2: plain labels allowed", bash("sed -n ':a;n;ba' docs/a.md"), 0, env_mode="maintain"),
 ]
+
+NOT_ON_LIST = "allowlist"
+# Task 5: per-mode Bash allowlists and Salesforce CLI levels. Not re-run in the "no allowlist" pass.
+ALLOWLIST_CASES = [
+    Case("normal: arbitrary command blocked", bash("make deploy"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: query helper allowed", bash("python3 tools/index/query.py stamp"), 0),
+    Case("normal: skill script allowed", bash("python3 framework/skills/story-impact/scripts/write_report.py --id 1"), 0),
+    Case("normal: render blocked", bash("python3 tools/build/render.py"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: git commit blocked", bash("git commit -m x"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: git add blocked", bash("git add docs/x"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: framework scripts allowed", bash("py -3 tools/build/lint.py --all"), 0),
+    Case("normal: evals runner allowed", bash("python3 tools/evals/run_skill.py x"), 0),
+    Case("normal: test_guard allowed", bash("python3 tools/guard/test_guard.py"), 0),
+    Case("normal: scan_data allowed", bash("python3 tools/guard/scan_data.py"), 0),
+    Case("normal: guard.py itself is not a framework script", bash("python3 tools/guard/guard.py"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: skill script dir must be lowercase", bash("python3 framework/skills/Story/scripts/w.py"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: arbitrary workspace script blocked", bash("python3 ai-context/x/y.py"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: pnpm exec blocked", bash("pnpm exec eslint ."), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: second segment off the list blocks the line", bash("git status && make deploy"), 2, stderr_has=NOT_ON_LIST),
+    Case("normal: tar listing off the normal list", bash("tar -tf ai-context/a.tar"), 2, stderr_has=NOT_ON_LIST),
+    Case("build: git commit allowed", bash("git commit -m x"), 0, env_mode="build"),
+    Case("build: git add allowed", bash("git add ai-context/x"), 0, env_mode="build"),
+    Case("build: pnpm test allowed", bash("pnpm test"), 0, env_mode="build"),
+    Case("build: pnpm run lint allowed", bash("pnpm run lint"), 0, env_mode="build"),
+    Case("build: pnpm exec prettier allowed", bash("pnpm exec prettier --check ."), 0, env_mode="build"),
+    Case("build: pnpm exec jest allowed", bash("pnpm exec jest"), 0, env_mode="build"),
+    Case("build: pnpm exec sfdx-lwc-jest allowed", bash("pnpm exec sfdx-lwc-jest"), 0, env_mode="build"),
+    Case("build: pnpm install blocked", bash("pnpm install"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("build: pnpm add blocked", bash("pnpm add left-pad"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("build: arbitrary command blocked", bash("make deploy"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("build: render blocked", bash("python3 tools/build/render.py"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("build: rm blocked", bash("rm ai-context/x"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("maintain: arbitrary command blocked", bash("make docs"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: trap blocked", bash("trap 'touch docs/x' EXIT"), 2, env_mode="maintain"),
+    Case("maintain: cp into docs allowed", bash("cp ai-context/a.md docs/a.md"), 0, env_mode="maintain"),
+    Case("maintain: render allowed", bash("python3 tools/build/render.py"), 0, env_mode="maintain"),
+    Case("maintain: workspace script allowed", bash("python3 ai-context/ws0/sdd/mkpatch.py a b c"), 0, env_mode="maintain"),
+    Case("maintain: git push still blocked", bash("git push"), 2, env_mode="maintain"),
+    Case("maintain: diff and cmp allowed", bash("cmp docs/a docs/b && diff docs/a docs/b"), 0, env_mode="maintain"),
+    Case("maintain: rmdir allowed in docs", bash("rmdir docs/old"), 0, env_mode="maintain"),
+    Case("maintain: rmdir tools/guard blocked", bash("rmdir tools/guard"), 2, env_mode="maintain"),
+    Case("maintain: rmdir -p blocked (it climbs)", bash("rmdir -p docs/a/b"), 2, env_mode="maintain"),
+    Case("maintain: rmdir off the normal list", bash("rmdir ai-context/old"), 2, stderr_has=NOT_ON_LIST),
+    Case("maintain: tar listing allowed", bash("tar -tf ai-context/a.tar"), 0, env_mode="maintain"),
+    Case("maintain: tar -tvf allowed", bash("tar -tvf ai-context/a.tar"), 0, env_mode="maintain"),
+    Case("maintain: tar extract blocked", bash("tar -xf ai-context/a.tar"), 2, env_mode="maintain"),
+    Case("maintain: tar create blocked", bash("tar -cf docs/a.tar docs"), 2, env_mode="maintain"),
+    Case("maintain: tar listing with checkpoint action blocked", bash("tar -tf ai-context/a.tar --checkpoint-action=exec=id"), 2, env_mode="maintain"),
+    Case("maintain: tar listing with to-command blocked", bash("tar -tf a.tar --to-command=cat"), 2, env_mode="maintain"),
+    Case("maintain: tar listing of a remote archive blocked", bash("tar -tf host:a.tar"), 2, env_mode="maintain"),
+    Case("maintain: tar listing with an expansion blocked", bash("tar -tf a.tar $X"), 2, env_mode="maintain"),
+    Case("maintain: tar listing with -I program blocked", bash("tar -tf a.tar -I id"), 2, env_mode="maintain"),
+    Case("maintain: pnpm exec prettier allowed", bash("pnpm exec prettier --check ."), 0, env_mode="maintain"),
+    Case("maintain: pnpm exec eslint allowed", bash("pnpm exec eslint ."), 0, env_mode="maintain"),
+    Case("maintain: pnpm jest allowed", bash("pnpm exec jest"), 0, env_mode="maintain"),
+    Case("maintain: pnpm test is not a maintainer tool", bash("pnpm test"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: pnpm sfdx-lwc-jest is not a maintainer tool", bash("pnpm sfdx-lwc-jest"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: script under tools allowed", bash("python3 tools/index/build_index.py --full"), 0, env_mode="maintain"),
+    Case("maintain: script under demo with py -3 allowed", bash("py -3 demo/org/seed.py"), 0, env_mode="maintain"),
+    Case("maintain: script under fixtures allowed", bash("python3 fixtures/make_fixture.py"), 0, env_mode="maintain"),
+    Case("maintain: script path with .. blocked", bash("python3 tools/../force-app/x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: script path with .. in the middle blocked", bash("python3 ai-context/a/../../x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: script outside the five roots blocked", bash("python3 force-app/x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: absolute script path blocked", bash("python3 /tmp/x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: tools2 is not tools", bash("python3 tools2/x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: x.pyz is not x.py", bash("python3 tools/x.pyz"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: python3 /dev/stdin blocked", bash("python3 /dev/stdin"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: python3 -i script blocked", bash("python3 -i tools/x.py"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: python3 -m blocked", bash("python3 -m tools.x"), 2, env_mode="maintain"),
+    Case("maintain: python3 -c after a script word blocked", bash("python3 -c 'import os' tools/x.py"), 2, env_mode="maintain"),
+    Case("maintain: py -3 -m blocked", bash("py -3 -m http.server"), 2, env_mode="maintain"),
+    # Controller ruling: these must never be admitted by maintainer_tools.
+    Case("maintain: gsed not admitted", bash("gsed -i s/a/b/ docs/x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: gcp not admitted", bash("gcp docs/a docs/b"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: busybox not admitted", bash("busybox cp docs/a docs/b"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: nvim not admitted", bash("nvim -es docs/x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: emacs not admitted", bash("emacs --batch docs/x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: yq not admitted", bash("yq -i . docs/x.yaml"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: make not admitted", bash("make docs"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: open not admitted", bash("open docs/x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: watch not admitted", bash("watch ls"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: flock not admitted", bash("flock docs/lock ls"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: xcrun not admitted", bash("xcrun ls"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: at not admitted", bash("at now"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: pip not admitted", bash("pip install x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("maintain: path-qualified cp is not the cp pattern", bash("/bin/cp docs/a docs/b"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    # Salesforce CLI levels.
+    Case("normal: sf --version allowed", bash("sf --version"), 0),
+    Case("build: sf version allowed", bash("sf version"), 0, env_mode="build"),
+    Case("maintain: sf help allowed", bash("sf help org"), 0, env_mode="maintain"),
+    Case("normal: sf <topic> --help allowed", bash("sf plugins --help"), 0),
+    Case("normal: sf generate into ai-context allowed", bash("sf apex generate class --name Foo --output-dir ai-context/x"), 0),
+    Case("normal: sf generate into force-app blocked", bash("sf apex generate class --name Foo --output-dir force-app/main/default/classes"), 2),
+    Case("normal: sf generate without output dir blocked", bash("sf apex generate class --name Foo"), 2),
+    Case("normal: sf generate -d into ai-context allowed", bash("sf project generate --name x -d ai-context/p"), 0),
+    Case("normal: sf generate --output-dir= into force-app blocked", bash("sf apex generate class --name Foo --output-dir=force-app"), 2),
+    Case("normal: sf generate -dVALUE into force-app blocked", bash("sf apex generate class --name Foo -dforce-app"), 2),
+    Case("normal: sf generate -d with no value blocked", bash("sf apex generate class --name Foo -d"), 2),
+    Case("normal: sf generate with a path in --name blocked", bash("sf apex generate class --name ../../x --output-dir ai-context/x"), 2),
+    Case("normal: sf generate with an expansion blocked", bash("sf apex generate class --name Foo --output-dir ai-context/x $X"), 2),
+    Case("normal: sf generate redirect into force-app blocked", bash("sf apex generate class --name Foo -d ai-context/x > force-app/log"), 2),
+    Case("normal: sf lightning generate component allowed", bash("sf lightning generate component --name c --type lwc --output-dir ai-context/l"), 0),
+    Case("normal: sf static-resource generate without output dir blocked", bash("sf static-resource generate --name r"), 2),
+    Case("normal: sf convert into ai-context allowed", bash("sf project convert source --root-dir force-app --output-dir ai-context/out"), 0),
+    Case("normal: sf convert without output dir blocked", bash("sf project convert source --root-dir force-app"), 2),
+    Case("normal: sf code-analyzer to ai-context allowed", bash("sf code-analyzer run --workspace force-app --output-file ai-context/r.json"), 0),
+    Case("normal: sf code-analyzer --output-file into tools/guard blocked", bash("sf code-analyzer run --output-file tools/guard/policy.json"), 2),
+    Case("normal: sf code-analyzer -f into tools/guard blocked", bash("sf code-analyzer run -f tools/guard/policy.json"), 2),
+    Case("normal: sf code-analyzer without output allowed", bash("sf code-analyzer run --workspace force-app"), 0),
+    Case("maintain: sf generate into docs allowed", bash("sf project generate --name x -d docs/p"), 0, env_mode="maintain"),
+    Case("maintain: sf generate into tools/guard blocked", bash("sf project generate --name x -d tools/guard/p"), 2, env_mode="maintain"),
+    Case("normal: org command blocked at offline level", bash("sf sobject describe --sobject Account --target-org dev1"), 2, stderr_has="not allowed at level offline"),
+    Case("normal: unknown sf subcommand blocked", bash("sf plugins install x"), 2, stderr_has="not allowed at level offline"),
+    Case("advise: sf --version blocked at level none", bash("sf --version"), 2, env_mode="advise"),
+    Case("advise: sf help blocked at level none", bash("sf help"), 2, env_mode="advise"),
+    Case("org-metadata: describe with allowed org allowed", bash("sf sobject describe --sobject Account --target-org dev1"), 0, policy=ORG_META),
+    Case("org-metadata: --target-org= form allowed", bash("sf sobject list --target-org=dev1"), 0, policy=ORG_META),
+    Case("org-metadata: -o form allowed", bash("sf org list metadata --metadata-type ApexClass -o dev1"), 0, policy=ORG_META),
+    Case("org-metadata: metadata-types allowed", bash("sf org list metadata-types -o dev1"), 0, policy=ORG_META),
+    Case("org-metadata: retrieve preview allowed", bash("sf project retrieve preview -o dev1"), 0, policy=ORG_META),
+    Case("org-metadata: org not in allowed_orgs blocked", bash("sf sobject describe --sobject Account --target-org prod"), 2, policy=ORG_META),
+    Case("org-metadata: missing target org blocked", bash("sf sobject describe --sobject Account"), 2, policy=ORG_META, stderr_has="allowed_orgs"),
+    Case("org-metadata: --target-org with no value blocked", bash("sf sobject describe --sobject Account --target-org"), 2, policy=ORG_META, stderr_has="allowed_orgs"),
+    Case("org-metadata: allowed org then another org blocked", bash("sf sobject describe --sobject Account --target-org dev1 -o prod"), 2, policy=ORG_META),
+    Case("org-metadata: attached -oVALUE for another org blocked", bash("sf sobject describe --sobject Account -o dev1 -oprod"), 2, policy=ORG_META),
+    Case("org-metadata: org name only in a quoted value does not count", bash("sf sobject describe --sobject '-o dev1'"), 2, policy=ORG_META, stderr_has="allowed_orgs"),
+    Case("org-metadata: empty allowed_orgs blocks everything", bash("sf sobject describe --sobject Account -o dev1"), 2,
+         policy={"sf": {"mode_level": {"normal": "org-metadata"}}}, stderr_has="allowed_orgs"),
+    Case("org-metadata: offline commands need no org", bash("sf --version"), 0, policy=ORG_META),
+    Case("org-metadata: data query blocked", bash("sf data query --query 'SELECT Id FROM Account' -o dev1"), 2, policy=ORG_META),
+    Case("org-metadata: build mode stays offline", bash("sf sobject describe --sobject Account -o dev1"), 2, env_mode="build", policy=ORG_META),
+    Case("org-data: data query allowed", bash("sf data query --query 'SELECT Id FROM Account' -o dev1"), 0, policy=ORG_DATA),
+    Case("org-data: levels are cumulative", bash("sf sobject describe --sobject Account -o dev1"), 0, policy=ORG_DATA),
+    Case("org-data: data query without org blocked", bash("sf data query --query 'SELECT Id FROM Account'"), 2, policy=ORG_DATA, stderr_has="allowed_orgs"),
+    Case("org-data: data query redirect into force-app blocked", bash("sf data query --query 'SELECT Id FROM Account' -o dev1 > force-app/x"), 2, policy=ORG_DATA),
+    Case("org-data: deploy always blocked", bash("sf project deploy start -o dev1"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("org-data: org display always blocked", bash("sf org display -o dev1"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("org-data: apex run always blocked", bash("sf apex run -f x.apex -o dev1"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("org-data: data delete always blocked", bash("sf data delete record -s Account -i x -o dev1"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("org-data: retrieve start always blocked", bash("sf project retrieve start -o dev1"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("always blocked beats --help", bash("sf org login web --help"), 2, stderr_has="always blocked"),
+    Case("always blocked in advise", bash("sf auth web login"), 2, env_mode="advise"),
+    Case("always blocked in build", bash("sf deploy metadata"), 2, env_mode="build", stderr_has="always blocked"),
+    Case("always blocked in maintain", bash("sf data bulk upsert"), 2, env_mode="maintain", stderr_has="always blocked"),
+    Case("always blocked: sf retrieve", bash("sf retrieve metadata"), 2, stderr_has="always blocked"),
+    Case("always blocked: sf login", bash("sf login"), 2, stderr_has="always blocked"),
+    Case("always blocked: sf org assign permset", bash("sf org assign permset --name x"), 2, stderr_has="always blocked"),
+    Case("always blocked: sf project delete", bash("sf project delete source"), 2, stderr_has="always blocked"),
+    Case("sf: later segment is checked", bash("git status && sf org login web"), 2, stderr_has="always blocked"),
+    Case("sf: if condition is checked", bash("if sf org login web; then ls; fi"), 2, stderr_has="always blocked"),
+    Case("sf: env assignment before sf blocked", bash("X=1 sf --version"), 2),
+    Case("sf: path-qualified sf blocked", bash("/usr/local/bin/sf --version"), 2, stderr_has="plain"),
+    Case("sf: upper-case SF blocked", bash("SF --version"), 2, stderr_has="plain"),
+    Case("sf: wrapped in env blocked", bash("env sf --version"), 2),
+    Case("sf: wrapped in xargs blocked", bash("echo x | xargs sf --version"), 2),
+    Case("sf: word sf as an argument is not a command", bash("echo sf org login"), 0),
+    Case("sf: word sf in a query helper argument is not a command", bash("python3 tools/index/query.py sf"), 0),
+    Case("sfdx still blocked", bash("sfdx force:org:list"), 2, env_mode="maintain"),
+    Case("sfdx blocked as an argument too", bash("echo sfdx"), 2),
+]
+
+
+def at(cwd, cmd):
+    return {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": "@PROJECT@/" + cwd}
+
+
+SUB = {"ai-context/x/.keep": ""}
+QUERY_ACCOUNT = '-q "SELECT Id FROM Account"'
+# Fix round 1 (review findings C1, C2, I1, I2, I4, M2). Every bypass payload expects 2; the positives must still pass.
+FIX_CASES = [
+    # C1: help is only the exact token form; topic:command spellings and the force topic are blocked.
+    Case("C1: --file value ending in -h", bash(f'sf data query {QUERY_ACCOUNT} -o prod --file "ai-context/q -h"'), 2),
+    Case("C1: -- -h after an org flag", bash(f"sf data query {QUERY_ACCOUNT} -o prod -- -h"), 2),
+    Case("C1: apex:run topic spelling", bash('sf apex:run -o prod --file "ai-context/x.apex -h"'), 2),
+    Case("C1: apex run with a quoted -h", bash('sf apex run -o prod --file "ai-context/x.apex -h"'), 2),
+    Case("C1: project:deploy:start --help", bash("sf project:deploy:start -o dev1 --help"), 2),
+    Case("C1: project deploy start --help stays always blocked", bash("sf project deploy start -o dev1 --help"), 2, stderr_has="always blocked"),
+    Case("C1: data:query topic spelling", bash(f"sf data:query {QUERY_ACCOUNT} -o prod"), 2),
+    Case("C1: org:display topic spelling", bash("sf org:display -o dev1"), 2),
+    Case("C1: force topic", bash("sf force apex execute -o dev1 -f x.apex -h"), 2),
+    Case("C1: plugins install with a quoted -h", bash('sf plugins install evil "x -h"'), 2),
+    Case("C1: plugins install with -- -h", bash("sf plugins install evil -- -h"), 2),
+    Case("C1: config set with -- -h", bash("sf config set target-org=prod -- -h"), 2),
+    Case("C1: --help=x is not the help form", bash("sf org display --help=x"), 2),
+    Case("C1: help with a flag before -h is not the help form", bash("sf data query -q x -h"), 2),
+    Case("C1: data query --help allowed", bash("sf data query --help"), 0),
+    Case("C1: data query -h allowed", bash("sf data query -h"), 0),
+    Case("C1: org list auth -h allowed", bash("sf org list auth -h"), 0),
+    Case("C1: help is not allowed at level none", bash("sf data query --help"), 2, env_mode="advise"),
+    # C2: any org flag needs an org-level command and an allowed alias.
+    Case("C2: --from-org at offline", bash("sf project generate manifest --from-org prod -d ai-context/x"), 2),
+    Case("C2: --from-org= at offline", bash("sf project generate manifest --from-org=prod -d ai-context/x"), 2),
+    Case("C2: --from-org with an allowed alias still needs an org-level command", bash("sf project generate manifest --from-org dev1 -d ai-context/x"), 2, policy=ORG_META),
+    Case("C2: --source-org at offline", bash("sf apex generate class --name Foo -d ai-context/x --source-org prod"), 2),
+    Case("C2: -u at offline", bash("sf apex generate class --name Foo -d ai-context/x -u prod"), 2),
+    Case("C2: --targetusername= at offline", bash("sf apex generate class --name Foo -d ai-context/x --targetusername=prod"), 2),
+    Case("C2: -v at offline", bash("sf apex generate class --name Foo -d ai-context/x -v prod"), 2),
+    Case("C2: --target-dev-hub at offline", bash("sf apex generate class --name Foo -d ai-context/x --target-dev-hub prod"), 2),
+    Case("C2: --target-dev-hub-username at offline", bash("sf apex generate class --name Foo -d ai-context/x --target-dev-hub-username prod"), 2),
+    Case("C2: attached -oVALUE at offline", bash("sf apex generate class --name Foo -d ai-context/x -oprod"), 2),
+    Case("C2: generate manifest without an org flag allowed", bash("sf project generate manifest -d ai-context/x --source-dir force-app"), 0),
+    Case("C2: -o dev1 with an allowed alias at org-metadata", bash("sf sobject describe -s Account -o dev1"), 0, policy=ORG_META),
+    Case("C2: --from-org on an org command with an allowed alias", bash("sf sobject describe -s Account --from-org dev1"), 0, policy=ORG_META),
+    Case("C2: a second org flag naming another org", bash("sf sobject describe -s Account -o dev1 -u prod"), 2, policy=ORG_META),
+    Case("C2: --targetusername naming another org", bash("sf sobject describe -s Account -o dev1 --targetusername prod"), 2, policy=ORG_META),
+    Case("C2: -v naming another org", bash("sf sobject describe -s Account -o dev1 -v prod"), 2, policy=ORG_META),
+    Case("C2: --target-dev-hub-username= naming another org", bash("sf sobject describe -s Account -o dev1 --target-dev-hub-username=prod"), 2, policy=ORG_META),
+    Case("C2: --flags-dir blocked on an org command", bash(f"sf data query {QUERY_ACCOUNT} -o dev1 --flags-dir ai-context/f"), 2, policy=ORG_DATA, stderr_has="always blocked"),
+    Case("C2: --flags-dir= blocked at offline", bash("sf code-analyzer run --flags-dir=ai-context/f"), 2, stderr_has="always blocked"),
+    # I1: scripts and pnpm run only from the project root, and the script must resolve under the allowed roots.
+    Case("I1: cd then query helper", bash("cd ai-context/x && python3 tools/index/query.py stamp"), 2, files=SUB, stderr_has="project root"),
+    Case("I1: cd then skill script", bash("cd ai-context/x; python3 framework/skills/a/scripts/b.py"), 2, files=SUB, stderr_has="project root"),
+    Case("I1: payload cwd in ai-context then query helper", at("ai-context/x", "python3 tools/index/query.py stamp"), 2, files=SUB, stderr_has="project root"),
+    Case("I1: cd then pnpm test in build", bash("cd ai-context/x && pnpm test"), 2, env_mode="build", files=SUB, stderr_has="project root"),
+    Case("I1: payload cwd then pnpm test in build", at("ai-context/x", "pnpm test"), 2, env_mode="build", files=SUB, stderr_has="project root"),
+    Case("I1: payload cwd then workspace script in maintain", at("ai-context/x", "python3 ai-context/ws0/sdd/mkpatch.py a"), 2, env_mode="maintain", files=SUB),
+    Case("I1: pushd then script", bash("pushd ai-context/x; python3 tools/index/query.py stamp"), 2, env_mode="maintain", files=SUB),
+    Case("I1: cd in advise then query helper", bash("cd ai-context/x && python3 tools/index/query.py stamp"), 2, env_mode="advise", files=SUB),
+    Case("I1: payload cwd in advise then query helper", at("ai-context/x", "python3 tools/index/query.py stamp"), 2, env_mode="advise", files=SUB),
+    Case("I1: payload cwd at the root in advise allowed", at("", "python3 tools/index/query.py stamp"), 0, env_mode="advise"),
+    Case("I1: query helper from the root allowed", bash("python3 tools/index/query.py stamp"), 0),
+    Case("I1: cd later in the line does not affect an earlier script", bash("python3 tools/index/query.py stamp && cd docs"), 0, env_mode="maintain"),
+    Case("I1: cd then a non-script command still allowed", bash("cd docs && ls"), 0, env_mode="maintain"),
+    # I2: pnpm tools write where --write, -w or --fix say; config and plugin options load code.
+    Case("I2: prettier --write tools/guard", bash("pnpm exec prettier --write tools/guard/guard.py"), 2, env_mode="build"),
+    Case("I2: prettier --write tools/guard in maintain", bash("pnpm exec prettier --write tools/guard/guard.py"), 2, env_mode="maintain"),
+    Case("I2: eslint --fix tools/guard", bash("pnpm exec eslint --fix tools/guard/guard.py"), 2, env_mode="build"),
+    Case("I2: prettier --write settings.json", bash("pnpm exec prettier --write .claude/settings.json"), 2, env_mode="build"),
+    Case("I2: prettier -w tools/guard", bash("pnpm exec prettier -w tools/guard/guard.py"), 2, env_mode="build"),
+    Case("I2: prettier --write after --", bash("pnpm exec prettier --write -- tools/guard/guard.py"), 2, env_mode="build"),
+    Case("I2: prettier --write glob onto tools/guard", bash('pnpm exec prettier --write "tools/gua*/guard.py"'), 2, env_mode="build", files={"tools/guard/guard.py": "x"}),
+    Case("I2: prettier --write . reaches tools/guard", bash("pnpm exec prettier --write ."), 2, env_mode="maintain", files={"tools/guard/guard.py": "x"}),
+    Case("I2: prettier --write with an expansion", bash("pnpm exec prettier --write $F"), 2, env_mode="build"),
+    Case("I2: prettier --write into ai-context allowed", bash("pnpm exec prettier --write ai-context/x/a.md"), 0, env_mode="build"),
+    Case("I2: prettier --check . stays allowed", bash("pnpm exec prettier --check ."), 0, env_mode="build"),
+    Case("I2: prettier -c is --check", bash("pnpm exec prettier -c ."), 0, env_mode="build"),
+    Case("I2: eslint -c loads a config", bash("pnpm exec eslint -c ai-context/x/c.js ."), 2, env_mode="build"),
+    Case("I2: eslint --config loads a config", bash("pnpm exec eslint --config=ai-context/x/c.js ."), 2, env_mode="build"),
+    Case("I2: eslint --plugin loads code", bash("pnpm exec eslint --plugin x ."), 2, env_mode="build"),
+    Case("I2: eslint --rulesdir loads code", bash("pnpm exec eslint --rulesdir ai-context/r ."), 2, env_mode="build"),
+    Case("I2: eslint --resolve-plugins-relative-to", bash("pnpm exec eslint --resolve-plugins-relative-to ai-context/r ."), 2, env_mode="build"),
+    Case("I2: prettier --config loads code", bash("pnpm exec prettier --config ai-context/x/p.js --check ."), 2, env_mode="build"),
+    Case("I2: eslint -o output file in tools/guard", bash("pnpm exec eslint -o tools/guard/out.txt ."), 2, env_mode="build"),
+    Case("I2: eslint --output-file into ai-context allowed", bash("pnpm exec eslint --output-file ai-context/x/out.txt ."), 0, env_mode="build"),
+    # I4: file and output flags on every sf command are write targets.
+    Case("I4: -f onto tools/guard at org-data", bash("sf org list metadata -m ApexClass -o dev1 -f tools/guard/policy.json"), 2, policy=ORG_DATA),
+    Case("I4: --file onto tools/guard", bash(f"sf data query {QUERY_ACCOUNT} -o dev1 --file tools/guard/policy.json"), 2, policy=ORG_DATA),
+    Case("I4: -fVALUE onto tools/guard", bash("sf org list metadata -m ApexClass -o dev1 -ftools/guard/policy.json"), 2, policy=ORG_DATA),
+    Case("I4: --output-file onto tools/guard", bash("sf org list metadata -m ApexClass -o dev1 --output-file tools/guard/policy.json"), 2, policy=ORG_DATA),
+    Case("I4: --file= onto force-app", bash(f"sf data query {QUERY_ACCOUNT} -o dev1 --file=force-app/q.soql"), 2, policy=ORG_DATA),
+    Case("I4: -f with no value", bash("sf org list metadata -m ApexClass -o dev1 -f"), 2, policy=ORG_DATA),
+    Case("I4: -f from ai-context still allowed", bash("sf org list metadata -m ApexClass -o dev1 -f ai-context/in.json"), 0, policy=ORG_DATA),
+    Case("I4: --file from ai-context still allowed", bash("sf data query --file ai-context/q.soql -o dev1"), 0, policy=ORG_DATA),
+    # M2: a code-analyzer config file can name anything to load.
+    Case("M2: --config-file", bash("sf code-analyzer run --config-file ai-context/c.yml"), 2),
+    Case("M2: --config-file=", bash("sf code-analyzer run --config-file=ai-context/c.yml"), 2),
+    Case("M2: -c", bash("sf code-analyzer run -c ai-context/c.yml"), 2),
+]
+
+# Fix round 2 (re-review New-1 .. New-5).
+FIX2_CASES = [
+    # New-1: pnpm tools need "exec".
+    Case("New-1: bare pnpm prettier --write", bash("pnpm prettier --write tools/guard/guard.py"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-1: bare pnpm eslint --fix", bash("pnpm eslint --fix tools/guard/x.js"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("New-1: bare pnpm jest", bash("pnpm jest"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-1: bare pnpm sfdx-lwc-jest", bash("pnpm sfdx-lwc-jest"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-1: pnpm exec prettier --check src/x.js allowed", bash("pnpm exec prettier --check src/x.js"), 0, env_mode="build"),
+    # New-2: every sf segment runs from the project root.
+    Case("New-2: sf code-analyzer run from the root allowed", bash("sf code-analyzer run"), 0),
+    Case("New-2: sf code-analyzer run from ai-context/x", at("ai-context/x", "sf code-analyzer run"), 2, files=SUB, stderr_has="project root"),
+    Case("New-2: cd then sf code-analyzer run", bash("cd ai-context/x && sf code-analyzer run"), 2, files=SUB, stderr_has="project root"),
+    Case("New-2: sf --version from a subdirectory", at("ai-context/x", "sf --version"), 2, files=SUB, stderr_has="project root"),
+    Case("New-2: sf generate from a subdirectory", at("ai-context/x", "sf apex generate class --name Foo -d ai-context/x"), 2, files=SUB, stderr_has="project root"),
+    Case("New-2: pushd then sf", bash("pushd ai-context/x; sf --version"), 2, env_mode="maintain", files=SUB),
+    # New-3: jest output paths are write targets; root and update options are unknown.
+    Case("New-3: jest --coverageDirectory tools/guard", bash("pnpm exec jest --coverageDirectory tools/guard --coverage"), 2, env_mode="build"),
+    Case("New-3: jest --coverageDirectory= tools/guard", bash("pnpm exec jest --coverageDirectory=tools/guard --coverage"), 2, env_mode="build"),
+    Case("New-3: jest --outputFile tools/guard", bash("pnpm exec jest --outputFile tools/guard/x.json --json"), 2, env_mode="build"),
+    Case("New-3: jest --cacheDirectory tools/guard", bash("pnpm exec jest --cacheDirectory tools/guard"), 2, env_mode="build"),
+    Case("New-3: pnpm test -- --coverageDirectory", bash("pnpm test -- --coverageDirectory tools/guard --coverage"), 2, env_mode="build"),
+    Case("New-3: pnpm run test -- --outputFile", bash("pnpm run test -- --outputFile tools/guard/x.json"), 2, env_mode="build"),
+    Case("New-3: sfdx-lwc-jest -- --coverageDirectory", bash("pnpm exec sfdx-lwc-jest -- --coverageDirectory tools/guard"), 2, env_mode="build"),
+    Case("New-3: jest -u", bash("pnpm exec jest -u"), 2, env_mode="build"),
+    Case("New-3: jest --updateSnapshot", bash("pnpm exec jest --updateSnapshot"), 2, env_mode="build"),
+    Case("New-3: pnpm run test -- -u", bash("pnpm run test -- -u"), 2, env_mode="build"),
+    Case("New-3: jest --rootDir", bash("pnpm exec jest --rootDir ai-context/x"), 2, env_mode="build"),
+    Case("New-3: jest --roots", bash("pnpm exec jest --roots ai-context/x"), 2, env_mode="build"),
+    Case("New-3: jest --config", bash("pnpm exec jest --config ai-context/j.js"), 2, env_mode="build"),
+    Case("New-3: jest --coverage allowed (default coverage/ dir is a documented limit)", bash("pnpm exec jest --coverage"), 0, env_mode="build"),
+    Case("New-3: jest --coverageDirectory into ai-context allowed", bash("pnpm exec jest --coverageDirectory ai-context/x/cov"), 0, env_mode="build"),
+    Case("New-3: pnpm test allowed", bash("pnpm test"), 0, env_mode="build"),
+    Case("New-3: pnpm test -- --coverage allowed", bash("pnpm test -- --coverage"), 0, env_mode="build"),
+    # New-4: odd org-ish flag names on sf commands.
+    Case("New-4: --target", bash("sf sobject describe -s Account -o dev1 --target prod"), 2, policy=ORG_META),
+    Case("New-4: --targe", bash("sf sobject describe -s Account -o dev1 --targe prod"), 2, policy=ORG_META),
+    Case("New-4: --targetdevhubusername", bash("sf sobject describe -s Account -o dev1 --targetdevhubusername prod"), 2, policy=ORG_META),
+    Case("New-4: --targetdevhubusername at offline", bash("sf apex generate class --name Foo -d ai-context/x --targetdevhubusername prod"), 2),
+    Case("New-4: --username", bash("sf sobject describe -s Account -o dev1 --username prod"), 2, policy=ORG_META),
+    Case("New-4: --organization", bash("sf sobject describe -s Account -o dev1 --organization prod"), 2, policy=ORG_META),
+    Case("New-4: a known org flag is not caught by the name rule", bash("sf sobject describe -s Account --target-org dev1"), 0, policy=ORG_META),
+    # New-5: --write= and --fix= forms; no extra arguments on pnpm scripts.
+    Case("New-5: --write=", bash("pnpm exec prettier --write=tools/guard/x.js"), 2, env_mode="build"),
+    Case("New-5: --fix=", bash("pnpm exec eslint --fix=tools/guard/x.js"), 2, env_mode="build"),
+    Case("New-5: pnpm test --dir", bash("pnpm test --dir ai-context/x"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-5: pnpm -C dir test", bash("pnpm -C ai-context/x test"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-5: pnpm lint --fix", bash("pnpm lint --fix"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-5: pnpm run format extra args", bash("pnpm run format tools/guard"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("New-5: pnpm lint alone allowed", bash("pnpm lint"), 0, env_mode="build"),
+    Case("New-5: pnpm run format alone allowed", bash("pnpm run format"), 0, env_mode="build"),
+]
+
+# Fix round 3 (re-review R1): jest accepts kebab-case and short-flag groups.
+FIX3_CASES = [Case(f"R1: {cmd}", bash(cmd), 2, env_mode="build") for cmd in (
+    "pnpm exec jest --coverage-directory tools/guard --coverage",
+    "pnpm exec jest --coverage-directory=tools/guard --coverage",
+    "pnpm exec jest --output-file tools/guard/x.json --json",
+    "pnpm exec jest --cache-directory tools/guard",
+    "pnpm exec jest --root-dir ai-context/x",
+    "pnpm exec jest --update-snapshot",
+    "pnpm exec jest --updateSnapshot=true",
+    "pnpm exec jest -ui",
+    "pnpm exec jest -iu",
+    "pnpm exec jest --ci=false -u",
+    "pnpm exec jest --coverageDirectory=tools/guard --coverage",
+    "pnpm exec jest --coverageDirectory ./tools/guard",
+    "pnpm exec jest --coverageDirectory force-app/x",
+    "pnpm exec jest --watchman=false --cacheDirectory=tools/guard",
+    "pnpm exec sfdx-lwc-jest --coverage -- --coverageDirectory tools/guard",
+    "pnpm exec sfdx-lwc-jest -- --coverage-directory tools/guard",
+    "pnpm exec sfdx-lwc-jest -u",
+    "pnpm exec sfdx-lwc-jest --update-snapshot",
+    "pnpm test -- --coverage-directory tools/guard",
+    "pnpm test -- --coverageDirectory=tools/guard",
+    "pnpm test -- --cacheDirectory tools/guard",
+    "pnpm test -- -u",
+    "pnpm test -- -ui",
+    "pnpm run test -- --rootDir x",
+    "pnpm run test -- --root-dir x",
+    # Options that load code.
+    "pnpm exec jest --reporters ai-context/r.js",
+    "pnpm exec jest --setupFiles ai-context/s.js",
+    "pnpm exec jest --setup-files ai-context/s.js",
+    "pnpm exec jest --setupFilesAfterEnv ai-context/s.js",
+    "pnpm exec jest --setupFilesAfterEach ai-context/s.js",
+    "pnpm exec jest --globalSetup ai-context/s.js",
+    "pnpm exec jest --global-setup ai-context/s.js",
+    "pnpm exec jest --globalTeardown ai-context/s.js",
+    "pnpm exec jest --testRunner ai-context/r.js",
+    "pnpm exec jest --test-runner ai-context/r.js",
+    "pnpm exec jest --transform ai-context/t.js",
+    "pnpm exec jest --testResultsProcessor ai-context/p.js",
+    "pnpm exec jest --test-results-processor ai-context/p.js",
+    "pnpm exec jest --projects ai-context/x",
+    "pnpm exec jest --config ai-context/j.js",
+    "pnpm exec jest -c ai-context/j.js",
+    "pnpm test -- --setup-files ai-context/s.js",
+    "pnpm exec eslint --format ai-context/f.js force-app",
+    "pnpm exec eslint --format=ai-context/f force-app",
+    "pnpm exec eslint -f custom.cjs force-app",
+    "pnpm exec eslint --format x.mjs force-app",
+)] + [
+    Case("R1: jest --coverage allowed", bash("pnpm exec jest --coverage"), 0, env_mode="build"),
+    Case("R1: jest -i allowed", bash("pnpm exec jest -i"), 0, env_mode="build"),
+    # Round 4 ruling: only exact spellings are allowed, so these kebab forms are now blocked.
+    Case("R1: jest --coverage-directory into ai-context blocked (kebab spelling)", bash("pnpm exec jest --coverage-directory ai-context/x/cov"), 2, env_mode="build"),
+    Case("R1: jest --run-in-band blocked (kebab spelling)", bash("pnpm exec jest --run-in-band"), 2, env_mode="build"),
+    Case("R1: eslint --format stylish allowed", bash("pnpm exec eslint --format stylish force-app"), 0, env_mode="build"),
+    Case("R1: eslint -f stylish allowed", bash("pnpm exec eslint -f stylish force-app"), 0, env_mode="build"),
+]
+
+# Fix round 4: jest and sfdx-lwc-jest flags are an exact-spelling allowlist (yargs rewrites names).
+FIX4_CASES = [Case(f"R4: {cmd}", bash(cmd), 2, env_mode="build") for cmd in (
+    "pnpm exec jest --COVERAGE-DIRECTORY tools/guard",
+    "pnpm exec jest --coverage--directory tools/guard",
+    "pnpm exec jest --coverage_directory- tools/guard",
+    "pnpm exec jest --coverage-_directory tools/guard",
+    "pnpm exec jest --Coverage-Directory tools/guard --coverage",
+    "pnpm exec jest --coverage_directory tools/guard --coverage",
+    "pnpm exec jest --CACHE-DIRECTORY tools/guard",
+    "pnpm exec jest --cache--directory tools/guard",
+    "pnpm exec jest --SETUP-FILES ai-context/s.js",
+    "pnpm exec jest --global--setup ai-context/s.js",
+    "pnpm exec jest --UPDATE-SNAPSHOT",
+    "pnpm exec jest -u1",
+    "pnpm exec jest -u=true",
+    "pnpm exec jest --coverageDirectory.x tools/guard",
+    "pnpm exec sfdx-lwc-jest -- --COVERAGE-DIRECTORY tools/guard",
+    "pnpm test -- -- --coverage-directory tools/guard",
+    "pnpm test -- --coverage -- --coverage-directory tools/guard",
+    "pnpm exec jest --coverage-directory ai-context/x/cov",
+    "pnpm exec jest --run-in-band",
+    "pnpm exec jest --ci=false",
+    "pnpm exec jest -t",
+    "pnpm exec jest -t --coverage-directory tools/guard",
+    "pnpm exec jest --testNamePattern --coverage-directory tools/guard",
+    "pnpm exec jest -w 2 --watch",
+    "pnpm exec jest -ib",
+    "pnpm exec jest --Coverage",
+)] + [
+    Case("R4: jest --coverageDirectory still a write target", bash("pnpm exec jest --coverageDirectory ai-context/a --coverageDirectory tools/guard"), 2, env_mode="build"),
+] + [Case(f"R4: {cmd} allowed", bash(cmd), 0, env_mode="build") for cmd in (
+    "pnpm exec jest --coverage",
+    "pnpm exec jest -i",
+    "pnpm exec jest --coverageDirectory ai-context/x/cov --coverage",
+    "pnpm exec jest --runInBand --ci",
+    "pnpm test",
+    "pnpm test -- --coverage",
+    "pnpm exec sfdx-lwc-jest -- --coverage",
+    "pnpm exec jest force-app/lwc/x",
+    "pnpm exec jest --no-cache --coverage --silent --verbose --json --passWithNoTests --detectOpenHandles --colors",
+    "pnpm exec jest --maxWorkers=2 --bail=1 --testNamePattern=foo",
+    "pnpm exec jest --maxWorkers 50% --testNamePattern foo force-app/lwc/x",
+    "pnpm exec jest -t foo -w 2 -b -e",
+    "pnpm exec jest --outputFile=ai-context/x/r.json --json --cacheDirectory ai-context/x/c",
+)]
 
 # A payload the guard ALLOWS, so exit 2 can only come from the wrapper's fail-closed branch.
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
@@ -404,6 +848,8 @@ SYMLINK_CASES = [
     Case("A: glob through a symlinked dir into tools/guard blocked", bash("echo x > ai-context/t*/guard.py"), 2, files={"tools/guard/guard.py": "x"}),
     Case("A: cp through a symlinked dir into tools/guard blocked", bash("cp ai-context/e ai-context/tg/guard.py"), 2, files={"tools/guard/guard.py": "x"}),
     Case("A: rm -rf through a symlinked dir blocked", bash("rm -rf ai-context/tg/"), 2, files={"tools/guard/guard.py": "x"}),
+    Case("I1: script symlinked out of ai-context blocked", bash("python3 ai-context/fa/A.py"), 2, env_mode="maintain", files={"force-app/A.py": ""},
+         stderr_has="must resolve under"),
 ]
 
 
@@ -464,16 +910,81 @@ def send(wrapper, payload, env, cwd):
     return p.returncode, p.stderr.decode()
 
 
+def merge(base, over):
+    """Deep-merge dict over into base: dicts merge, anything else (lists included) is replaced."""
+    for key, val in over.items():
+        if isinstance(val, dict) and isinstance(base.get(key), dict):
+            merge(base[key], val)
+        else:
+            base[key] = val
+    return base
+
+
+def guard_copy(policy):
+    """A temp copy of the wrapper and guard.py next to a policy.json merged with `policy`. Returns (dir, wrapper)."""
+    copy = tempfile.mkdtemp(prefix="guard-policy-")
+    try:
+        for name in (os.path.basename(WRAPPER), "guard.py"):
+            shutil.copy(os.path.join(HERE, name), os.path.join(copy, name))
+        wrapper = os.path.join(copy, os.path.basename(WRAPPER))
+        os.chmod(wrapper, 0o755)
+        with open(os.path.join(HERE, "policy.json"), encoding="utf-8") as f:
+            merged = merge(json.load(f), policy)
+        with open(os.path.join(copy, "policy.json"), "w", encoding="utf-8") as f:
+            json.dump(merged, f)
+    except BaseException:
+        shutil.rmtree(copy, ignore_errors=True)
+        raise
+    return copy, wrapper
+
+
 def run_case(case):
     project = make_project(case.committed_mode, case.files)
+    copy = None
     try:
         make_dirty(project, case.dirty)
         payload = case.payload
         if isinstance(payload, dict) and isinstance(payload.get("cwd"), str):
             payload = dict(payload, cwd=payload["cwd"].replace("@PROJECT@", os.path.realpath(project)))
-        return send(WRAPPER, payload, case_env(project, case.env_mode), project)
+        wrapper = WRAPPER
+        if case.policy:
+            copy, wrapper = guard_copy(case.policy)
+        return send(wrapper, payload, case_env(project, case.env_mode), project)
     finally:
         shutil.rmtree(project, ignore_errors=True)
+        if copy:
+            shutil.rmtree(copy, ignore_errors=True)
+
+
+def no_allowlist_variants(cases):
+    """Task 4's Bash cases again with every mode's allowlist opened, so the write-target checks stay tested
+    on their own: with the allowlist on, many of them are blocked for a different reason first."""
+    for c in cases:
+        p = c.payload
+        if (isinstance(p, dict) and p.get("tool_name") == "Bash" and c.env_mode != "advise"
+                and c.committed_mode == "normal" and not c.policy):
+            changed = c.legacy is not None
+            yield replace(c, name=f"{c.name} [no allowlist]", policy=OPEN,
+                          want=c.legacy if changed else c.want, stderr_has="" if changed else c.stderr_has)
+
+
+def check_settings_deny():
+    """.claude/settings.json (two levels above this directory) denies every always-blocked sf prefix and no longer denies all of sf."""
+    path = os.path.join(HERE, "..", "..", ".claude", "settings.json")
+    name = "settings deny rules cover always-blocked sf commands"
+    try:
+        with open(path, encoding="utf-8") as f:
+            deny = json.load(f)["permissions"]["deny"]
+    except Exception as e:
+        print(f"[FAIL] {name}: cannot read {path}: {e}")
+        return False
+    prefixes = sf_deny_prefixes()
+    missing = [p for p in prefixes if f"Bash({p}*)" not in deny] + ([] if len(prefixes) >= 26 else ["<too few prefixes derived>"])
+    kept = [d for d in ("Bash(sfdx *)", "Bash(git push*)", "Bash(curl *)", "Bash(wget *)", "WebFetch(*)") if d not in deny]
+    ok = not missing and not kept and "Bash(sf *)" not in deny
+    detail = "" if ok else f" missing={missing} dropped={kept} blanket_sf_rule_present={'Bash(sf *)' in deny}"
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}{detail}")
+    return ok
 
 
 def add_symlinks(project):
@@ -557,8 +1068,9 @@ def report(case, code, err):
 
 def main():
     results = []
-    for case in CASES:
+    for case in CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + list(no_allowlist_variants(CASES)):
         results.append(report(case, *run_case(case)))
+    results.append(check_settings_deny())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
     results.append(report(NO_POLICY_CASE, *run_without_policy(NO_POLICY_CASE)))
     skipped = 0

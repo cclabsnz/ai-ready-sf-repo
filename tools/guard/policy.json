@@ -1,7 +1,7 @@
 {
   "version": 1,
   "blocked_commands": [
-    "(^|\\s|/)sf(dx)?(\\s|$)",
+    "(^|\\s|/)sfdx(\\s|$)",
     "\\bgit\\s+push\\b",
     "\\bgit\\s+commit\\b.*--amend",
     "\\bcurl\\b",
@@ -11,15 +11,75 @@
     "\\bInvoke-WebRequest\\b"
   ],
   "unknown_writers": [
-    "sh", "bash", "zsh", "eval", "xargs", "env", "nohup", "perl", "ruby", "node",
-    "exec", "command", "builtin", "source", ".", "sudo", "doas", "time", "timeout", "nice", "setsid", "stdbuf",
-    "rsync", "patch", "tar", "unzip", "awk", "gawk",
-    "ln", "link", "unlink", "trap", "alias", "coproc", "noglob", "nocorrect", "caffeinate", "arch", "script",
-    "osascript", "ed", "ex", "vi", "vim", "ditto", "plutil", "cpio", "pax",
-    "function", "export", "declare", "typeset", "readonly", "local", "set"
+    "sh",
+    "bash",
+    "zsh",
+    "eval",
+    "xargs",
+    "env",
+    "nohup",
+    "perl",
+    "ruby",
+    "node",
+    "exec",
+    "command",
+    "builtin",
+    "source",
+    ".",
+    "sudo",
+    "doas",
+    "time",
+    "timeout",
+    "nice",
+    "setsid",
+    "stdbuf",
+    "rsync",
+    "patch",
+    "tar",
+    "unzip",
+    "awk",
+    "gawk",
+    "ln",
+    "link",
+    "unlink",
+    "trap",
+    "alias",
+    "coproc",
+    "noglob",
+    "nocorrect",
+    "caffeinate",
+    "arch",
+    "script",
+    "osascript",
+    "ed",
+    "ex",
+    "vi",
+    "vim",
+    "ditto",
+    "plutil",
+    "cpio",
+    "pax",
+    "function",
+    "export",
+    "declare",
+    "typeset",
+    "readonly",
+    "local",
+    "set"
   ],
   "git_allowed": [
-    "status", "diff", "log", "show", "rev-parse", "ls-files", "check-ignore", "blame", "branch", "grep", "add", "commit"
+    "status",
+    "diff",
+    "log",
+    "show",
+    "rev-parse",
+    "ls-files",
+    "check-ignore",
+    "blame",
+    "branch",
+    "grep",
+    "add",
+    "commit"
   ],
   "fetch_allowlist": [
     "help.salesforce.com",
@@ -40,14 +100,31 @@
   "modes": {
     "advise": {
       "writes": [],
-      "bash_allow": ["read_only"]
+      "bash_allow": [
+        "read_only"
+      ]
     },
     "normal": {
-      "writes": ["ai-context/", "index/"]
+      "writes": [
+        "ai-context/",
+        "index/"
+      ],
+      "bash_allow": [
+        "read_only",
+        "framework_scripts"
+      ]
     },
     "build": {
-      "writes": ["ai-context/", "index/"],
-      "scoped_source": true
+      "writes": [
+        "ai-context/",
+        "index/"
+      ],
+      "scoped_source": true,
+      "bash_allow": [
+        "read_only",
+        "framework_scripts",
+        "dev_tooling"
+      ]
     },
     "maintain": {
       "writes": [
@@ -73,6 +150,11 @@
         ".ai-framework.json",
         "ai-context/",
         "index/"
+      ],
+      "bash_allow": [
+        "read_only",
+        "framework_scripts",
+        "maintainer_tools"
       ]
     }
   },
@@ -86,6 +168,78 @@
       "find(\\s+(?!-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)(\\s|$))\\S+)*",
       "python3?\\s+tools/index/query\\.py(\\s.*)?",
       "py\\s+-3\\s+tools/index/query\\.py(\\s.*)?"
+    ],
+    "framework_scripts": [
+      "(python3?|py -3) tools/index/(build_index|query|test_index)\\.py( .*)?",
+      "(python3?|py -3) tools/evals/run_(skill|agent)\\.py( .*)?",
+      "(python3?|py -3) tools/build/lint\\.py( .*)?",
+      "(python3?|py -3) tools/guard/(test_guard|scan_data)\\.py( .*)?",
+      "(python3?|py -3) framework/skills/[a-z0-9-]+/scripts/[a-z0-9_]+\\.py( .*)?"
+    ],
+    "dev_tooling": [
+      "git (add|commit)( .*)?",
+      "pnpm exec (prettier|eslint|jest|sfdx-lwc-jest)( .*)?",
+      "pnpm (run )?(lint|format)",
+      "pnpm (run )?test( -- .*)?"
+    ],
+    "maintainer_tools": [
+      "(cp|mv|mkdir|rm|touch|rmdir|sed|diff|cmp)( .*)?",
+      "tar -t[a-zA-Z]*( .*)?",
+      "(python3?|py -3) (tools|ai-context|framework|fixtures|demo)(/[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*)+\\.py( .*)?",
+      "(python3?|py -3) tools/build/render\\.py( .*)?",
+      "git (add|commit)( .*)?",
+      "pnpm exec (prettier|eslint|jest)( .*)?"
+    ]
+  },
+  "sf": {
+    "level_order": [
+      "none",
+      "offline",
+      "org-metadata",
+      "org-data"
+    ],
+    "levels": {
+      "none": [],
+      "offline": [
+        "sf (--version|version)",
+        "sf help( .*)?",
+        "sf project generate( .*)?",
+        "sf apex generate (class|trigger)( .*)?",
+        "sf lightning generate (component|app|event|interface|test)( .*)?",
+        "sf static-resource generate( .*)?",
+        "sf code-analyzer run( .*)?",
+        "sf project convert source( .*)?"
+      ],
+      "org-metadata": [
+        "sf sobject (describe|list)( .*)?",
+        "sf org list metadata( .*)?",
+        "sf org list metadata-types( .*)?",
+        "sf project retrieve preview( .*)?"
+      ],
+      "org-data": [
+        "sf data query( .*)?"
+      ]
+    },
+    "org_levels": [
+      "org-metadata",
+      "org-data"
+    ],
+    "allowed_orgs": [],
+    "mode_level": {
+      "advise": "none",
+      "normal": "offline",
+      "build": "offline",
+      "maintain": "offline"
+    },
+    "always_blocked": [
+      "sf (auth|login|logout)( .*)?",
+      "sf org (login|logout|display|create|delete|open|resume|generate password|assign permset)( .*)?",
+      "sf project deploy( .*)?",
+      "sf project retrieve start( .*)?",
+      "sf project delete( .*)?",
+      "sf (deploy|retrieve)( .*)?",
+      "sf apex run( .*)?",
+      "sf data (create|update|upsert|delete|import|export|bulk|resume)( .*)?"
     ]
   }
 }

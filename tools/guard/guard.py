@@ -8,8 +8,10 @@ Exit codes (Claude Code semantics):
   never deliberately exits with another code.
 
 Policy:
-  - No org or network commands: sf, sfdx, git push, curl, wget, ssh.
+  - No network commands (git push, curl, wget, ssh) and no sfdx. The Salesforce CLI (sf) runs only at the
+    mode's level (policy.json sf.mode_level), never an always_blocked command.
   - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
+  - Outside advise, every Bash command must also be on the mode's bash_allow list.
   - WebFetch only to the allowlist.
   - Mode advise blocks every write and every Bash call except read-only
     ones (the kill switch). The committed .claude/settings.json is the
@@ -262,7 +264,31 @@ def segment_matches(seg, patterns):
     return any(re.fullmatch(p, text) for p in patterns)
 
 
-def advise_block_reason(cmd, patterns):
+SCRIPT_ROOTS = ("tools/", "framework/", "fixtures/", "demo/", "ai-context/")
+
+
+def cwd_bound_reason(segments, root, cwd):
+    """None unless a script or pnpm segment runs from elsewhere than the project root.
+
+    Scripts are named relative to the working directory, so a cd (or a payload cwd) into ai-context/ can make
+    "tools/index/query.py" resolve to a script the assistant wrote. The script must also resolve, symlinks
+    included, under one of SCRIPT_ROOTS.
+    """
+    after_cd = False
+    for seg in segments:
+        words = segment_command(seg)
+        base = command_base(words)
+        if PYTHON.fullmatch(base) or base == "pnpm" or sf_words(seg):
+            if cwd != root or after_cd:
+                return "scripts, pnpm and the Salesforce CLI run only from the project root, with no cd before them."
+            script = next((a for a in words[1:] if not a.startswith("-")), None) if PYTHON.fullmatch(base) else None
+            if PYTHON.fullmatch(base) and not ((rel := rel_path(root, script or "")) and rel.startswith(SCRIPT_ROOTS)):
+                return f"the script must resolve under {SCRIPT_ROOTS}."
+        after_cd = after_cd or command_base(command_words(seg)) in CD_COMMANDS
+    return None
+
+
+def advise_block_reason(cmd, patterns, root=None, cwd=None):
     """None if every segment of cmd is read-only, else the reason."""
     segments = parse_bash(cmd)
     if segments is None:
@@ -277,7 +303,7 @@ def advise_block_reason(cmd, patterns):
             return "environment assignments before a command are not allowed."
         if not segment_matches(seg, patterns):
             return "only read-only commands are allowed."
-    return None
+    return cwd_bound_reason(segments, root, cwd)
 
 
 UNKNOWN_WRITE_MSG = "cannot determine what this command writes; run it as a human"
@@ -287,12 +313,12 @@ GLOB_CHARS = re.compile(r"[*?\[]")
 PYTHON = re.compile(r"python[0-9.]*|py")
 CHMOD_MODE = re.compile(r"[0-7]{3,4}|[ugoa]*[-+=][rwxXst]*(,[ugoa]*[-+=][rwxXst]*)*")
 WALK_LIMIT = 20000  # entries a recursive command may be expanded to before we give up and call it unknown
-MODELLED = {"cp", "mv", "install", "rm", "mkdir", "touch", "truncate", "chmod", "chown", "chgrp", "dd", "tee", "sed",
-            "find", "sort", "uniq", "git"}
+MODELLED = {"cp", "mv", "install", "rm", "rmdir", "mkdir", "touch", "truncate", "chmod", "chown", "chgrp", "dd", "tee", "sed",
+            "find", "sort", "uniq", "git", "sf"}
 # Per command: single-dash flags that take no value, and single-dash options that take the next word.
 # Anything else is an option we do not model, and an unmodelled option can change which files are written.
 SHORT_OPTS = {
-    "rm": ("rRfivId", ""), "mkdir": ("pv", "m"), "touch": ("acmh", "dtr"), "truncate": ("co", "sr"),
+    "rm": ("rRfivId", ""), "rmdir": ("v", ""), "mkdir": ("pv", "m"), "touch": ("acmh", "dtr"), "truncate": ("co", "sr"),
     "chmod": ("Rvcf", ""), "chown": ("RvcfhHLP", ""), "chgrp": ("RvcfhHLP", ""), "tee": ("aip", ""),
     "cp": ("RrafipvnuLPHxdTbZ", "St"), "mv": ("fivnuTbZ", "St"), "install": ("bCcdDpsTvZ", "mogSt"),
 }
@@ -553,12 +579,155 @@ def copy_targets(base, ops, opts, cwd):
     return out
 
 
+TAR_LIST = re.compile(r"-t[vzjJaf]*")
+# No leading "-" (an option), no ":" (host:file opens a remote shell), nothing the shell would rewrite.
+TAR_OPERAND = re.compile(r"[A-Za-z0-9_./@%+=,][A-Za-z0-9_./@%+=,-]*")
+
+
+def tar_list_only(args):
+    """True for "tar -t[vzjJaf]* operand...": list mode with no option that runs a program (--to-command, --checkpoint-action, -I)."""
+    return bool(args) and bool(TAR_LIST.fullmatch(args[0])) and all(TAR_OPERAND.fullmatch(a) for a in args[1:])
+
+
+SF_DIR_FLAGS = ("--output-dir", "-d")
+# -f and --file name an input on most commands; treating them as writes is conservative (an input under ai-context/ still passes).
+SF_PATH_FLAGS = SF_DIR_FLAGS + ("--output-file", "--file", "-f")
+
+
+def sf_targets(words):
+    """Paths an sf command writes through its output and file flags, or None when they cannot be known.
+
+    A generate or convert command writes into --output-dir/-d; without one the CLI picks a default
+    under the current directory, so that counts as unknown. So does a code-analyzer config file.
+    """
+    args, writes = words[1:], any(w in ("generate", "convert") for w in words[1:4])
+    analyzer = words[1:3] == ["code-analyzer", "run"]
+    out, has_dir, i = [], False, 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        name, eq, val = a.partition("=")
+        if analyzer and (name == "--config-file" or (a[:1] == "-" and a[:2] == "-c")):
+            return None
+        if name in SF_PATH_FLAGS:
+            if not eq:
+                if i >= len(args):
+                    return None
+                val, i = args[i], i + 1
+            out.append(val)
+            has_dir = has_dir or name in SF_DIR_FLAGS
+        elif a[:1] == "-" and a[:2] in ("-d", "-f"):
+            out.append(a[2:].lstrip("="))  # -dVALUE and -fVALUE
+            has_dir = has_dir or a[:2] == "-d"
+        elif writes and name in ("-n", "--name"):
+            if not eq:
+                if i >= len(args):
+                    return None
+                val, i = args[i], i + 1
+            # A name that is a path would move the generated files out of --output-dir.
+            if "/" in val or "\\" in val or ".." in val:
+                return None
+    return None if writes and not has_dir else out
+
+
+PNPM_WRITE_FLAGS = {"--write", "-w", "--fix"}
+# Options that load code or config from a path we do not model.
+PNPM_LOADERS = ("--config", "--plugin", "--rulesdir", "--resolve-plugins-relative-to")
+PNPM_OUT_FLAGS = ("--output-file", "-o", "--cache-location")
+JEST_TOOLS = ("jest", "sfdx-lwc-jest")
+# yargs-parser rewrites flag names (case, kebab, "_", doubled dashes), so jest flags are an exact-spelling allowlist, not a denylist.
+JEST_FLAGS = ("--coverage", "--ci", "--silent", "--verbose", "--json", "--runInBand", "--passWithNoTests", "--no-cache",
+              "--bail", "--detectOpenHandles", "--colors", "-i", "-b", "-e")
+JEST_VALUE_FLAGS = ("--maxWorkers", "--bail", "--testNamePattern", "-t", "-w")
+JEST_PATH_FLAGS = ("--coverageDirectory", "--outputFile", "--cacheDirectory")
+
+
+def jest_targets(opts):
+    """Paths a jest or sfdx-lwc-jest run writes, or None when a flag is off the allowlist.
+
+    Operands are test path patterns; running a test file the assistant wrote is an acknowledged limit.
+    """
+    out, i = [], 0
+    while i < len(opts):
+        a = opts[i]
+        i += 1
+        name, eq, val = a.partition("=")
+        if a == "--" or not a.startswith("-"):
+            continue
+        if a in JEST_FLAGS:
+            continue
+        valued = name in JEST_VALUE_FLAGS or name in JEST_PATH_FLAGS
+        if not valued or (eq and (not val or not name.startswith("--"))):
+            return None
+        if not eq:
+            # A value never starts with "-": yargs would read that word as the next flag, so it is checked as one.
+            if i >= len(opts) or opts[i].startswith("-"):
+                return None
+            val, i = opts[i], i + 1
+        if name in JEST_PATH_FLAGS:
+            out.append(val)
+    return out
+
+
+def pnpm_targets(args):
+    """Paths "pnpm exec <tool>" or "pnpm test" writes, or None when unknown.
+
+    With --write, -w or --fix (or --write=X) every non-option operand is a target (a directory recursively).
+    A config or plugin option can run any code; -c is --check for prettier but --config elsewhere.
+    jest and sfdx-lwc-jest go through jest_targets.
+    What a package.json script does stays an acknowledged limit, but flags after "--" on "pnpm test" go to jest.
+    """
+    if any(any(c in a for c in "${}") or a.startswith("~") for a in args):
+        return None
+    if args[:1] == ["exec"] and len(args) > 1:
+        tool, opts = args[1], args[2:]
+    elif args[:1] in (["test"], ["run"]) and "test" in args[:2] and "--" in args:
+        tool, opts = "jest", args[args.index("--") + 1:]
+    else:
+        return [], False
+    if tool in JEST_TOOLS:
+        found = jest_targets(opts)
+        return None if found is None else (found, False)
+    out, operands, write, i = [], [], False, 0
+    while i < len(opts):
+        a = opts[i]
+        i += 1
+        name, eq, val = a.partition("=")
+        if a == "--":
+            operands += opts[i:]
+            break
+        if name in PNPM_LOADERS or name.startswith("--plugin") or (a[:2] == "-c" and tool != "prettier"):
+            return None
+        if tool == "eslint" and (name == "--format" or a[:2] == "-f" and a[:3] != "--f"):
+            fmt = val if eq else (a[2:] if a[:2] == "-f" and a != "-f" else (opts[i] if i < len(opts) else ""))
+            if not eq and (a in ("-f", "--format")):
+                i += 1
+            if "/" in fmt or fmt.endswith((".js", ".cjs", ".mjs")):
+                return None
+            continue
+        if name in PNPM_OUT_FLAGS:
+            if not eq:
+                if i >= len(opts):
+                    return None
+                val, i = opts[i], i + 1
+            out.append(val)
+        elif name in PNPM_WRITE_FLAGS:
+            write = True
+            if eq:
+                operands.append(val)
+        elif not a.startswith("-"):
+            operands.append(a)
+    return (out + operands, True) if write else (out, False)
+
+
 def command_targets(words, policy, cwd):
     """(paths the command writes, whether directories among them are written recursively), or None when unknown."""
     name, args = words[0], words[1:]
     if any(c in name for c in "${}*?") or ("[" in name and name != "[") or name.startswith(("~", "=")) or name == "-":
         return None  # the shell decides which program runs
     base = command_base(words)
+    if base == "tar" and tar_list_only(args):
+        return [], False
     if base in policy["unknown_writers"]:
         return None
     if PYTHON.fullmatch(base):
@@ -574,12 +743,17 @@ def command_targets(words, policy, cwd):
             elif not a.startswith("-"):
                 return [], False
         return None
+    if base == "pnpm":
+        return pnpm_targets(args)
     if base not in MODELLED:
         return [], False
     # A word the shell rewrites can be an option or a path that we never see: the whole segment is unknown.
     for a in args:
         if any(c in a for c in "${}") or a.startswith("~") or (GLOB_CHARS.search(a) and ".." in a.split("/")):
             return None
+    if base == "sf":
+        found = sf_targets(words)
+        return None if found is None else (found, False)
     if base == "git":
         return ([], False) if git_allowed(args, policy) else None
     if base == "find":
@@ -672,11 +846,118 @@ def protected_overlap(rel, policy):
     return None
 
 
+UNPARSABLE_MSG = "the command cannot be parsed safely (unbalanced quote, substitution or subshell)."
+SF_NAMES = {"sf", "sf.cmd", "sf.exe"}
+
+
+def sf_words(seg):
+    """The words of a segment that runs the Salesforce CLI (shell keywords and assignments before it skipped), else None."""
+    words = command_words(seg)
+    while words and ASSIGNMENT.match(words[0]):
+        words = words[1:]
+    return words if command_base(words) in SF_NAMES else None
+
+
+SF_ORG_LONG = {"--target-org", "--targetdevhubusername", "--from-org", "--source-org", "--targetusername", "--target-dev-hub", "--target-dev-hub-username"}
+SF_ORG_SHORT = ("-o", "-u", "-v")
+SF_WORD = re.compile(r"[a-z][a-z0-9-]*")
+
+
+def sf_org_values(words):
+    """Every org named by an org flag, in the forms "-o X", "--target-org X", "--target-org=X", "-o=X" and "-oX".
+
+    None stands for a flag with no value.
+    """
+    orgs = []
+    for i, w in enumerate(words):
+        name, eq, val = w.partition("=")
+        if w in SF_ORG_LONG or w in SF_ORG_SHORT:
+            orgs.append(words[i + 1] if i + 1 < len(words) else None)
+        elif name in SF_ORG_LONG and eq:
+            orgs.append(val)
+        elif w[:2] in SF_ORG_SHORT:
+            orgs.append(w[2:].lstrip("="))
+    return orgs
+
+
+def sf_help_only(words):
+    """True for exactly "sf <plain words> -h" or "--help": no flag, no "--", no quoted word, so nothing else can run."""
+    return len(words) >= 3 and words[-1] in ("-h", "--help") and all(re.fullmatch(r"[a-z][a-z-]*", w) for w in words[1:-1])
+
+
+def sf_block_reason(words, mode, policy):
+    """None if this Salesforce CLI command may run in this mode, else the reason. Write targets are checked separately."""
+    sf = policy["sf"]
+    if words[0] != "sf":
+        return "run the Salesforce CLI as plain 'sf', not as a path or another spelling."
+    text = " ".join(words)
+    if any(re.fullmatch(p, text) for p in sf["always_blocked"]):
+        return "this Salesforce CLI command is always blocked: it changes an org, a credential or org data. Hand it to a human."
+    if any(w == "--flags-dir" or w.startswith("--flags-dir=") for w in words):
+        return "this Salesforce CLI command is always blocked: --flags-dir reads flags from files the guard cannot see."
+    for w in words[1:]:
+        name = w.partition("=")[0]
+        # Defence in depth: the CLI may accept an abbreviation or alias that we do not list ("--targe").
+        bare = name.lstrip("-").lower()
+        abbreviation = name.startswith("--") and len(bare) >= 2 and any(f[2:].startswith(bare) for f in SF_ORG_LONG)
+        if (name.startswith("-") and name not in SF_ORG_LONG and name not in SF_ORG_SHORT
+                and (abbreviation or any(k in bare for k in ("target", "org", "username")))):
+            return f"flag {name!r} looks like an org flag but is not a known one; use --target-org with an alias in sf.allowed_orgs."
+    # The words that name the command, up to the first flag. "topic:command" spellings and the force topic reach commands the patterns do not describe.
+    named = []
+    for w in words[1:]:
+        if w.startswith("-"):
+            break
+        named.append(w)
+    if any(not SF_WORD.fullmatch(w) for w in named) or named[:1] == ["force"]:
+        return "Salesforce CLI command words must be plain lowercase words: no 'topic:command' spelling, no force topic, no quoted words."
+    order = sf["level_order"]
+    level = sf["mode_level"].get(mode)
+    if level not in order:
+        level = order[0]  # an unknown level or mode gets the lowest one
+    hits = [lv for lv in order[: order.index(level) + 1] if any(re.fullmatch(p, text) for p in sf["levels"][lv])]
+    if not hits and not (sf_help_only(words) and level != order[0]):
+        return f"Salesforce CLI command not allowed at level {level} (tools/guard/policy.json sf.mode_level)"
+    orgs = sf_org_values(words)
+    if any(lv in sf["org_levels"] for lv in hits):
+        if not orgs or any(o not in sf["allowed_orgs"] for o in orgs):
+            return "org commands need --target-org with an alias listed in sf.allowed_orgs"
+    elif orgs:
+        return "org flags are only allowed on org-level commands, with an alias listed in sf.allowed_orgs"
+    return None
+
+
+def allowlist_block_reason(segments, mode, policy, root, cwd):
+    """None if every segment is on the mode's allowlist, else the reason. A segment that passed the sf checks counts as listed."""
+    groups = policy["modes"].get(mode, {}).get("bash_allow")
+    msg = f"command not on the {mode} allowlist (tools/guard/policy.json)"
+    if groups is None:
+        return msg
+    patterns = [p for g in groups for p in policy["bash_groups"][g]]
+    for seg in segments:
+        words = sf_words(seg)
+        if not (words and words[0] == "sf") and not segment_matches(seg, patterns):
+            return msg
+    return cwd_bound_reason(segments, root, cwd)
+
+
+def bash_block_reason(cmd, mode, policy, scope, root, cwd):
+    """None if the command may run in this mode (not advise), else the reason: sf checks, then write targets, then the allowlist."""
+    segments = parse_bash(cmd, strict=False)
+    if segments is None:
+        return UNPARSABLE_MSG
+    for seg in segments:
+        words = sf_words(seg)
+        if words and (reason := sf_block_reason(words, mode, policy)):
+            return reason
+    return bash_write_block_reason(cmd, mode, policy, scope, root, cwd) or allowlist_block_reason(segments, mode, policy, root, cwd)
+
+
 def bash_write_block_reason(cmd, mode, policy, scope, root, cwd):
     """None if every write the command makes is allowed in this mode, else the reason. cwd is where Bash runs."""
     segments = parse_bash(cmd, strict=False)
     if segments is None:
-        return "the command cannot be parsed safely (unbalanced quote, substitution or subshell)."
+        return UNPARSABLE_MSG
     after_cd = False
     for seg in segments:
         targets = write_targets(seg, policy, cwd)
@@ -716,7 +997,9 @@ def main():
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
         if mode == "advise":
             patterns = [p for g in policy["modes"]["advise"]["bash_allow"] for p in policy["bash_groups"][g]]
-            reason = advise_block_reason(cmd, patterns)
+            cwd = payload.get("cwd")
+            cwd = root if cwd is None else (os.path.realpath(cwd) if isinstance(cwd, str) else None)
+            reason = advise_block_reason(cmd, patterns, root, cwd)
             if reason:
                 block(f"framework is in ADVISE mode: {reason} Output recommendations, do not act.")
         else:
@@ -729,7 +1012,7 @@ def main():
             cwd = os.path.realpath(cwd)
             if cwd != root and not cwd.startswith(root + os.sep):
                 block(f"the shell's working directory {cwd!r} is outside the project; run it as a human.")
-            reason = bash_write_block_reason(cmd, mode, policy, active_scope(root), root, cwd)
+            reason = bash_block_reason(cmd, mode, policy, active_scope(root), root, cwd)
             if reason:
                 block(reason)
 
