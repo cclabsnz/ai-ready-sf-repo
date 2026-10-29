@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "blocked_commands": [
+    "(^|\\s|/)sf(dx)?(\\s|$)",
+    "\\bgit\\s+push\\b",
+    "\\bgit\\s+commit\\b.*--amend",
+    "\\bcurl\\b",
+    "\\bwget\\b",
+    "\\bssh\\b",
+    "\\bscp\\b",
+    "\\bInvoke-WebRequest\\b"
+  ],
+  "fetch_allowlist": [
+    "help.salesforce.com",
+    "developer.salesforce.com",
+    "releasenotes.docs.salesforce.com",
+    "docs.ncino.com"
+  ],
+  "modes": {
+    "normal": {
+      "writes": ["ai-context/", "index/"]
+    }
+  },
+  "bash_groups": {
+    "read_only": [
+      "cat",
+      "ls",
+      "dir",
+      "git\\s+(status|diff|log|show|rev-parse)",
+      "python3?\\s+tools/index/query\\.py",
+      "py\\s+-3\\s+tools/index/query\\.py"
+    ]
+  }
+}

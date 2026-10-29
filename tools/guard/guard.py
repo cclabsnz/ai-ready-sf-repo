@@ -13,32 +13,57 @@ Policy:
   - WebFetch only to the allowlist.
   - AI_FRAMEWORK_MODE=advise blocks every write and every Bash call
     except read-only ones (the kill switch).
+
+The rules live in policy.json next to this file. Any internal error,
+including an unreadable policy, blocks (exit 2): the hook runner treats
+every other exit code as a warning and would let the call through.
 """
 import json
 import os
 import re
 import sys
 
-BLOCKED_CMDS = [
-    r"(^|\s|/)sf(dx)?(\s|$)",
-    r"\bgit\s+push\b",
-    r"\bgit\s+commit\b.*--amend",
-    r"\bcurl\b", r"\bwget\b", r"\bssh\b", r"\bscp\b",
-    r"\bInvoke-WebRequest\b",
-]
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-ALLOWED_WRITE_PREFIXES = ("ai-context/", "index/")
-FETCH_ALLOWLIST = ("help.salesforce.com", "developer.salesforce.com", "releasenotes.docs.salesforce.com",
-                   "docs.ncino.com")
-READ_ONLY_BASH = re.compile(r"^\s*(cat|ls|dir|git\s+(status|diff|log|show|rev-parse)|python3?\s+tools/index/query\.py|py\s+-3\s+tools/index/query\.py)\b")
+# Found through __file__ because the wrapper runs us with -I (no cwd, no script dir on sys.path).
+POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.json")
 
 
 def block(msg):
-    sys.stderr.write(f"BLOCKED by tools/guard/guard.py: {msg}\n")
+    try:
+        sys.stderr.write(f"BLOCKED by tools/guard/guard.py: {msg}\n")
+        sys.stderr.flush()
+    except BaseException:
+        # Closed or broken stderr must not turn a block into another exit code. _exit skips
+        # the interpreter's shutdown flush, which would fail again and exit 120.
+        os._exit(2)
     sys.exit(2)
 
 
+def load_policy(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            policy = json.load(f)
+    except (OSError, ValueError) as e:
+        block(f"policy unreadable: {e}; failing closed")
+    if not isinstance(policy, dict) or policy.get("version") != 1:
+        block("policy unreadable: version is not 1; failing closed")
+    return policy
+
+
+def project_dir():
+    return os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def rel_path(root, path):
+    """Path relative to root with ".." and symlinks resolved, so neither can carry a write out of ai-context/."""
+    try:
+        return os.path.relpath(os.path.realpath(os.path.join(root, path)), root).replace("\\", "/")
+    except ValueError:  # Windows: path is on a different drive from the repo
+        return None
+
+
 def main():
+    policy = load_policy(POLICY_PATH)
     try:
         payload = json.load(sys.stdin)
     except Exception:
@@ -49,33 +74,38 @@ def main():
 
     if tool == "Bash":
         cmd = inp.get("command", "")
-        for pat in BLOCKED_CMDS:
+        for pat in policy["blocked_commands"]:
             if re.search(pat, cmd):
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
-        if mode == "advise" and not READ_ONLY_BASH.match(cmd):
+        read_only = re.compile(r"^\s*(" + "|".join(policy["bash_groups"]["read_only"]) + r")\b")
+        if mode == "advise" and not read_only.match(cmd):
             block("framework is in ADVISE mode: only read-only commands are allowed. Output recommendations, do not act.")
 
     elif tool in WRITE_TOOLS:
         path = (inp.get("file_path") or inp.get("path") or "").replace("\\", "/")
-        # Resolve ".." and symlinks against the real cwd, so neither can carry a write out of ai-context/.
-        root = os.path.realpath(os.getcwd())
-        try:
-            rel = os.path.relpath(os.path.realpath(os.path.join(root, path)), root).replace("\\", "/")
-        except ValueError:  # Windows: path is on a different drive from the repo
+        rel = rel_path(project_dir(), path)
+        if rel is None:
             block(f"write to {path!r} is on a different drive from the repo.")
         if mode == "advise":
             block("framework is in ADVISE mode: no writes. Output the content in your reply instead.")
-        if not rel.startswith(ALLOWED_WRITE_PREFIXES):
-            block(f"write to {rel!r} is outside {ALLOWED_WRITE_PREFIXES}. The build is read-only; hand code to the squad.")
+        allowed = tuple(policy["modes"]["normal"]["writes"])
+        if not rel.startswith(allowed):
+            block(f"write to {rel!r} is outside {allowed}. The build is read-only; hand code to the squad.")
 
     elif tool == "WebFetch":
         url = inp.get("url", "")
         host = re.sub(r"^https?://", "", url).split("/")[0].lower()
-        if not any(host == h or host.endswith("." + h) for h in FETCH_ALLOWLIST):
-            block(f"fetch to {host!r} is not on the allowlist {FETCH_ALLOWLIST}.")
+        allowlist = policy["fetch_allowlist"]
+        if not any(host == h or host.endswith("." + h) for h in allowlist):
+            block(f"fetch to {host!r} is not on the allowlist {tuple(allowlist)}.")
 
     sys.exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException:
+        block("internal error; failing closed")
