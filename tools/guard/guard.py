@@ -9,10 +9,11 @@ Exit codes (Claude Code semantics):
 
 Policy:
   - No org or network commands: sf, sfdx, git push, curl, wget, ssh.
-  - Writes only under ai-context/ and index/.
+  - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
   - WebFetch only to the allowlist.
-  - AI_FRAMEWORK_MODE=advise blocks every write and every Bash call
-    except read-only ones (the kill switch).
+  - Mode advise blocks every write and every Bash call except read-only
+    ones (the kill switch). The committed .claude/settings.json is the
+    ceiling: committed advise beats any local AI_FRAMEWORK_MODE.
 
 The rules live in policy.json next to this file. Any internal error,
 including an unreadable policy, blocks (exit 2): the hook runner treats
@@ -23,6 +24,8 @@ import os
 import re
 import sys
 
+MODES = ("advise", "normal", "build", "maintain")
+NO_SCOPE_MSG = "no active story scope; run tools/impacts/start.py <storyId> (WS8)"
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Found through __file__ because the wrapper runs us with -I (no cwd, no script dir on sys.path).
 POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.json")
@@ -62,6 +65,56 @@ def rel_path(root, path):
         return None
 
 
+def committed_mode(root):
+    """The mode committed in settings.json. Anything unreadable or unknown is advise: the kill switch fails safe."""
+    try:
+        with open(os.path.join(root, ".claude", "settings.json"), encoding="utf-8") as f:
+            mode = json.load(f)["env"]["AI_FRAMEWORK_MODE"]
+    except Exception:
+        return "advise"
+    return mode if isinstance(mode, str) and mode in MODES else "advise"
+
+
+def resolve_mode(committed, local):
+    """Committed advise always wins. Only a committed normal lets a local override pick the mode."""
+    if committed == "advise":
+        return "advise"
+    if committed == "normal":
+        if local and local not in MODES:
+            block(f"unknown AI_FRAMEWORK_MODE {local!r}; expected one of {MODES}. Failing closed.")
+        return local or "normal"
+    return "advise"  # build and maintain are personal; a committed one is not trusted
+
+
+def active_scope(root):
+    return []  # WS8 fills this from the active story
+
+
+def write_block_reason(rel, mode, policy, scope):
+    """None if the write is allowed, else the reason. Always-blocked paths are checked before the mode's list."""
+    # Lowercased so a case-insensitive filesystem cannot reach .GIT/ or Tools/Guard/.
+    low = rel.lower()
+    # GitHub honours CODEOWNERS in docs/ too, so match the basename anywhere in the tree.
+    if low.rsplit("/", 1)[-1] == "codeowners":
+        return f"write to {rel!r} is never allowed (CODEOWNERS file). Guard, settings, CI and git internals change by human-applied patch."
+    for p in policy["always_blocked_writes"]:
+        if (low + "/").startswith(p.lower()) or low.startswith(p.lower()):
+            return f"write to {rel!r} is never allowed (matches {p!r}). Guard, settings, CI and git internals change by human-applied patch."
+    cfg = policy["modes"].get(mode)
+    if cfg is None:
+        return f"no write policy for mode {mode!r}; failing closed."
+    allowed = tuple(cfg["writes"])
+    if allowed and rel.startswith(allowed):
+        return None
+    if mode == "advise":
+        return "framework is in ADVISE mode: no writes. Output the content in your reply instead."
+    if cfg.get("scoped_source"):
+        if scope and rel.startswith(tuple(scope)):
+            return None
+        return NO_SCOPE_MSG
+    return f"write to {rel!r} is outside {allowed} in {mode.upper()} mode. The build is read-only; hand code to the squad."
+
+
 def main():
     policy = load_policy(POLICY_PATH)
     try:
@@ -70,7 +123,8 @@ def main():
         block("could not parse hook input; failing closed")
     tool = payload.get("tool_name", "")
     inp = payload.get("tool_input", {}) or {}
-    mode = os.environ.get("AI_FRAMEWORK_MODE", "normal").lower()
+    root = project_dir()
+    mode = resolve_mode(committed_mode(root), os.environ.get("AI_FRAMEWORK_MODE", "").strip().lower())
 
     if tool == "Bash":
         cmd = inp.get("command", "")
@@ -83,14 +137,12 @@ def main():
 
     elif tool in WRITE_TOOLS:
         path = (inp.get("file_path") or inp.get("path") or "").replace("\\", "/")
-        rel = rel_path(project_dir(), path)
+        rel = rel_path(root, path)
         if rel is None:
             block(f"write to {path!r} is on a different drive from the repo.")
-        if mode == "advise":
-            block("framework is in ADVISE mode: no writes. Output the content in your reply instead.")
-        allowed = tuple(policy["modes"]["normal"]["writes"])
-        if not rel.startswith(allowed):
-            block(f"write to {rel!r} is outside {allowed}. The build is read-only; hand code to the squad.")
+        reason = write_block_reason(rel, mode, policy, active_scope(root))
+        if reason:
+            block(reason)
 
     elif tool == "WebFetch":
         url = inp.get("url", "")

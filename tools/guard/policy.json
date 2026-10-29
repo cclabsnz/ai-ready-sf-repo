@@ -16,9 +16,52 @@
     "releasenotes.docs.salesforce.com",
     "docs.ncino.com"
   ],
+  "always_blocked_writes": [
+    "tools/guard/",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".github/workflows/",
+    ".github/hooks/",
+    ".github/CODEOWNERS",
+    "CODEOWNERS",
+    ".git/"
+  ],
   "modes": {
+    "advise": {
+      "writes": []
+    },
     "normal": {
       "writes": ["ai-context/", "index/"]
+    },
+    "build": {
+      "writes": ["ai-context/", "index/"],
+      "scoped_source": true
+    },
+    "maintain": {
+      "writes": [
+        "framework/",
+        "tools/",
+        "fixtures/",
+        "demo/",
+        "docs/",
+        "impacts/",
+        "CLAUDE.md",
+        ".claude/knowledge/",
+        ".claude/skills/",
+        ".claude/agents/",
+        ".github/instructions/",
+        ".github/knowledge/",
+        ".github/skills/",
+        ".github/agents/",
+        "README.md",
+        "HANDOFF.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        ".ai-framework.json",
+        "ai-context/",
+        "index/"
+      ]
     }
   },
   "bash_groups": {

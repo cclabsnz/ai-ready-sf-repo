@@ -28,7 +28,7 @@ class Case:
     committed_mode: str = "normal"
     env_mode: str | None = None
     dirty: tuple[str, ...] = ()
-    files: dict[str, str] = field(default_factory=dict)
+    files: dict[str, str | None] = field(default_factory=dict)
     stderr_has: str = ""
 
 
@@ -61,6 +61,37 @@ CASES = [
     Case("advise mode blocks writes", write("ai-context/x/y.md"), 2, committed_mode="normal", env_mode="advise"),
     Case("advise mode allows git status", bash("git status"), 0, committed_mode="normal", env_mode="advise"),
     Case("malformed hook JSON fails closed", "not json", 2, stderr_has="failing closed"),
+    Case("committed advise beats local maintain", write("docs/x.md"), 2, committed_mode="advise", env_mode="maintain"),
+    Case("committed advise beats local normal", write("ai-context/x.md"), 2, committed_mode="advise", env_mode="normal"),
+    Case("local maintain may write docs", write("docs/x.md"), 0, env_mode="maintain"),
+    Case("local maintain may write rendered skills", write(".claude/skills/a/SKILL.md"), 0, env_mode="maintain"),
+    Case("maintain may write tools/index", write("tools/index/x.py"), 0, env_mode="maintain"),
+    Case("maintain may not write tools/guard", write("tools/guard/guard.py"), 2, env_mode="maintain"),
+    Case("maintain may not write workflows", write(".github/workflows/ci.yml"), 2, env_mode="maintain"),
+    Case("maintain may not write force-app", write("force-app/main/default/classes/A.cls"), 2, env_mode="maintain"),
+    Case("no mode may write settings.local.json", write(".claude/settings.local.json"), 2, env_mode="maintain"),
+    Case("no mode may write .git/hooks", write(".git/hooks/pre-commit"), 2, env_mode="maintain"),
+    Case("normal may not write docs", write("docs/x.md"), 2),
+    Case("build without active story may not write force-app", write("force-app/main/default/classes/A.cls"), 2,
+         env_mode="build", stderr_has="no active story scope"),
+    Case("build may write ai-context", write("ai-context/1-x/change.md"), 0, env_mode="build"),
+    Case("unknown local mode fails closed", write("ai-context/x.md"), 2, env_mode="yolo", stderr_has="unknown AI_FRAMEWORK_MODE"),
+    Case("committed build is treated as advise", write("ai-context/x.md"), 2, committed_mode="build"),
+    Case("unreadable settings.json is treated as advise", write("ai-context/x.md"), 2,
+         files={".claude/settings.json": "{not json"}),
+    Case("committed unknown value is treated as advise", write("ai-context/x.md"), 2, committed_mode="yolo"),
+    Case("absent settings.json is treated as advise", write("ai-context/x.md"), 2, files={".claude/settings.json": None}),
+    Case("maintain may not write docs/CODEOWNERS", write("docs/CODEOWNERS"), 2, env_mode="maintain"),
+    Case("maintain may not write nested CODEOWNERS", write("framework/x/CODEOWNERS"), 2, env_mode="maintain"),
+    Case("maintain may not write lowercase nested codeowners", write("docs/codeowners"), 2, env_mode="maintain"),
+    Case("maintain may not write root CODEOWNERS", write("CODEOWNERS"), 2, env_mode="maintain"),
+    Case("maintain may not write .github/CODEOWNERS", write(".github/CODEOWNERS"), 2, env_mode="maintain"),
+    Case("maintain may not write settings.json", write(".claude/settings.json"), 2, env_mode="maintain"),
+    Case("maintain may not write .github/hooks", write(".github/hooks/x"), 2, env_mode="maintain"),
+    Case("always-blocked folds case: Tools/Guard", write("Tools/Guard/guard.py"), 2, env_mode="maintain"),
+    Case("always-blocked folds case: .GIT", write(".GIT/hooks/pre-commit"), 2, env_mode="maintain"),
+    Case("prefix boundary: tools/guardX is not tools/guard/", write("tools/guardX/x.py"), 0, env_mode="maintain"),
+    Case("prefix boundary: tools/guard itself is blocked", write("tools/guard"), 2, env_mode="maintain"),
 ]
 
 # A payload the guard ALLOWS, so exit 2 can only come from the wrapper's fail-closed branch.
@@ -98,7 +129,10 @@ def make_project(committed_mode, files):
         subprocess.run(["git", "init", "-q"], cwd=project, check=True, capture_output=True)
         put(project, ".claude/settings.json", json.dumps({"env": {"AI_FRAMEWORK_MODE": committed_mode}}))
         for rel, text in files.items():
-            put(project, rel, text)
+            if text is None:  # None means the file must be absent
+                os.remove(os.path.join(project, *rel.split("/")))
+            else:
+                put(project, rel, text)
         for d in ("ai-context", "index", "force-app/main/default/classes"):
             os.makedirs(os.path.join(project, *d.split("/")), exist_ok=True)
         for keep in ("tools/guard/.keep", ".github/workflows/.keep"):
