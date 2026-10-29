@@ -1,0 +1,4 @@
+*.sh text eol=lf
+*.cmd text eol=crlf
+tools/guard/*.json text eol=lf
+tools/guard/*.py text eol=lf

@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/tools/guard/guard.sh",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/tools/guard/guard.sh\"",
             "timeout": 10
           }
         ]

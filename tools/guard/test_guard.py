@@ -19,6 +19,15 @@ from dataclasses import dataclass, field, replace
 HERE = os.path.dirname(os.path.abspath(__file__))
 WRAPPER = os.path.join(HERE, "guard.cmd" if os.name == "nt" else "guard.sh")
 INTERPRETERS = ("python3", "python", "py")
+
+
+def registered_hook_command():
+    """The hook command string exactly as .claude/settings.json registers it (two levels above this directory)."""
+    with open(os.path.join(HERE, "..", "..", ".claude", "settings.json"), encoding="utf-8") as f:
+        return json.load(f)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+
+HOOK_COMMAND = registered_hook_command()
 GIT = ["git", "-c", "user.name=guard-test", "-c", "user.email=guard-test@example.com"]
 
 
@@ -1236,6 +1245,70 @@ def run_without_guard_py(case):
         shutil.rmtree(project, ignore_errors=True)
 
 
+HOOK_COMMAND_CASE = Case("registered hook command blocks sf on this OS", bash("sf org login web"), 2, stderr_has="BLOCKED")
+
+
+def hook_shell():
+    """argv prefix that runs HOOK_COMMAND, or None when no suitable shell exists here.
+    Inferred, not Confirmed (docs unreachable): Claude Code runs hook commands through a POSIX shell, and on
+    Windows through Git Bash, which expands "$CLAUDE_PROJECT_DIR". On POSIX we use sh -c (bash would behave the
+    same for this string). On Windows prefer Git for Windows' bash, never the WSL launcher: it must report Msys."""
+    if os.name != "nt":
+        return ["sh", "-c"]
+    git_bash = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bin", "bash.exe")
+    bash_exe = git_bash if os.path.exists(git_bash) else shutil.which("bash")
+    if not bash_exe:
+        return None
+    try:
+        p = subprocess.run([bash_exe, "-c", "uname -o"], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [bash_exe, "-c"] if b"msys" in p.stdout.lower() else None
+
+
+def run_hook_command(case, mode=None, command=None):
+    """Run the registered command string itself, in a throwaway project that carries tools/guard/ so
+    $CLAUDE_PROJECT_DIR/tools/guard/guard.sh resolves inside it. `mode` sets guard.sh's file mode (the copy keeps
+    its source mode otherwise). Returns None if there is no shell to use."""
+    shell = hook_shell()
+    if shell is None:
+        return None
+    project = make_project(case.committed_mode, case.files)
+    try:
+        dest = os.path.join(project, "tools", "guard")
+        for name in ("guard.sh", "guard.cmd", "guard.py", "policy.json"):
+            shutil.copy(os.path.join(HERE, name), os.path.join(dest, name))
+        if mode is not None:
+            os.chmod(os.path.join(dest, "guard.sh"), mode)
+        git(project, "add", "-A")
+        git(project, "commit", "-q", "-m", "guard files")
+        guard_module().write_baseline(project)
+        data = json.dumps(case.payload).encode()
+        p = subprocess.run(shell + [command or HOOK_COMMAND], input=data, capture_output=True,
+                           env=case_env(project, case.env_mode), cwd=project)
+        return p.returncode, p.stderr.decode()
+    finally:
+        shutil.rmtree(project, ignore_errors=True)
+
+
+HOOK_NO_EXEC_CASE = Case("registered hook command blocks sf with guard.sh not executable (mode 0644)", bash("sf org login web"), 2, stderr_has="BLOCKED")
+GITATTRIBUTES_RULES = ("*.sh text eol=lf", "*.cmd text eol=crlf", "tools/guard/*.json text eol=lf", "tools/guard/*.py text eol=lf")
+
+
+def check_gitattributes():
+    """.gitattributes (two levels above this directory) pins guard.sh to LF: a CRLF shebang breaks it on Windows."""
+    name = ".gitattributes pins guard line endings"
+    try:
+        with open(os.path.join(HERE, "..", "..", ".gitattributes"), encoding="utf-8") as f:
+            lines = [" ".join(ln.split("#")[0].split()) for ln in f]
+    except OSError as e:
+        print(f"[FAIL] {name}: {e}")
+        return False
+    missing = [r for r in GITATTRIBUTES_RULES if r not in lines]
+    print(f"[{'FAIL' if missing else 'PASS'}] {name}" + (f": missing {missing}" if missing else ""))
+    return not missing
+
+
 def run_without_policy(case):
     """Copy the wrapper and guard.py, but not policy.json, and run that copy."""
     copy = tempfile.mkdtemp(prefix="guard-nopolicy-")
@@ -1356,6 +1429,13 @@ def main():
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
     results.append(report(NO_POLICY_CASE, *run_without_policy(NO_POLICY_CASE)))
+    results.append(check_gitattributes())
+    hook = run_hook_command(HOOK_COMMAND_CASE)
+    if hook is None:
+        print("[SKIP] 2 registered hook command cases: no Git for Windows bash (Msys) here")
+    else:
+        results.append(report(HOOK_COMMAND_CASE, *hook))
+        results.append(report(HOOK_NO_EXEC_CASE, *run_hook_command(HOOK_NO_EXEC_CASE, mode=0o644)))
     if os.name == "nt":  # fake interpreters and the sh wrapper are POSIX only
         print("[SKIP] 3 wrapper status cases: POSIX only")
     else:

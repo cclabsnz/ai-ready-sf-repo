@@ -12,6 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Guard blocks on this OS
+        shell: bash  # Git Bash on Windows, so the test's bash is not the WSL launcher
         run: python tools/guard/test_guard.py
       - name: Real-data scan
         run: python tools/guard/scan_data.py --all
