@@ -21,6 +21,8 @@ jobs:
         run: python tools/build/render.py --check
       - name: Build index on fixtures
         run: python tools/index/build_index.py --root fixtures --out ../index-ci
+      - name: Index evidence opens from the repo root
+        run: python tools/index/test_index.py
       - name: Agent trajectory eval (sample)
         run: python tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
   secrets:

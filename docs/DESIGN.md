@@ -37,6 +37,7 @@ The index is the foundation and the first thing built. One stdlib-only Python sc
 Rules for the index:
 
 - Parsing is by file type with deliberately narrow regexes and XML parsing; no fuzzy matching. A false negative is reported as "zero hits for pattern X" and is still evidence.
+- Every `path` and `path:line` in the index is relative to the repo root (the git checkout's top level), whatever `--root` was, so evidence opens from the checkout as cited. `tools/index/test_index.py` proves it on the fixtures.
 - Managed-package metadata is indexed from `pkg-*/` and from a committed `namespaces.json` list; package internals the repo does not hold are marked Unverifiable, not guessed.
 - The index is rebuilt in CI on every PR and committed artefacts are never trusted: a skill that finds the stamp's commit does not match `HEAD` rebuilds before proceeding.
 - Query helpers (`tools/index/query.py`) answer the questions skills ask: `consumers(apiName, hops)`, `exists(apiName)`, `type(apiName)`, `below_api_floor(n)`. Skills call these, not `grep`.
@@ -145,6 +146,7 @@ The index and control plane are built together in the first fortnight because th
 | --- | --- | --- |
 | `framework/` | The one source tree squads edit: `rules/`, `knowledge/`, `skills/`, `agents/` | Single source of truth; CODEOWNERS puts the guild on every change |
 | `tools/index/build_index.py` | Walks `force-app/` and `pkg-*/`, emits `metadata.json` (nodes, edges) and `inventory.json` (counts) stamped with commit SHA, version and time | Layer 1; the thing every skill reads instead of grepping |
+| `tools/index/test_index.py` | Builds the index on the fixtures and checks every node path and `path:line` opens from the repo root | Evidence the skill evals and reviewers can follow without knowing where the index was built |
 | `tools/index/query.py` | `exists`, `type`, `consumers --hops`, `below-api-floor`, `stamp`, `check-stale` (exit 3 when the index commit is not HEAD) | Skills call this; zero hits are reported as evidence |
 | `tools/guard/guard.py` + `guard.sh` + `guard.cmd` | PreToolUse hook: blocks `sf`/`sfdx`, `git push`, `curl`, writes outside `ai-context/` (paths resolved through `..` and symlinks first, so neither can escape), fetches off the allowlist; honours `AI_FRAMEWORK_MODE=advise` | Layer 2; the wrappers exit 2 when no interpreter is found so the guard fails closed |
 | `tools/guard/test_guard.py` | Synthetic hook payloads with required exit codes, plus a run with no Python on PATH (must exit 2) and a throwaway repo with symlinks out of `ai-context/` (must be blocked) | Proves the control on each OS in CI and on each laptop at onboarding |

@@ -6,8 +6,13 @@ ai-context/**/*.xlsx
 ai-context/**/*.docx
 ai-context/**/scan/*.json
 
-# Generated index: rebuilt in CI, never trusted from git
-index/
+# Generated index: rebuilt in CI, never trusted from git.
+# Anchored with "/": a bare "index/" also ignores tools/index/, the index builder itself.
+/index/
+
+# Rendered rules entry point; render.py --check needs it. Un-ignored here because a
+# personal global gitignore that lists CLAUDE.md would otherwise keep it out of commits.
+!/CLAUDE.md
 
 # Tool state
 .sf/
