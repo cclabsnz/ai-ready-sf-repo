@@ -23,7 +23,7 @@ without a written reason in the PR.
 ## Smoke test (run before anything else)
 
 ```sh
-python3 tools/guard/test_guard.py          # 12 cases must pass
+python3 tools/guard/test_guard.py          # every case must pass
 python3 tools/build/lint.py                # 0 errors
 python3 tools/build/render.py --check      # "rendered outputs are current"
 python3 tools/index/build_index.py --root fixtures --out ../index
@@ -48,7 +48,7 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
 ## Backlog, in order
 
 ### Gate 1 hardening (do first)
-- [ ] `tools/guard/test_guard.py`: add a case that runs the wrapper with PATH cleared of every
+- [x] `tools/guard/test_guard.py`: add a case that runs the wrapper with PATH cleared of every
       Python and asserts exit 2 (proves fail-closed on a laptop with no interpreter).
 - [ ] `tools/index/build_index.py`: add parsers for custom metadata records, custom labels,
       named credentials, record types and FlexiPages; add `@AuraEnabled` method → LWC edges.

@@ -57,7 +57,12 @@ def main():
 
     elif tool in WRITE_TOOLS:
         path = (inp.get("file_path") or inp.get("path") or "").replace("\\", "/")
-        rel = os.path.relpath(path, os.getcwd()).replace("\\", "/") if os.path.isabs(path) else path
+        # Resolve ".." and symlinks against the real cwd, so neither can carry a write out of ai-context/.
+        root = os.path.realpath(os.getcwd())
+        try:
+            rel = os.path.relpath(os.path.realpath(os.path.join(root, path)), root).replace("\\", "/")
+        except ValueError:  # Windows: path is on a different drive from the repo
+            block(f"write to {path!r} is on a different drive from the repo.")
         if mode == "advise":
             block("framework is in ADVISE mode: no writes. Output the content in your reply instead.")
         if not rel.startswith(ALLOWED_WRITE_PREFIXES):
