@@ -2,7 +2,7 @@
  * Bands Account records by seat count for regional coverage.
  *
  * Records at or above HIGH_THRESHOLD are High, at or above MEDIUM_THRESHOLD are Medium, anything
- * lower is Low and a blank value is None. stampBands writes the band to Account_Tier_Label__c, and
+ * lower is Low and a blank value is None. stampBands writes the band to Account_Planning_Band__c, and
  * bandForRecord feeds the regionalCoveragePanel component.
  */
 public with sharing class RegionalCoverageService {
@@ -46,13 +46,13 @@ public with sharing class RegionalCoverageService {
         return bands;
     }
 
-    /** Writes the band to Account_Tier_Label__c on the records whose stored band differs. */
+    /** Writes the band to Account_Planning_Band__c on the records whose stored band differs. */
     public static void stampBands(List<Account> rows) {
         List<Account> changed = new List<Account>();
         for (Account row : rows) {
             String band = bandFor(row.Seat_Count__c);
-            if (row.Account_Tier_Label__c != band) {
-                changed.add(new Account(Id = row.Id, Account_Tier_Label__c = band));
+            if (row.Account_Planning_Band__c != band) {
+                changed.add(new Account(Id = row.Id, Account_Planning_Band__c = band));
             }
         }
         if (!changed.isEmpty()) {

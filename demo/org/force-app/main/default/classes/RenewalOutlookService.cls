@@ -1,9 +1,12 @@
+// Deliberate sign of age for the demo inventory: pinned to API 48.0, with no user-mode enforcement.
+// Plain SOQL and DML, as code written before user mode existed would be; the rule baseline (WS8)
+// records it as debt. Kept as is.
 /**
  * Bands Account records by health score for renewal outlook.
  *
  * Records at or above HIGH_THRESHOLD are High, at or above MEDIUM_THRESHOLD are Medium, anything
  * lower is Low and a blank value is None. stampBands writes the band to Health_Band__c, and
- * bandForRecord feeds the the record page component.
+ * bandForRecord feeds the record page.
  */
 public with sharing class RenewalOutlookService {
 
@@ -38,7 +41,6 @@ public with sharing class RenewalOutlookService {
             SELECT Id, Health_Score__c
             FROM Account
             WHERE Id IN :recordIds
-            WITH USER_MODE
         ];
         for (Account row : rows) {
             bands.put(row.Id, bandFor(row.Health_Score__c));
@@ -56,12 +58,12 @@ public with sharing class RenewalOutlookService {
             }
         }
         if (!changed.isEmpty()) {
-            Database.update(changed, AccessLevel.USER_MODE);
+            update changed;
         }
     }
 
     /**
-     * The band of one record for the the record page component. Null when the record is not visible.
+     * The band of one record for the record page. Null when the record is not visible.
      * cacheable=true: the client may show a stale band until the record page refreshes.
      */
     @AuraEnabled(cacheable=true)
@@ -70,7 +72,6 @@ public with sharing class RenewalOutlookService {
             SELECT Id, Health_Score__c
             FROM Account
             WHERE Id = :recordId
-            WITH USER_MODE
             LIMIT 1
         ];
         return rows.isEmpty() ? null : bandFor(rows[0].Health_Score__c);

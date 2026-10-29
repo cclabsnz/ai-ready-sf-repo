@@ -17,8 +17,25 @@ class to class, invocable and `@AuraEnabled` methods (the LWC Apex import edge h
 or false, or null when the class is not indexed), flow Apex actions and trigger objects, FlexiPages,
 and permission-set object and class access. `consumers` goes to 3 hops.
 
+## Stories
+
+- **DEMO-101** (Customer Tier on the Case page): a new field plus the existing places that show
+  account data to agents, and the overlapping tier and segment concepts a person must weigh.
+- **DEMO-201** (premium case escalation): seeded only from `Account.Service_Level__c`, the field that
+  defines "premium customers", at hops 3. From that field, the escalation flow
+  (`Case_Escalate_Premium`), the agent page (`Case_Agent_Console`) and the trigger (`CaseTrigger`) are
+  three hops away, through the escalation service and the classes and component that call it. None
+  of them names the field, so a field search finds none of them; only the reference chain does.
+  Eval case 004 asks for exactly those.
+- **DEMO-202** (round-robin assignment of new cases): shares `CaseTriggerHandler` with DEMO-201.
+
 ## Answer keys
 
+- **Seeds** anchor the check: the checker expands them through the index. They are not given to
+  the AI; story-impact gets only the story text. DEMO-101's seeds are themselves answer components,
+  by ruling, so they are listed at hop 0.
+- **changeType**: `modify` means the story requires a change to the component; `review` means it
+  may need one, or the component must be confirmed unaffected; `new` means it does not exist yet.
 - **Index components** (`source` "index", the default): `hop` is the minimum index hop. It is
   index-derived, so scoring must not treat hop as independent human truth.
 - **Judgement components** (`source` "judgement"): things the index cannot see. Each carries file
@@ -34,16 +51,40 @@ files that are missing, and `--check` writes nothing and fails if the committed 
 filler is isolated from the story core: it never references a core API name and never touches Case
 or Entitlement, so the answer keys stay exact.
 
+The generated tests run their record work as a user holding the area permission set, because fields
+deployed through the Metadata API grant field access to nobody. Flows stamp a status field that no
+generated service stamps, so a flow firing during a test never changes a field the test asserts.
+
+**Determinism.** CI pins Python 3.12 (`.github/workflows/framework-ci.yml:13`). The generator uses
+`random`, whose output may differ across Python minor versions, so regenerate and run `--check` with
+Python 3.12.
+
+## Signs of age
+
+These classes are deliberately aged, and each says so in a header comment: `LegacyCaseMerge` (old
+API, `without sharing`), and the filler `RenewalOutlookService` and `ContractTermService` (old API).
+Each uses plain SOQL and DML with no user-mode enforcement, as code from before user mode would;
+the WS8 rule baseline records that debt. Their tests stay on the current API and match them.
+
 ## Building an index of the demo
 
 `build_index.py --out` resolves relative to `--root`, and so does the default (`index`), which would
 write `demo/org/index` inside the scanned tree. Always pass an absolute `--out`.
 
-## Line endings
+## Index limits on a real org
+
+The demo is built to avoid these; a real org will not be.
+
+- A short field name such as `X__c` in Apex links to every object's field with that name.
+- Apex name matching is case-sensitive, though Apex itself is not.
+- A relationship name that equals an unrelated object's name can resolve to that object.
+
+## Line endings and owner patches
 
 The demo's line endings are pinned to LF (`demo/org/** text eol=lf` in `.gitattributes`, delivered as
 `ai-context/ws1/patches/gitattributes-ws1.patch`) so the filler `--check`, which compares bytes,
-passes on a Windows checkout.
+passes on a Windows checkout. Apply that patch together with `ai-context/ws1/patches/ci-ws1.patch`:
+the CI patch adds the `--check` step to the Windows job, which fails without the LF pin.
 
 ## Before deploying (Unverifiable here; nothing was deployed)
 
@@ -52,4 +93,12 @@ passes on a Windows checkout.
 - Agents may need the "Transfer Cases" permission for the owner change.
 - User visibility settings can shrink the assignment pool.
 - Escalation on insert is not handled; the logic runs on update only.
+- The Automated Case User needs field access to `Account.Service_Level__c` and
+  `Entitlement.Premium_SLA_Hours__c`: `CaseEscalationService` reads them `WITH USER_MODE`
+  (`CaseEscalationService.cls:48`, `:51`) when the trigger runs as that user.
+- Case assignment rules that run on insert may override the owner DEMO-202 sets (also a DEMO-202
+  assumption).
+- The assignment test counts the members of the shared `Escalation_Agents` queue, so members
+  already in the target org's queue change what it sees.
+- A test adds an inactive user as a queue member.
 - Demo class names carry no project prefix; the prefix becomes a per-project setting in WS8.

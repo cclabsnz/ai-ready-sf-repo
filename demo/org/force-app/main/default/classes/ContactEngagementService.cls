@@ -3,7 +3,7 @@
  *
  * Records at or above HIGH_THRESHOLD are High, at or above MEDIUM_THRESHOLD are Medium, anything
  * lower is Low and a blank value is None. stampBands writes the band to Engagement_Band__c, and
- * bandForRecord feeds the the record page component.
+ * bandForRecord feeds the record page.
  */
 public with sharing class ContactEngagementService {
 
@@ -61,7 +61,7 @@ public with sharing class ContactEngagementService {
     }
 
     /**
-     * The band of one record for the the record page component. Null when the record is not visible.
+     * The band of one record for the record page. Null when the record is not visible.
      * cacheable=true: the client may show a stale band until the record page refreshes.
      */
     @AuraEnabled(cacheable=true)

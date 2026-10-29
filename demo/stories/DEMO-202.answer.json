@@ -5,7 +5,8 @@
   "seeds": ["CaseAssignmentService"],
   "hops": 2,
   "assumptions": [
-    "New cases are assigned on insert; today assign() only runs on before update (CaseTriggerHandler.cls:16)."
+    "New cases are assigned on insert; today assign() only runs on before update (CaseTriggerHandler.cls:16).",
+    "Case assignment rules that run on insert in the target org may override the owner this story sets (Unverifiable here: org configuration, not metadata in this repo)."
   ],
   "decisions": [
     {"text": "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field.",

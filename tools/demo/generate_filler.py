@@ -39,7 +39,7 @@ FIELDS = {
         ("Expansion_Potential__c", "Currency", None),
         ("Churn_Risk_Pct__c", "Percent", None),
         ("Health_Band__c", "Text", None),
-        ("Account_Tier_Label__c", "Text", None),
+        ("Account_Planning_Band__c", "Text", None),
         ("Account_Review_Status__c", "Text", None),
         ("Onboarding_Notes__c", "Text", None),
         ("Billing_Region_Code__c", "Text", None),
@@ -92,6 +92,7 @@ FIELDS = {
         ("Discount_Pct__c", "Percent", None),
         ("Risk_Band__c", "Text", None),
         ("Review_Status_Label__c", "Text", None),
+        ("Opportunity_Review_Status__c", "Text", None),
         ("Competitor_Notes__c", "Text", None),
         ("Next_Step_Detail__c", "Text", None),
         ("Pricing_Exception_Reason__c", "Text", None),
@@ -105,15 +106,15 @@ NUMERIC = ("Number", "Currency", "Percent")
 # (topic, field the band is computed from, text field the band is stamped into) per object.
 SERVICES = {
     "Account": [
-        ("AccountPlanning", "Health_Score__c", "Account_Tier_Label__c"),
-        ("SegmentAssignment", "Seat_Count__c", "Account_Tier_Label__c"),
+        ("AccountPlanning", "Health_Score__c", "Account_Planning_Band__c"),
+        ("SegmentAssignment", "Seat_Count__c", "Account_Planning_Band__c"),
         ("RenewalOutlook", "Health_Score__c", "Health_Band__c"),
         ("ChurnWatch", "Churn_Risk_Pct__c", "Health_Band__c"),
-        ("ExpansionTarget", "Expansion_Potential__c", "Account_Tier_Label__c"),
+        ("ExpansionTarget", "Expansion_Potential__c", "Account_Planning_Band__c"),
         ("SeatUsage", "Seat_Count__c", "Health_Band__c"),
         ("OnboardingProgress", "Health_Score__c", "Health_Band__c"),
-        ("PartnerTiering", "Expansion_Potential__c", "Account_Tier_Label__c"),
-        ("RegionalCoverage", "Seat_Count__c", "Account_Tier_Label__c"),
+        ("PartnerTiering", "Expansion_Potential__c", "Account_Planning_Band__c"),
+        ("RegionalCoverage", "Seat_Count__c", "Account_Planning_Band__c"),
         ("ReviewCadence", "Health_Score__c", "Health_Band__c"),
     ],
     "Contact": [
@@ -153,10 +154,11 @@ SERVICES = {
         ("StageAging", "Quote_Total__c", "Risk_Band__c"),
     ],
 }
-# The text field record-triggered flows stamp a review status into.
+# The text field record-triggered flows stamp a review status into. Never a service stamp field
+# (SERVICES): a before-save flow firing in a service test would overwrite the band the test asserts.
 FLOW_STATUS_FIELD = {
     "Account": "Account_Review_Status__c", "Contact": "Contact_Review_Status__c",
-    "Lead": "Lead_Review_Status__c", "Opportunity": "Review_Status_Label__c",
+    "Lead": "Lead_Review_Status__c", "Opportunity": "Opportunity_Review_Status__c",
 }
 # Number and Currency fields that can never be negative; Forecast_Adjustment__c can, so it has no rule.
 NON_NEGATIVE = {"Seat_Count__c", "Meeting_Cadence_Days__c", "Event_Spend__c", "Budget_Estimate__c",
@@ -279,7 +281,7 @@ SERVICE_TEMPLATE = """/**
  *
  * Records at or above HIGH_THRESHOLD are High, at or above MEDIUM_THRESHOLD are Medium, anything
  * lower is Low and a blank value is None. stampBands writes the band to @@TXT@@, and
- * bandForRecord feeds the @@LWC@@ component.
+ * bandForRecord feeds @@LWCREF@@.
  */
 public with sharing class @@CLS@@ {
 
@@ -337,7 +339,7 @@ public with sharing class @@CLS@@ {
     }
 
     /**
-     * The band of one record for the @@LWC@@ component. Null when the record is not visible.
+     * The band of one record for @@LWCREF@@. Null when the record is not visible.
      * cacheable=true: the client may show a stale band until the record page refreshes.
      */
     @AuraEnabled(cacheable=true)
@@ -357,6 +359,35 @@ public with sharing class @@CLS@@ {
 TEST_TEMPLATE = """@IsTest
 private with sharing class @@CLS@@_Test {
 
+    /**
+     * A standard user holding the @@PERMSET@@ permission set.
+     * Fields deployed through the Metadata API grant field access to nobody, so the record work
+     * below runs as this user.
+     */
+    private static User areaUser() {
+        Profile p = [SELECT Id FROM Profile WHERE Name = 'Standard User' LIMIT 1];
+        String unique = String.valueOf(Datetime.now().getTime()) + String.valueOf(Crypto.getRandomInteger()).replace('-', '');
+        User u = new User(
+            ProfileId = p.Id,
+            LastName = 'Sample Planner',
+            Alias = 'smplusr',
+            Email = 'sample.planner@example.com',
+            Username = 'sample.planner.' + unique + '@example.com',
+            TimeZoneSidKey = 'Pacific/Auckland',
+            LocaleSidKey = 'en_NZ',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+        PermissionSet ps = [SELECT Id FROM PermissionSet WHERE Name = '@@PERMSET@@' LIMIT 1];
+        // Setup objects in their own runAs block, so the record inserts that follow do not raise
+        // MIXED_DML_OPERATION.
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert u;
+            insert new PermissionSetAssignment(AssigneeId = u.Id, PermissionSetId = ps.Id);
+        }
+        return u;
+    }
+
     private static @@OBJ@@ sampleRecord(Decimal value) {
         @@OBJ@@ record = new @@OBJ@@(@@REQ@@, @@NUM@@ = value);
         Database.insert(record, AccessLevel.USER_MODE);
@@ -373,38 +404,60 @@ private with sharing class @@CLS@@_Test {
 
     @IsTest
     static void bandsForReadsStoredValues() {
-        @@OBJ@@ high = sampleRecord(@@CLS@@.HIGH_THRESHOLD);
-        @@OBJ@@ low = sampleRecord(@@CLS@@.MEDIUM_THRESHOLD - 1);
+        System.runAs(areaUser()) {
+            @@OBJ@@ high = sampleRecord(@@CLS@@.HIGH_THRESHOLD);
+            @@OBJ@@ low = sampleRecord(@@CLS@@.MEDIUM_THRESHOLD - 1);
 
-        Map<Id, String> bands = @@CLS@@.bandsFor(new Set<Id>{ high.Id, low.Id });
+            Map<Id, String> bands = @@CLS@@.bandsFor(new Set<Id>{ high.Id, low.Id });
 
-        Assert.areEqual(2, bands.size());
-        Assert.areEqual(@@CLS@@.BAND_HIGH, bands.get(high.Id));
-        Assert.areEqual(@@CLS@@.BAND_LOW, bands.get(low.Id));
-        Assert.areEqual(0, @@CLS@@.bandsFor(new Set<Id>()).size());
+            Assert.areEqual(2, bands.size());
+            Assert.areEqual(@@CLS@@.BAND_HIGH, bands.get(high.Id));
+            Assert.areEqual(@@CLS@@.BAND_LOW, bands.get(low.Id));
+            Assert.areEqual(0, @@CLS@@.bandsFor(new Set<Id>()).size());
+        }
     }
 
     @IsTest
     static void stampBandsWritesTheBand() {
-        @@OBJ@@ record = sampleRecord(@@CLS@@.HIGH_THRESHOLD);
-        @@OBJ@@ before = [SELECT Id, @@NUM@@, @@TXT@@ FROM @@OBJ@@ WHERE Id = :record.Id WITH USER_MODE];
-        Assert.isNull(before.@@TXT@@);
+        System.runAs(areaUser()) {
+            @@OBJ@@ record = sampleRecord(@@CLS@@.HIGH_THRESHOLD);
+            @@OBJ@@ before = [SELECT Id, @@NUM@@, @@TXT@@ FROM @@OBJ@@ WHERE Id = :record.Id WITH USER_MODE];
+            Assert.isNull(before.@@TXT@@);
 
-        @@CLS@@.stampBands(new List<@@OBJ@@>{ before });
+            @@CLS@@.stampBands(new List<@@OBJ@@>{ before });
 
-        @@OBJ@@ after = [SELECT Id, @@TXT@@ FROM @@OBJ@@ WHERE Id = :record.Id WITH USER_MODE];
-        Assert.areEqual(@@CLS@@.BAND_HIGH, after.@@TXT@@);
+            @@OBJ@@ after = [SELECT Id, @@TXT@@ FROM @@OBJ@@ WHERE Id = :record.Id WITH USER_MODE];
+            Assert.areEqual(@@CLS@@.BAND_HIGH, after.@@TXT@@);
+        }
     }
 
     @IsTest
     static void bandForRecordReturnsBandOrNull() {
-        @@OBJ@@ record = sampleRecord(@@CLS@@.MEDIUM_THRESHOLD);
+        System.runAs(areaUser()) {
+            @@OBJ@@ record = sampleRecord(@@CLS@@.MEDIUM_THRESHOLD);
 
-        Assert.areEqual(@@CLS@@.BAND_MEDIUM, @@CLS@@.bandForRecord(record.Id));
-        Assert.isNull(@@CLS@@.bandForRecord(null));
+            Assert.areEqual(@@CLS@@.BAND_MEDIUM, @@CLS@@.bandForRecord(record.Id));
+            Assert.isNull(@@CLS@@.bandForRecord(null));
+        }
     }
 }
 """
+
+LEGACY_HEADER = """// Deliberate sign of age for the demo inventory: pinned to API @@VER@@, with no user-mode enforcement.
+// Plain SOQL and DML, as code written before user mode existed would be; the rule baseline (WS8)
+// records it as debt. Kept as is.
+"""
+LEGACY_TEST_HEADER = """// Plain SOQL and DML, matching @@CLS@@, the deliberately aged class it tests.
+"""
+
+
+def legacy_variant(body):
+    """The same Apex with plain SOQL and DML: no WITH USER_MODE, no AccessLevel.USER_MODE."""
+    body = re.sub(r"\n[ \t]+WITH USER_MODE\n", "\n", body)
+    body = body.replace(" WITH USER_MODE]", "]")
+    body = re.sub(r"Database\.(insert|update)\((\w+), AccessLevel\.USER_MODE\);", r"\1 \2;", body)
+    assert "USER_MODE" not in body
+    return body
 
 
 def apex_class(files, name, body, api_version=API_VERSION):
@@ -663,12 +716,18 @@ def generate(seed):
         s = services[i]
         lwc_for[s["cls"]] = lower_first(s["topic"]) + rng.choice(LWC_SUFFIXES)
     for s in services:
-        lwc = lwc_for.get(s["cls"], "the record page")
+        lwc = lwc_for.get(s["cls"])
         tokens = dict(CLS=s["cls"], OBJ=s["obj"], NUM=s["num"], TXT=s["txt"], HIGH=s["high"],
                       MED=s["high"] // 2, TOPICWORDS=words(s["topic"]), NUMWORDS=words(s["num"]),
-                      LWC=lwc, REQ=REQUIRED_INIT[s["obj"]])
-        apex_class(files, s["cls"], fill(SERVICE_TEMPLATE, **tokens), s["api_version"])
-        apex_class(files, s["cls"] + "_Test", fill(TEST_TEMPLATE, **tokens))
+                      LWCREF=f"the {lwc} component" if lwc else "the record page",
+                      REQ=REQUIRED_INIT[s["obj"]], PERMSET=PERMSETS[s["obj"]], VER=s["api_version"])
+        service, test = fill(SERVICE_TEMPLATE, **tokens), fill(TEST_TEMPLATE, **tokens)
+        if s["topic"] in LEGACY_API_VERSIONS:
+            # Deliberate sign of age: user mode needs a newer API than the class is pinned to.
+            service = fill(LEGACY_HEADER, **tokens) + legacy_variant(service)
+            test = fill(LEGACY_TEST_HEADER, **tokens) + legacy_variant(test)
+        apex_class(files, s["cls"], service, s["api_version"])
+        apex_class(files, s["cls"] + "_Test", test)
     for s in services:
         name = lwc_for.get(s["cls"])
         if not name:

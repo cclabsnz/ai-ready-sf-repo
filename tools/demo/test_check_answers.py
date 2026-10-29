@@ -73,7 +73,7 @@ def case_wrong_hop_detected():
     key = load("DEMO-201")
     for c in key["components"]:
         if c["api"] == "Case_Escalate_Premium":
-            c["hop"] = 3
+            c["hop"] = 2  # the index reaches it at hop 3 from Service_Level__c
     code, out = run([write_key("hop.json", key)])
     assert code == 1 and "wrong hop: Case_Escalate_Premium" in out, out
 

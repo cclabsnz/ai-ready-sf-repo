@@ -1,6 +1,8 @@
-// Deliberate sign of age for the demo inventory: old API version and without sharing.
-// Why without sharing: the original merge job ran as a batch that had to see every follow-up task,
-// whoever owned it. Kept as is; nothing in the core Case flow calls it.
+// Deliberate sign of age for the demo inventory: pinned to API 45.0, without sharing, and with no
+// user-mode enforcement (plain SOQL and DML; the rule baseline in WS8 records it as debt).
+// Why without sharing: the original merge job ran as a batch that had to see and complete every
+// follow-up task, whoever owned it. Its one DML statement is plain too. Kept as is; nothing in the
+// core Case flow calls it.
 public without sharing class LegacyCaseMerge {
 
     /** Lower-cases a subject and strips reply and forward prefixes, so near-duplicates share a key. */
@@ -46,7 +48,7 @@ public without sharing class LegacyCaseMerge {
             }
         }
         if (!duplicates.isEmpty()) {
-            Database.update(duplicates, AccessLevel.USER_MODE);
+            update duplicates;
         }
         return duplicates;
     }

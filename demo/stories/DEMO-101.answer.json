@@ -31,6 +31,9 @@
      "why": "Overlapping tier concept: the panel already labels a case Premium or Standard customer (caseEscalationPanel.html:6-7). Should the new tier replace or sit beside it?"},
     {"api": "Account.Service_Level__c", "type": "CustomField", "changeType": "review", "hop": null, "source": "judgement",
      "evidence": "demo/org/force-app/main/default/objects/Account/fields/Service_Level__c.field-meta.xml",
-     "why": "Overlapping tier concept: it is already the contracted support tier. Is Customer_Tier__c a different thing or a duplicate?"}
+     "why": "Overlapping tier concept: it is already the contracted support tier. Is Customer_Tier__c a different thing or a duplicate?"},
+    {"api": "Account.Customer_Segment__c", "type": "CustomField", "changeType": "review", "hop": null, "source": "judgement",
+     "evidence": "demo/org/force-app/main/default/objects/Account/fields/Customer_Segment__c.field-meta.xml",
+     "why": "An existing segmentation concept on Account (SMB, Mid-Market, Enterprise); confirm Customer Tier is distinct from it."}
   ]
 }

@@ -138,7 +138,7 @@ Every skill has the same anatomy, enforced by `tools/build/lint_skill.py`:
 
 The first two skills, in order:
 
-1. **story-impact.** Input: a work item (story, feature, defect) as text. Method: seed terms from the taxonomy, `consumers()` to two hops, triage with recorded drop reasons, classify each hit (layer, ownership, change type, impact, confidence), write `ai-context/<id>-<slug>/impact.md` and the RICEFW workbook. This is the skill that proves the index and pays back first.
+1. **story-impact.** Input: a work item (story, feature, defect) as text. Method: seed terms from the taxonomy, `consumers()` to two hops by default (an optional `hops` input takes 1 to 3), triage with recorded drop reasons, classify each hit (layer, ownership, change type, impact, confidence), write `ai-context/<id>-<slug>/impact.md` and the RICEFW workbook. This is the skill that proves the index and pays back first.
 2. **pr-reference-check.** Input: a diff. Method: extract every API name referenced in changed files, `exists()` and `type()` against the index, report invented names and type mismatches with `path:line`. Deterministic checks (secrets, manifest completeness, naming, debug statements) are not in this skill; they are CI steps the skill links to.
 
 Then, by demand and only once the first two are stable on one squad: release-impact (reads `inventory.json` against release notes), discovery-pack, test-case-design, wiki-page. Each is a consumer of the same index and the same evidence taxonomy, so each is mostly method and templates.

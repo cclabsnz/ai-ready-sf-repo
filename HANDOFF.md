@@ -59,6 +59,10 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
   `maintain` writes do not. Raising a Salesforce CLI
   level (`sf.mode_level`, `sf.allowed_orgs`) is such a patch. The human applies and commits guard
   files together.
+- The WS1 owner patches, `ai-context/ws1/patches/ci-ws1.patch` and
+  `ai-context/ws1/patches/gitattributes-ws1.patch`, must be applied together. The CI patch adds the
+  byte-comparing filler `--check` on Windows too; without the LF pin in `.gitattributes` a Windows
+  checkout converts `demo/org/` to CRLF and that step fails.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
@@ -113,7 +117,7 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
       `<rootDir>/ai-context/` in `testPathIgnorePatterns`.
 
 ### Skills
-- [ ] `story-impact`: write `evals/expected/*.md` golden outputs for the three cases, produced by
+- [ ] `story-impact`: write `evals/expected/*.md` golden outputs for each eval case, produced by
       running the skill under Claude Code headless on the fixtures, reviewed by hand.
 - [ ] `pr-reference-check`: the eval cases reference `fixtures/diffs/*.patch`; add a small runner
       that applies a patch to a temp branch so `extract_refs.py --base` works in CI.

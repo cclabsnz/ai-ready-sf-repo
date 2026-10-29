@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Account_Tier_Label__c</fullName>
-    <description>Account Tier Label on Account records, kept for pipeline and engagement reporting.</description>
+    <fullName>Account_Planning_Band__c</fullName>
+    <description>Account Planning Band on Account records, kept for pipeline and engagement reporting.</description>
     <externalId>false</externalId>
-    <label>Account Tier Label</label>
+    <label>Account Planning Band</label>
     <length>80</length>
     <required>false</required>
     <trackHistory>false</trackHistory>

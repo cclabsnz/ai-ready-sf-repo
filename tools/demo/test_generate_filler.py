@@ -215,7 +215,9 @@ def case_apex_follows_rules():
             assert "@IsTest" in t and len(re.findall(r"Assert\.\w+\(", t)) >= 4, p
         else:
             assert f"classes/{name}_Test.cls" in files, p
-            assert "WITH USER_MODE" in t and "AccessLevel.USER_MODE" in t, p
+            # The API-pinned legacy topics are the labelled exception (case_legacy_classes_are_labelled_and_plain).
+            if not name.startswith(tuple(load_gen().LEGACY_API_VERSIONS)):
+                assert "WITH USER_MODE" in t and "AccessLevel.USER_MODE" in t, p
             assert "@AuraEnabled(cacheable=true)" in t, p
         # no SOQL or DML inside a for/while body: track brace depth of loops
         depth, loop_depths = 0, []
@@ -345,6 +347,132 @@ def case_stamp_fields_are_status_like():
         if p.startswith("flows/") and "AutoLaunchedFlow" in t:
             m = re.search(r"<assignToReference>\$Record\.(\w+)</assignToReference>", t)
             assert m and re.search(r"Status(__c|_Label__c)$", m.group(1)), p
+
+
+def _service_stamps(files):
+    """{class name: (object, band source field, stamped field)} for every generated service class."""
+    out = {}
+    for p, t in files.items():
+        m = re.match(r"classes/(\w+)(?<!_Test)\.cls$", p)
+        if m:
+            obj = re.search(r"FROM (\w+)", t).group(1)
+            num = re.search(r"SELECT Id, (\w+__c)", t).group(1)
+            txt = re.search(r"changed\.add\(new \w+\(Id = row\.Id, (\w+) = band\)\)", t).group(1)
+            out[m.group(1)] = (obj, num, txt)
+    return out
+
+
+def _record_flows(files):
+    """[(flow, object, filter field, threshold, stamped field)] for every before-save flow."""
+    out = []
+    for p, t in files.items():
+        if p.startswith("flows/") and "<triggerType>RecordBeforeSave</triggerType>" in t:
+            el = ET.fromstring(t)
+            start = el.find("m:start", NS)
+            filt = start.find("m:filters", NS)
+            ref = el.find("m:assignments/m:assignmentItems/m:assignToReference", NS).text
+            out.append((p, start.find("m:object", NS).text, filt.find("m:field", NS).text,
+                        float(filt.find("m:value/m:numberValue", NS).text), ref.split(".", 1)[1]))
+    return out
+
+
+def case_flow_stamps_disjoint_from_service_stamps():
+    # F1: a before-save flow that stamps a service's band field would overwrite what the service test
+    # asserts, so flow targets and service targets never share a field.
+    files = generated()
+    service_txt = {txt for _, _, txt in _service_stamps(files).values()}
+    flow_txt = {f[4] for f in _record_flows(files)}
+    assert flow_txt and service_txt
+    assert not flow_txt & service_txt, flow_txt & service_txt
+
+
+def case_no_test_value_fires_a_flow_on_an_asserted_field():
+    # F1: every value a generated test inserts, against every flow on the same object it would fire.
+    files = generated()
+    flows = _record_flows(files)
+    checked = 0
+    for cls, (obj, num, txt) in _service_stamps(files).items():
+        svc = files[f"classes/{cls}.cls"]
+        high = int(re.search(r"HIGH_THRESHOLD = (\d+);", svc).group(1))
+        med = int(re.search(r"MEDIUM_THRESHOLD = (\d+);", svc).group(1))
+        test = files[f"classes/{cls}_Test.cls"]
+        asserted = set(re.findall(r"\b(\w+__c)\b", test))
+        assert asserted == {num, txt}, (cls, asserted)
+        for flow, fobj, ffield, threshold, stamped in flows:
+            if fobj != obj or ffield != num:
+                continue  # the test never sets this flow's filter field, so it cannot fire
+            if any(v > threshold for v in (high, med, med - 1)):
+                checked += 1
+                assert stamped not in asserted, f"{flow} fires in {cls}_Test and stamps {stamped}"
+    assert checked > 0, "expected some flows to fire in generated tests"
+
+
+def case_tests_run_as_a_user_with_the_area_permission_set():
+    # F2: fields deployed through the Metadata API grant FLS to nobody, so user-mode DML in a test
+    # needs a user holding the area permission set, and that set must grant every field the test uses.
+    gen = load_gen()
+    files = generated()
+    grants = {}
+    for obj, ps in gen.PERMSETS.items():
+        el = ET.fromstring(files[f"permissionsets/{ps}.permissionset-meta.xml"])
+        grants[obj] = {fp.find("m:field", NS).text for fp in el.findall("m:fieldPermissions", NS)
+                       if fp.find("m:readable", NS).text == "true" and fp.find("m:editable", NS).text == "true"}
+    n = 0
+    for cls, (obj, _, _) in _service_stamps(files).items():
+        n += 1
+        t = files[f"classes/{cls}_Test.cls"]
+        ps = gen.PERMSETS[obj]
+        assert f"Name = '{ps}'" in t, (cls, ps)
+        assert "insert new PermissionSetAssignment(AssigneeId = u.Id, PermissionSetId = ps.Id);" in t, cls
+        assert "System.runAs(new User(Id = UserInfo.getUserId()))" in t, cls
+        for f in set(re.findall(r"\b(\w+__c)\b", t)):
+            assert f"{obj}.{f}" in grants[obj], f"{cls}_Test uses {obj}.{f}; {ps} does not grant it"
+        # every test method that touches records does so as that user
+        for body in re.split(r"\n    @IsTest\n", t)[1:]:
+            if "sampleRecord(" in body or "WITH USER_MODE" in body:
+                assert "System.runAs(areaUser())" in body, (cls, body.splitlines()[0])
+    assert n >= 40
+
+
+def case_legacy_classes_are_labelled_and_plain():
+    # F3: the API-pinned legacy service classes use plain SOQL and DML (user mode needs a newer API),
+    # carry a header labelling them a deliberate sign of age, and are the only services without user mode.
+    gen = load_gen()
+    files = generated()
+    legacy = set()
+    for cls in _service_stamps(files):
+        t = files[f"classes/{cls}.cls"]
+        meta = files[f"classes/{cls}.cls-meta.xml"]
+        test_meta = files[f"classes/{cls}_Test.cls-meta.xml"]
+        assert "<apiVersion>62.0</apiVersion>" in test_meta, cls
+        topic = next(tp for tp in gen.LEGACY_API_VERSIONS if cls.startswith(tp)) if any(
+            cls.startswith(tp) for tp in gen.LEGACY_API_VERSIONS) else None
+        if topic:
+            legacy.add(topic)
+            assert f"<apiVersion>{gen.LEGACY_API_VERSIONS[topic]}</apiVersion>" in meta, cls
+            assert "USER_MODE" not in t, cls
+            assert t.startswith("// Deliberate sign of age"), cls
+            assert "no user-mode enforcement" in t, cls
+            assert re.search(r"^\s+update changed;$", t, re.M), cls
+            # its test stays at 62.0 but matches the class: plain SOQL and DML
+            assert "USER_MODE" not in files[f"classes/{cls}_Test.cls"], cls
+        else:
+            assert "WITH USER_MODE" in t and "AccessLevel.USER_MODE" in t, cls
+            assert "sign of age" not in t, cls
+    assert legacy == set(gen.LEGACY_API_VERSIONS), legacy
+
+
+def case_planning_band_replaces_tier_label():
+    # F5: no filler name is a near-duplicate of the Customer Tier concept on Account.
+    files = generated()
+    assert "objects/Account/fields/Account_Planning_Band__c.field-meta.xml" in files
+    for p, t in files.items():
+        assert "Account_Tier_Label" not in p and "Account_Tier_Label" not in t, p
+
+
+def case_no_doubled_words_in_comments():
+    for p, t in generated().items():
+        assert not re.search(r"\bthe the\b", t), p
 
 
 def case_files_are_wellformed_lf_utf8():

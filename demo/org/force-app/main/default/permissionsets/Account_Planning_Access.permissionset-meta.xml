@@ -8,12 +8,12 @@
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>Account.Account_Review_Status__c</field>
+        <field>Account.Account_Planning_Band__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
-        <field>Account.Account_Tier_Label__c</field>
+        <field>Account.Account_Review_Status__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>

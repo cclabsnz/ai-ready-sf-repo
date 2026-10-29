@@ -7,14 +7,14 @@
         <locationX>176</locationX>
         <locationY>287</locationY>
         <assignmentItems>
-            <assignToReference>$Record.Review_Status_Label__c</assignToReference>
+            <assignToReference>$Record.Opportunity_Review_Status__c</assignToReference>
             <operator>Assign</operator>
             <value>
                 <stringValue>Default applied</stringValue>
             </value>
         </assignmentItems>
     </assignments>
-    <description>Before save on Opportunity: when forecast adjustment is above 1000, stamps review status label.</description>
+    <description>Before save on Opportunity: when forecast adjustment is above 1000, stamps opportunity review status.</description>
     <environments>Default</environments>
     <interviewLabel>Opportunity Pricing Review {!$Flow.CurrentDateTime}</interviewLabel>
     <label>Opportunity Pricing Review</label>

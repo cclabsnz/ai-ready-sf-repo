@@ -2,8 +2,8 @@
  * Bands Account records by seat count for segment assignment.
  *
  * Records at or above HIGH_THRESHOLD are High, at or above MEDIUM_THRESHOLD are Medium, anything
- * lower is Low and a blank value is None. stampBands writes the band to Account_Tier_Label__c, and
- * bandForRecord feeds the the record page component.
+ * lower is Low and a blank value is None. stampBands writes the band to Account_Planning_Band__c, and
+ * bandForRecord feeds the record page.
  */
 public with sharing class SegmentAssignmentEvaluator {
 
@@ -46,13 +46,13 @@ public with sharing class SegmentAssignmentEvaluator {
         return bands;
     }
 
-    /** Writes the band to Account_Tier_Label__c on the records whose stored band differs. */
+    /** Writes the band to Account_Planning_Band__c on the records whose stored band differs. */
     public static void stampBands(List<Account> rows) {
         List<Account> changed = new List<Account>();
         for (Account row : rows) {
             String band = bandFor(row.Seat_Count__c);
-            if (row.Account_Tier_Label__c != band) {
-                changed.add(new Account(Id = row.Id, Account_Tier_Label__c = band));
+            if (row.Account_Planning_Band__c != band) {
+                changed.add(new Account(Id = row.Id, Account_Planning_Band__c = band));
             }
         }
         if (!changed.isEmpty()) {
@@ -61,7 +61,7 @@ public with sharing class SegmentAssignmentEvaluator {
     }
 
     /**
-     * The band of one record for the the record page component. Null when the record is not visible.
+     * The band of one record for the record page. Null when the record is not visible.
      * cacheable=true: the client may show a stale band until the record page refreshes.
      */
     @AuraEnabled(cacheable=true)

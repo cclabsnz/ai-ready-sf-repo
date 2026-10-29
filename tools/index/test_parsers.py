@@ -379,6 +379,18 @@ def case_commented_out_annotations_do_not_count():
     assert idx["nodes"]["C"]["auraEnabledMethods"] == []
 
 
+def case_is_test_read_from_code_not_comments():
+    idx = build_tree({
+        f"{CLS}/Svc.cls": "// covered by the @IsTest class below\n"
+                          "public with sharing class Svc {\n    String s = '@isTest';\n}\n",
+        f"{CLS}/Svc_Test.cls": "@isTest\nprivate with sharing class Svc_Test {\n}\n",
+        f"{CLS}/Upper_Test.cls": "@ISTEST\nprivate with sharing class Upper_Test {\n}\n",
+    })
+    assert idx["nodes"]["Svc"]["isTest"] is False, idx["nodes"]["Svc"]
+    assert idx["nodes"]["Svc_Test"]["isTest"] is True
+    assert idx["nodes"]["Upper_Test"]["isTest"] is True
+
+
 FLOWS = "force-app/main/default/flows"
 FLEXI = "force-app/main/default/flexipages"
 PERMS = "force-app/main/default/permissionsets"
@@ -660,6 +672,12 @@ def case_demo_signs_of_age():
     low = query_root("demo/org", "below-api-floor", "58")
     assert {"LegacyCaseMerge"} <= {i["api"] for i in low["items"]} and len(low["items"]) >= 3
     assert sorted(i["apiVersion"] for i in low["items"]) == ["45.0", "48.0", "52.0"], low
+    # Each aged class is labelled, and uses plain SOQL and DML: user mode needs a newer API.
+    for item in low["items"]:
+        with open(os.path.join(REPO, item["path"]), encoding="utf-8") as fh:
+            src = fh.read()
+        assert src.startswith("// Deliberate sign of age"), item["api"]
+        assert "USER_MODE" not in src, item["api"]
     # The legacy class is the only one that is not `with sharing`, and it touches no core component.
     classes = {k: v for k, v in idx["nodes"].items() if v["type"] == "ApexClass"}
     others = {k: v["sharing"] for k, v in classes.items() if k != "LegacyCaseMerge"}

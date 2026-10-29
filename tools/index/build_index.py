@@ -170,7 +170,9 @@ def build(root, namespaces):
             sharing = "without sharing" if re.search(r"\bwithout\s+sharing\b", code) else (
                 "with sharing" if re.search(r"\bwith\s+sharing\b", code) else "inherited/unspecified")
             nodes[api] = {"type": kind, "path": r, "apiVersion": api_version,
-                          "sharing": sharing, "isTest": "@isTest" in src or "@IsTest" in src}
+                          "sharing": sharing,
+                          # from code only (Apex annotations are case-insensitive), never comments or strings
+                          "isTest": re.search(r"@isTest\b", code, re.I) is not None}
             if meta_bad:
                 nodes[api]["parseError"] = True
             if kind == "ApexClass":
