@@ -10,6 +10,17 @@
     "\\bscp\\b",
     "\\bInvoke-WebRequest\\b"
   ],
+  "unknown_writers": [
+    "sh", "bash", "zsh", "eval", "xargs", "env", "nohup", "perl", "ruby", "node",
+    "exec", "command", "builtin", "source", ".", "sudo", "doas", "time", "timeout", "nice", "setsid", "stdbuf",
+    "rsync", "patch", "tar", "unzip", "awk", "gawk",
+    "ln", "link", "unlink", "trap", "alias", "coproc", "noglob", "nocorrect", "caffeinate", "arch", "script",
+    "osascript", "ed", "ex", "vi", "vim", "ditto", "plutil", "cpio", "pax",
+    "function", "export", "declare", "typeset", "readonly", "local", "set"
+  ],
+  "git_allowed": [
+    "status", "diff", "log", "show", "rev-parse", "ls-files", "check-ignore", "blame", "branch", "grep", "add", "commit"
+  ],
   "fetch_allowlist": [
     "help.salesforce.com",
     "developer.salesforce.com",
