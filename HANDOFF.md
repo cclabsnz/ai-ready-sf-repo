@@ -28,6 +28,9 @@ python3 tools/build/lint.py                # 0 errors
 python3 tools/build/render.py --check      # "rendered outputs are current"
 python3 tools/index/build_index.py --root fixtures --out ../index
 python3 tools/index/test_index.py          # every path:line opens from the repo root
+python3 tools/index/test_parsers.py        # parsers build their own temp trees
+python3 tools/demo/test_generate_filler.py # filler is seeded and deterministic
+python3 tools/demo/test_check_answers.py   # answer-key checker
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index   # 5 consumers
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```

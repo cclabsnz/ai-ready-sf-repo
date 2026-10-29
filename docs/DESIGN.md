@@ -30,7 +30,7 @@ The index is the foundation and the first thing built. One stdlib-only Python sc
 | Output | Contents | Consumed by |
 | --- | --- | --- |
 | `metadata.json` nodes | Every object, field, record type, class, trigger, LWC, Aura bundle, flow, permission set, custom permission, custom label, named credential, with type, path, API version and managed namespace | All skills: existence checks, type checks, `path:line` evidence |
-| `metadata.json` edges | References between nodes found by parsing: SOQL field use in Apex, `@AuraEnabled` consumers, flow element references, permission-set field grants, LWC imports | Story impact (hop expansion), PR reference check (consumers of a changed field) |
+| `metadata.json` edges | References between nodes found by parsing: SOQL field use in Apex, `@AuraEnabled` consumers, flow element references, permission-set field grants, LWC imports. Also modelled: validation rules, record types, triggers to their objects, Apex class to class, invocable and `@AuraEnabled` methods (the LWC Apex import edge carries `auraEnabled` true or false, or null when the class is not indexed), flow Apex actions and flow trigger objects, FlexiPages, and permission-set object and class access | Story impact (hop expansion), PR reference check (consumers of a changed field) |
 | `inventory.json` | Counts and distributions: classes by API version, flows by process type, Aura vs LWC, `without sharing` classes, Remote Site vs Named Credential, report types, FlexiPages | Release impact baseline, knowledge-file lint (no stored counts), dashboards |
 | `stamp` block | `commit`, `indexVersion`, `builtAt`, `namespaces[]` | Every report cites it; staleness is decided by comparing stamps, never by judgement |
 
@@ -40,7 +40,7 @@ Rules for the index:
 - Every `path` and `path:line` in the index is relative to the repo root (the git checkout's top level), whatever `--root` was, so evidence opens from the checkout as cited. `tools/index/test_index.py` proves it on the fixtures.
 - Managed-package metadata is indexed from `pkg-*/` and from a committed `namespaces.json` list; package internals the repo does not hold are marked Unverifiable, not guessed.
 - The index is rebuilt in CI on every PR and committed artefacts are never trusted: a skill that finds the stamp's commit does not match `HEAD` rebuilds before proceeding.
-- Query helpers (`tools/index/query.py`) answer the questions skills ask: `consumers(apiName, hops)`, `exists(apiName)`, `type(apiName)`, `below_api_floor(n)`. Skills call these, not `grep`.
+- Query helpers (`tools/index/query.py`) answer the questions skills ask: `consumers(apiName, hops)` (up to 3 hops; story-impact defaults to 2 and takes an optional `hops` input), `exists(apiName)`, `type(apiName)`, `below_api_floor(n)`. Skills call these, not `grep`.
 
 ## Layer 2: the control plane
 
@@ -205,12 +205,13 @@ The index and control plane are built together in the first fortnight because th
 | `tools/build/lint.py` | Knowledge: owner, date, method, no stored counts, staleness; skills: description ≤ 200 chars with when/not-for, input checklist, ≥ 3 eval cases; agents: tools listed, no persona prose | The multi-squad hygiene rules as code |
 | `tools/evals/run_skill.py` | Output assertions: references present, labels on every claim, banned phrases absent, verdict in set, every cited `path:line` exists; pass only if every run passes | Skill regression and variance, harness-independent |
 | `tools/evals/run_agent.py` | Trajectory assertions over a JSONL tool-call log: must-call, must-not-call, must-block | Agent regression; works with any harness that logs tool calls |
-| `framework/skills/story-impact/` | SKILL.md, input checklist, seed-term method, manual checks, `write_report.py`, three eval cases | The first skill, built as the template for the rest |
+| `framework/skills/story-impact/` | SKILL.md, input checklist, seed-term method, manual checks, `write_report.py`, its eval cases | The first skill, built as the template for the rest |
 | `framework/skills/pr-reference-check/` | SKILL.md, input checklist, `extract_refs.py` (diff against the PR's target branch), three eval cases with diff fixtures | The second skill; CI does the deterministic review checks |
 | `framework/agents/` | `analyst`, `reviewer`, `discovery-lead`: posture plus skill table only; `evals/analyst.json` and a sample run log | Layer 5, kept to three |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |
 | `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan, lint, render check, index build, agent eval; gitleaks job | Everything above, gated on every PR |
+| `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys; see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
 | `fixtures/` | Synthetic Account fields, Apex (one at API 45 and `without sharing`), a flow, a permission set, an LWC, three diff patches | Evals and CI never see real metadata |
 
 What the skeleton does not yet include, by design: a release-impact skill, docx and pptx builders, the Copilot hook registration (a README placeholder marks the gap), and a plugin manifest. Each is a consumer of what is here and lands after Gate 2.

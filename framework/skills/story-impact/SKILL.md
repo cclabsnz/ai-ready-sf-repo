@@ -20,7 +20,7 @@ Two to four sentences: item type, persona and segment, trigger or symptom, what 
 
 ## Step 3: seed terms and scan
 1. Derive API-name seed terms per `references/seed-terms.md`. Write them to `ai-context/<id>-<slug>/scan/terms.txt`.
-2. For each term: `python3 tools/index/query.py exists <term>` then `python3 tools/index/query.py consumers <term> --hops 2`.
+2. For each term: `python3 tools/index/query.py exists <term>` then `python3 tools/index/query.py consumers <term> --hops <hops>` (`hops` is an optional input, 1 to 3, default 2).
 3. Zero hits is valid evidence: record "zero consumers in index for `<term>`".
 4. Triage: drop false positives with a one-line reason each, kept in the output.
 

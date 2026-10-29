@@ -1,0 +1,2 @@
+{"id": "9004", "slug": "premium-escalation-hops-3", "input": "DEMO-201 Premium case escalation. Change case escalation for premium customers. Squad: Customer Care. hops: 3", "hops": 3,
+ "assert": {"must_reference": ["EscalationNotifier", "CaseTrigger", "Case_Agent_Console"], "must_label_every_claim": true, "banned_phrases": ["we recommend", "should"], "max_hops": 3}}
