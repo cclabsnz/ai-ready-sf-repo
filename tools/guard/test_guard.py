@@ -951,6 +951,12 @@ for _tool, _payload in (("write", write("ai-context/x.md")), ("git status", bash
              git_append={".git/config": '[core]\n\thooksPath = "ai-context/hk"\n'}, stderr_has="simplify"),
     ]
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
+FAKE_PYTHON_CASES = [
+    (1, Case("python3 exiting 1 fails closed", bash("git status"), 2)),
+    (127, Case("python3 exiting 127 fails closed", bash("git status"), 2)),
+]
+NO_GUARD_PY_CASE = Case("missing guard.py fails closed", bash("git status"), 2, stderr_has="guard.py not found or unreadable")
+EMPTY_PATH_CASE = Case("empty PATH fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
 # The guard allows this payload when its policy is present, so exit 2 can only come from the missing file.
 NO_POLICY_CASE = Case("missing policy fails closed", bash("git status"), 2, stderr_has="policy")
 # A payload the guard blocks, with nowhere to write the message: the exit code must still be 2.
@@ -1177,15 +1183,11 @@ def run_symlink_case(case):
 
 
 def run_without_python(case):
-    """Run the wrapper with a PATH that holds the shell tools it needs and no Python."""
+    """Run the wrapper with an empty directory as PATH: no Python, and no shell tools either."""
     shim = tempfile.mkdtemp(prefix="guard-nopy-")
     project = make_project(case.committed_mode, case.files)
     try:
-        if os.name != "nt":
-            # guard.sh needs sh (via its /usr/bin/env shebang) and dirname; link only those.
-            for tool in ("sh", "dirname"):
-                os.symlink(shutil.which(tool), os.path.join(shim, tool))
-        # On Windows the shim stays empty: `where` cannot resolve, so guard.cmd falls through.
+        # The shim stays empty: guard.sh uses only shell builtins, and on Windows `where` cannot resolve.
         found = [py for py in INTERPRETERS if shutil.which(py, path=shim)]
         if found:
             return None, f"test setup invalid: {found} still on PATH"
@@ -1193,6 +1195,44 @@ def run_without_python(case):
         return send(WRAPPER, case.payload, env, project)
     finally:
         shutil.rmtree(shim, ignore_errors=True)
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def run_with_empty_path(case):
+    """Run the wrapper with PATH set to the empty string: `env` cannot find `sh`, so the shebang must not use it."""
+    project = make_project(case.committed_mode, case.files)
+    try:
+        return send(WRAPPER, case.payload, dict(case_env(project, case.env_mode), PATH=""), project)
+    finally:
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def run_fake_python(case, status):
+    """PATH holds only a `python3` that exits `status`: the wrapper must not pass that status through."""
+    shim = tempfile.mkdtemp(prefix="guard-fakepy-")
+    project = make_project(case.committed_mode, case.files)
+    try:
+        fake = os.path.join(shim, "python3")
+        with open(fake, "w") as f:
+            f.write(f"#!/bin/sh\nexit {status}\n")
+        os.chmod(fake, 0o755)
+        return send(WRAPPER, case.payload, dict(case_env(project, case.env_mode), PATH=shim), project)
+    finally:
+        shutil.rmtree(shim, ignore_errors=True)
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def run_without_guard_py(case):
+    """Copy only the wrapper, so guard.py is missing next to it."""
+    copy = tempfile.mkdtemp(prefix="guard-nogpy-")
+    project = make_project(case.committed_mode, case.files)
+    try:
+        wrapper = os.path.join(copy, os.path.basename(WRAPPER))
+        shutil.copy(WRAPPER, wrapper)
+        os.chmod(wrapper, 0o755)
+        return send(wrapper, case.payload, case_env(project, case.env_mode), project)
+    finally:
+        shutil.rmtree(copy, ignore_errors=True)
         shutil.rmtree(project, ignore_errors=True)
 
 
@@ -1316,6 +1356,16 @@ def main():
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
     results.append(report(NO_POLICY_CASE, *run_without_policy(NO_POLICY_CASE)))
+    if os.name == "nt":  # fake interpreters and the sh wrapper are POSIX only
+        print("[SKIP] 3 wrapper status cases: POSIX only")
+    else:
+        for status, case in FAKE_PYTHON_CASES:
+            results.append(report(case, *run_fake_python(case, status)))
+        results.append(report(NO_GUARD_PY_CASE, *run_without_guard_py(NO_GUARD_PY_CASE)))
+    if os.name == "nt":  # an empty PATH on Windows breaks cmd itself, not the wrapper's shebang
+        print("[SKIP] empty PATH fails closed: POSIX only")
+    else:
+        results.append(report(EMPTY_PATH_CASE, *run_with_empty_path(EMPTY_PATH_CASE)))
     skipped = 0
     if os.name == "nt":  # needs fd-level stderr control that Windows subprocess cannot give
         skipped += len(BAD_STDERR_CASES)
