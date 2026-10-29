@@ -59,6 +59,14 @@ def line_of(src, needle, start=0):
     return 1 if i < 0 else src.count("\n", 0, i) + 1
 
 
+def find_line(src, needle, pos):
+    """(1-based line, next offset) of `needle` at or after `pos`; (1, pos) when absent."""
+    i = src.find(needle, pos)
+    if i < 0:
+        return 1, pos
+    return src.count("\n", 0, i) + 1, i + 1
+
+
 def parse_xml(path):
     """Root element of an XML file, or None when it cannot be parsed. Malformed input marks the
     node (parseError) instead of stopping the build."""
@@ -114,6 +122,7 @@ def build(root, namespaces):
     apex_sources = {}
     vr_formulas = []    # (rule, object, path, formula, formula start line)
     rt_picklists = []   # (record type, object, picklist, path, line)
+    flexi_fields = []   # (page, object, field, path, line)
     base = repo_root(root)
 
     for path in walk(root):
@@ -192,6 +201,23 @@ def build(root, namespaces):
             for m in re.finditer(r"<(?:field|object)>([A-Za-z0-9_]+(?:__c|__r)?)</", src):
                 edges.append({"from": api, "to": m.group(1), "kind": "flowRef",
                               "evidence": f"{r}:{src[:m.start()].count(chr(10)) + 1}"})
+            if el is not None:
+                pos = 0
+                for ac in el.findall("m:actionCalls", NS):
+                    _, pos = find_line(src, "<actionCalls>", pos)
+                    aname = text(ac, "actionName")
+                    if aname and text(ac, "actionType") == "apex":
+                        ln, _ = find_line(src, f"<actionName>{aname}</actionName>", pos)
+                        edges.append({"from": api, "to": aname, "kind": "flowApexAction",
+                                      "evidence": f"{r}:{ln}"})
+                start = el.find("m:start", NS)
+                sobj = text(start, "object") if start is not None else None
+                if sobj:
+                    nodes.setdefault(sobj, {"type": "CustomObject", "path": None,
+                                            "namespace": namespace_of(sobj, namespaces)})
+                    ln, _ = find_line(src, f"<object>{sobj}</object>", max(src.find("<start>"), 0))
+                    edges.append({"from": api, "to": sobj, "kind": "flowTriggerObject",
+                                  "evidence": f"{r}:{ln}"})
 
         # Permission sets
         elif name.endswith(".permissionset-meta.xml"):
@@ -201,11 +227,52 @@ def build(root, namespaces):
             if el is None:
                 nodes[api]["parseError"] = True
             else:
+                src = read_src(path)
+                pos = 0
                 for fp in el.findall("m:fieldPermissions", NS):
                     f = text(fp, "field")
                     if f:
+                        ln, pos = find_line(src, f"<field>{f}</field>", pos)
                         edges.append({"from": api, "to": f, "kind": "fieldPermission",
-                                      "editable": text(fp, "editable") == "true"})
+                                      "editable": text(fp, "editable") == "true",
+                                      "evidence": f"{r}:{ln}"})
+                pos = 0
+                for op in el.findall("m:objectPermissions", NS):
+                    o = text(op, "object")
+                    if o:
+                        ln, pos = find_line(src, f"<object>{o}</object>", pos)
+                        edges.append({"from": api, "to": o, "kind": "objectPermission",
+                                      "allowEdit": text(op, "allowEdit") == "true",
+                                      "evidence": f"{r}:{ln}"})
+
+        # FlexiPages
+        elif name.endswith(".flexipage-meta.xml"):
+            api = name[: -len(".flexipage-meta.xml")]
+            nodes[api] = {"type": "FlexiPage", "path": r}
+            el = parse_xml(path)
+            if el is None:
+                nodes[api]["parseError"] = True
+                continue
+            src = read_src(path)
+            pos = 0
+            for cn in el.iter(f"{{{NS['m']}}}componentName"):
+                v = (cn.text or "").strip()
+                if v.startswith("c:") and len(v) > 2:  # only the c namespace; force:, flexipage: etc. are platform
+                    ln, pos = find_line(src, f"<componentName>{v}</componentName>", pos)
+                    edges.append({"from": api, "to": v[2:], "kind": "flexipageComponent",
+                                  "evidence": f"{r}:{ln}"})
+            sobj = text(el, "sobjectType")
+            if sobj:
+                nodes.setdefault(sobj, {"type": "CustomObject", "path": None,
+                                        "namespace": namespace_of(sobj, namespaces)})
+                edges.append({"from": api, "to": sobj, "kind": "flexipageObject",
+                              "evidence": f"{r}:{line_of(src, '<sobjectType>')}"})
+                pos = 0
+                for fi in el.iter(f"{{{NS['m']}}}fieldItem"):
+                    v = (fi.text or "").strip()
+                    if v.startswith("Record.") and len(v) > 7:
+                        ln, pos = find_line(src, f"<fieldItem>{v}</fieldItem>", pos)
+                        flexi_fields.append((api, sobj, v[7:], r, ln))
 
         # Validation rules
         elif name.endswith(".validationRule-meta.xml"):
@@ -318,6 +385,12 @@ def build(root, namespaces):
         if nodes.get(target, {}).get("type") == "CustomField":
             edges.append({"from": api, "to": target, "kind": "recordTypePicklist",
                           "evidence": f"{r}:{line}"})
+
+    for api, obj, fld, r, ln in flexi_fields:
+        target = f"{obj}.{fld}"
+        if nodes.get(target, {}).get("type") == "CustomField":
+            edges.append({"from": api, "to": target, "kind": "flexipageField",
+                          "evidence": f"{r}:{ln}"})
 
     # Resolve flow short names (<field>Risk_Rating__c</field>) to full API names when unambiguous
     for e in edges:

@@ -351,6 +351,119 @@ def case_commented_out_annotations_do_not_count():
     assert idx["nodes"]["C"]["auraEnabledMethods"] == []
 
 
+FLOWS = "force-app/main/default/flows"
+FLEXI = "force-app/main/default/flexipages"
+PERMS = "force-app/main/default/permissionsets"
+
+
+def FLOW_XML(actions, obj="Case"):
+    acts = "".join(f'    <actionCalls>\n        <name>a{i}</name>\n        <actionName>{n}</actionName>\n'
+                   f'        <actionType>{t}</actionType>\n    </actionCalls>\n'
+                   for i, (n, t) in enumerate(actions))
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<Flow xmlns="{MD}">\n'
+            f'{acts}'
+            f'    <start>\n        <object>{obj}</object>\n    </start>\n'
+            f'</Flow>\n')
+
+
+def FLEXI_XML(components, fields, sobject="Case"):
+    items = "".join(f'    <componentName>{c}</componentName>\n' for c in components)
+    fi = "".join(f'    <fieldItem>{f}</fieldItem>\n' for f in fields)
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<FlexiPage xmlns="{MD}">\n'
+            f'{items}{fi}'
+            f'    <sobjectType>{sobject}</sobjectType>\n'
+            f'</FlexiPage>\n')
+
+
+def PERM_XML(fields, objects):
+    fp = "".join(f'    <fieldPermissions>\n        <editable>{str(e).lower()}</editable>\n'
+                 f'        <field>{f}</field>\n    </fieldPermissions>\n' for f, e in fields)
+    op = "".join(f'    <objectPermissions>\n        <allowEdit>{str(e).lower()}</allowEdit>\n'
+                 f'        <object>{o}</object>\n    </objectPermissions>\n' for o, e in objects)
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="{MD}">\n{fp}{op}</PermissionSet>\n')
+
+
+def _flow_tree(extra=None):
+    files = {
+        f"{FLOWS}/Case_Escalate_Premium.flow-meta.xml":
+            FLOW_XML([("EscalationNotifier", "apex"), ("Notify_Owner", "emailAlert"),
+                      ("Post_It", "chatterPost")]),
+        f"{CLS}/EscalationNotifier.cls": "public with sharing class EscalationNotifier {}\n",
+        f"{BASE}/Case/fields/Escalation_Level__c.field-meta.xml": FIELD_XML("Picklist"),
+        f"{FLEXI}/Case_Agent_Console.flexipage-meta.xml":
+            FLEXI_XML(["c:caseEscalationPanel", "force:highlightsPanel", "flexipage:richText",
+                       "other:thing"],
+                      ["Record.Escalation_Level__c", "Record.Ghost__c", "Record.Status"]),
+        f"{PERMS}/Service_Agent.permissionset-meta.xml":
+            PERM_XML([("Case.Escalation_Level__c", True), ("Case.Escalation_Level__c", False),
+                      ("Case.Other__c", True)], [("Case", True), ("Account", False)]),
+    }
+    files.update(extra or {})
+    return build_tree(files)
+
+
+def case_flow_apex_action_and_trigger_object():
+    idx = _flow_tree()
+    e = edge(idx, "Case_Escalate_Premium", "EscalationNotifier", "flowApexAction")
+    assert e and e["evidence"].endswith("Case_Escalate_Premium.flow-meta.xml:5"), e
+    e = edge(idx, "Case_Escalate_Premium", "Case", "flowTriggerObject")
+    assert e and e["evidence"].endswith(".flow-meta.xml:19"), e
+    assert edge(idx, "Case_Escalate_Premium", "Case", "flowRef")  # existing edge stays
+
+
+def case_flow_non_apex_actions_make_no_edge():
+    idx = _flow_tree()
+    acts = [e for e in idx["edges"] if e["kind"] == "flowApexAction"]
+    assert [e["to"] for e in acts] == ["EscalationNotifier"], acts
+
+
+def case_flexipage_edges():
+    idx = _flow_tree()
+    assert idx["nodes"]["Case_Agent_Console"]["type"] == "FlexiPage"
+    assert edge(idx, "Case_Agent_Console", "caseEscalationPanel", "flexipageComponent")["evidence"].endswith(":3")
+    assert edge(idx, "Case_Agent_Console", "Case", "flexipageObject")
+    assert edge(idx, "Case_Agent_Console", "Case.Escalation_Level__c", "flexipageField")["evidence"].endswith(":7")
+
+
+def case_non_c_namespace_component_ignored():
+    idx = _flow_tree()
+    comps = [e["to"] for e in idx["edges"] if e["from"] == "Case_Agent_Console" and e["kind"] == "flexipageComponent"]
+    assert comps == ["caseEscalationPanel"], comps
+    assert not [e for e in idx["edges"] if e["from"] == "Case_Agent_Console"
+                and e["to"] in ("highlightsPanel", "force:highlightsPanel", "richText", "thing")]
+
+
+def case_flexipage_field_only_when_field_exists():
+    idx = _flow_tree()
+    fields = [e["to"] for e in idx["edges"] if e["kind"] == "flexipageField"]
+    assert fields == ["Case.Escalation_Level__c"], fields
+
+
+def case_malformed_flexipage_marks_node():
+    idx = _flow_tree({f"{FLEXI}/Bad.flexipage-meta.xml": "<FlexiPage>"})
+    assert idx["nodes"]["Bad"]["parseError"] is True
+    assert edge(idx, "Case_Agent_Console", "Case", "flexipageObject")
+
+
+def case_permission_set_object_and_field_evidence():
+    idx = _flow_tree()
+    assert edge(idx, "Service_Agent", "Case", "objectPermission")["allowEdit"] is True
+    assert edge(idx, "Service_Agent", "Account", "objectPermission")["allowEdit"] is False
+    assert edge(idx, "Service_Agent", "Case", "objectPermission")["evidence"].endswith(".permissionset-meta.xml:17")
+    assert edge(idx, "Service_Agent", "Case.Escalation_Level__c", "fieldPermission")["evidence"]
+
+
+def case_permission_set_repeated_field_distinct_evidence():
+    idx = _flow_tree()
+    fps = [e for e in idx["edges"] if e["kind"] == "fieldPermission" and e["to"] == "Case.Escalation_Level__c"]
+    lines = sorted(int(e["evidence"].rsplit(":", 1)[1]) for e in fps)
+    assert lines == [5, 9], fps
+    other = edge(idx, "Service_Agent", "Case.Other__c", "fieldPermission")
+    assert other["evidence"].endswith(":13"), other
+
+
 def case_index_version():
     assert build_index.INDEX_VERSION == "0.3.0"
 
