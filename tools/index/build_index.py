@@ -19,7 +19,7 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-INDEX_VERSION = "0.2.0"
+INDEX_VERSION = "0.3.0"
 NS = {"m": "http://soap.sforce.com/2006/04/metadata"}
 
 
@@ -53,6 +53,35 @@ def text(el, tag):
     return found.text.strip() if found is not None and found.text else None
 
 
+def line_of(src, needle, start=0):
+    """1-based line of the first `needle` at or after offset `start`, or 1 if absent."""
+    i = src.find(needle, start)
+    return 1 if i < 0 else src.count("\n", 0, i) + 1
+
+
+def parse_xml(path):
+    """Root element of an XML file, or None when it cannot be parsed. Malformed input marks the
+    node (parseError) instead of stopping the build."""
+    try:
+        return ET.parse(path).getroot()
+    except (ET.ParseError, OSError, ValueError, UnicodeError):
+        return None
+
+
+_LITERALS = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|/\*.*?\*/", re.S)
+
+
+def blank_literals(formula):
+    """Blank '...' and "..." literals (with \\ escapes) and /* ... */ comments, keeping newlines so
+    offsets and line numbers are unchanged."""
+    return _LITERALS.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), formula)
+
+
+def read_src(path):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
 def walk(root):
     for base in sorted(os.listdir(root)):
         if base == "force-app" or base.startswith("pkg-"):
@@ -71,6 +100,8 @@ def namespace_of(api_name, namespaces):
 def build(root, namespaces):
     nodes, edges = {}, []
     apex_sources = {}
+    vr_formulas = []    # (rule, object, path, formula, formula start line)
+    rt_picklists = []   # (record type, object, picklist, path, line)
     base = repo_root(root)
 
     for path in walk(root):
@@ -88,15 +119,14 @@ def build(root, namespaces):
             obj = os.path.basename(os.path.dirname(os.path.dirname(path)))
             field = name[: -len(".field-meta.xml")]
             api = f"{obj}.{field}"
-            try:
-                el = ET.parse(path).getroot()
-                ftype = text(el, "type")
-                required = text(el, "required") == "true"
-            except ET.ParseError:
-                ftype, required = None, None
+            el = parse_xml(path)
+            ftype = text(el, "type") if el is not None else None
+            required = (text(el, "required") == "true") if el is not None else None
             nodes[api] = {"type": "CustomField", "fieldType": ftype,
                           "required": required, "path": r,
                           "namespace": namespace_of(field, namespaces)}
+            if el is None:
+                nodes[api]["parseError"] = True
             nodes.setdefault(obj, {"type": "CustomObject", "path": None,
                                    "namespace": namespace_of(obj, namespaces)})
             edges.append({"from": api, "to": obj, "kind": "fieldOf"})
@@ -106,32 +136,32 @@ def build(root, namespaces):
             api = name.rsplit(".", 1)[0]
             kind = "ApexClass" if name.endswith(".cls") else "ApexTrigger"
             meta = path + "-meta.xml"
-            api_version = None
+            api_version, meta_bad = None, False
             if os.path.exists(meta):
-                try:
-                    api_version = text(ET.parse(meta).getroot(), "apiVersion")
-                except ET.ParseError:
-                    pass
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                src = fh.read()
+                mel = parse_xml(meta)
+                if mel is None:
+                    meta_bad = True
+                else:
+                    api_version = text(mel, "apiVersion")
+            src = read_src(path)
             apex_sources[api] = (r, src)
             sharing = "without sharing" if re.search(r"\bwithout\s+sharing\b", src) else (
                 "with sharing" if re.search(r"\bwith\s+sharing\b", src) else "inherited/unspecified")
             nodes[api] = {"type": kind, "path": r, "apiVersion": api_version,
                           "sharing": sharing, "isTest": "@isTest" in src or "@IsTest" in src}
+            if meta_bad:
+                nodes[api]["parseError"] = True
 
         # Flows
         elif name.endswith(".flow-meta.xml"):
             api = name[: -len(".flow-meta.xml")]
-            try:
-                el = ET.parse(path).getroot()
-                ptype = text(el, "processType")
-                status = text(el, "status")
-            except ET.ParseError:
-                ptype, status = None, None
+            el = parse_xml(path)
+            ptype = text(el, "processType") if el is not None else None
+            status = text(el, "status") if el is not None else None
             nodes[api] = {"type": "Flow", "processType": ptype, "status": status, "path": r}
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                src = fh.read()
+            if el is None:
+                nodes[api]["parseError"] = True
+            src = read_src(path)
             for m in re.finditer(r"<(?:field|object)>([A-Za-z0-9_]+(?:__c|__r)?)</", src):
                 edges.append({"from": api, "to": m.group(1), "kind": "flowRef",
                               "evidence": f"{r}:{src[:m.start()].count(chr(10)) + 1}"})
@@ -140,22 +170,62 @@ def build(root, namespaces):
         elif name.endswith(".permissionset-meta.xml"):
             api = name[: -len(".permissionset-meta.xml")]
             nodes[api] = {"type": "PermissionSet", "path": r}
-            try:
-                el = ET.parse(path).getroot()
+            el = parse_xml(path)
+            if el is None:
+                nodes[api]["parseError"] = True
+            else:
                 for fp in el.findall("m:fieldPermissions", NS):
                     f = text(fp, "field")
                     if f:
                         edges.append({"from": api, "to": f, "kind": "fieldPermission",
                                       "editable": text(fp, "editable") == "true"})
-            except ET.ParseError:
-                pass
+
+        # Validation rules
+        elif name.endswith(".validationRule-meta.xml"):
+            obj = os.path.basename(os.path.dirname(os.path.dirname(path)))
+            api = f"{obj}.{name[: -len('.validationRule-meta.xml')]}"
+            el = parse_xml(path)
+            nodes[api] = {"type": "ValidationRule", "path": r,
+                          "active": (text(el, "active") == "true") if el is not None else None}
+            nodes.setdefault(obj, {"type": "CustomObject", "path": None,
+                                   "namespace": namespace_of(obj, namespaces)})
+            if el is None:
+                nodes[api]["parseError"] = True
+                continue
+            src = read_src(path)
+            edges.append({"from": api, "to": obj, "kind": "validationRuleOf",
+                          "evidence": f"{r}:{line_of(src, '<ValidationRule')}"})
+            fel = el.find("m:errorConditionFormula", NS)
+            formula = fel.text if fel is not None else None  # raw: keeps leading newlines for line math
+            if formula:
+                vr_formulas.append((api, obj, r, formula,
+                                    line_of(src, "<errorConditionFormula")))
+
+        # Record types
+        elif name.endswith(".recordType-meta.xml"):
+            obj = os.path.basename(os.path.dirname(os.path.dirname(path)))
+            api = f"{obj}.{name[: -len('.recordType-meta.xml')]}"
+            el = parse_xml(path)
+            nodes[api] = {"type": "RecordType", "path": r}
+            nodes.setdefault(obj, {"type": "CustomObject", "path": None,
+                                   "namespace": namespace_of(obj, namespaces)})
+            if el is None:
+                nodes[api]["parseError"] = True
+                continue
+            src = read_src(path)
+            edges.append({"from": api, "to": obj, "kind": "recordTypeOf",
+                          "evidence": f"{r}:{line_of(src, '<RecordType')}"})
+            for pv in el.findall("m:picklistValues", NS):
+                pick = text(pv, "picklist")
+                if pick:
+                    rt_picklists.append((api, obj, pick, r,
+                                         line_of(src, f"<picklist>{pick}</picklist>")))
 
         # LWC / Aura
         elif "/lwc/" in r and name.endswith(".js") and not name.endswith(".test.js"):
             api = os.path.basename(os.path.dirname(path))
             nodes.setdefault(api, {"type": "LightningComponentBundle", "path": os.path.dirname(r)})
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                src = fh.read()
+            src = read_src(path)
             for m in re.finditer(r"@salesforce/apex/([A-Za-z0-9_]+)\.", src):
                 edges.append({"from": api, "to": m.group(1), "kind": "lwcApexImport",
                               "evidence": f"{r}:{src[:m.start()].count(chr(10)) + 1}"})
@@ -178,6 +248,28 @@ def build(root, namespaces):
                 if tok in nodes and nodes[tok]["type"] == "CustomObject":
                     edges.append({"from": api, "to": tok, "kind": "apexObjectRef",
                                   "evidence": f"{r}:{i}"})
+
+    # Validation rule formulas -> fields. Bare X__c is a field on the rule's own object;
+    # Obj.X__c is used only when Obj is an object node. Edges only to field nodes that exist.
+    for api, obj, r, formula, start in vr_formulas:
+        formula = blank_literals(formula)
+        for m in re.finditer(r"(?<![A-Za-z0-9_.])(?:([A-Za-z0-9_]+)\.)?([A-Za-z0-9_]+__c)\b", formula):
+            qual, tok = m.group(1), m.group(2)
+            if qual is None:
+                target = f"{obj}.{tok}"
+            elif nodes.get(qual, {}).get("type") == "CustomObject":
+                target = f"{qual}.{tok}"
+            else:
+                continue
+            if nodes.get(target, {}).get("type") == "CustomField":
+                edges.append({"from": api, "to": target, "kind": "validationFieldRef",
+                              "evidence": f"{r}:{start + formula.count(chr(10), 0, m.start())}"})
+
+    for api, obj, pick, r, line in rt_picklists:
+        target = f"{obj}.{pick}"
+        if nodes.get(target, {}).get("type") == "CustomField":
+            edges.append({"from": api, "to": target, "kind": "recordTypePicklist",
+                          "evidence": f"{r}:{line}"})
 
     # Resolve flow short names (<field>Risk_Rating__c</field>) to full API names when unambiguous
     for e in edges:
