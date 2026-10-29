@@ -1,0 +1,2 @@
+{"id": "9001", "slug": "risk-rating-field", "input": "As a lender I need a Risk Rating picklist on Account so the credit team can see rating at a glance. Values: Low, Medium, High.",
+ "assert": {"must_reference": ["Account.Risk_Rating__c"], "must_label_every_claim": true, "banned_phrases": ["we recommend", "should", "option A is better"], "max_hops": 2}}

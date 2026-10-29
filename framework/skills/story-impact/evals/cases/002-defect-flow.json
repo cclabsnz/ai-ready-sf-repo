@@ -1,0 +1,2 @@
+{"id": "9002", "slug": "loan-status-flow-defect", "input": "Defect: when Loan Stage changes to Approved the Account Risk Rating is not recalculated. Expected: rating updated within the same transaction.",
+ "assert": {"must_reference": ["Loan_Stage_Update", "Account.Risk_Rating__c"], "must_label_every_claim": true, "banned_phrases": ["we recommend", "should"], "max_hops": 2}}

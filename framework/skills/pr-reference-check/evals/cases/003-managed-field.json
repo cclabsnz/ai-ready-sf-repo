@@ -1,0 +1,2 @@
+{"diff_fixture": "fixtures/diffs/003-managed-field.patch", "target": "develop",
+ "assert": {"must_contain_label": "Unverifiable", "must_reference": ["LLC_BI__Collateral__c"], "banned_phrases": ["Approve"]}}

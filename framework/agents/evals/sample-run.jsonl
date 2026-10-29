@@ -1,0 +1,4 @@
+{"tool": "Read", "input": {"file_path": ".claude/knowledge/README.md"}, "guard_exit": 0, "allowed": true}
+{"tool": "Bash", "input": {"command": "python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2"}, "guard_exit": 0, "allowed": true}
+{"tool": "Bash", "input": {"command": "sf org login web -a uat"}, "guard_exit": 2, "allowed": false}
+{"tool": "Write", "input": {"file_path": "ai-context/9001-risk-rating-field/impact.md"}, "guard_exit": 0, "allowed": true}

@@ -1,0 +1,31 @@
+name: ai-framework
+on:
+  pull_request:
+    paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**"]
+jobs:
+  guard-and-lint:
+    strategy:
+      matrix: { os: [ubuntu-latest, windows-latest] }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Guard blocks on this OS
+        run: python tools/guard/test_guard.py
+      - name: Real-data scan
+        run: python tools/guard/scan_data.py --all
+      - name: Framework lint
+        run: python tools/build/lint.py
+      - name: Rendered outputs are current
+        run: python tools/build/render.py --check
+      - name: Build index on fixtures
+        run: python tools/index/build_index.py --root fixtures --out ../index-ci
+      - name: Agent trajectory eval (sample)
+        run: python tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2

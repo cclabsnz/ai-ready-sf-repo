@@ -1,0 +1,8 @@
+# Framework guild reviews every change to the AI framework and its rendered outputs.
+/framework/            @org/ai-framework-guild
+/tools/                @org/ai-framework-guild
+/.claude/              @org/ai-framework-guild
+/.github/instructions/ @org/ai-framework-guild
+/.github/agents/       @org/ai-framework-guild
+/.github/skills/       @org/ai-framework-guild
+/.github/hooks/        @org/ai-framework-guild

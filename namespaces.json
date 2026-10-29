@@ -1,0 +1,4 @@
+{
+  "namespaces": ["LLC_BI", "nFORCE", "nFUSE", "nRetail", "FinServ"],
+  "note": "Managed-package prefixes present in this repo. Internals not in pkg-*/ are Unverifiable."
+}

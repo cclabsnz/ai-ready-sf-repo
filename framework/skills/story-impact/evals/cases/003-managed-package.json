@@ -1,0 +1,2 @@
+{"id": "9003", "slug": "managed-collateral", "input": "Show collateral owner-occupied status on the loan screen using LLC_BI__Collateral__c.",
+ "assert": {"must_reference": ["LLC_BI__Collateral__c"], "must_contain_label": "Unverifiable", "must_label_every_claim": true, "banned_phrases": ["we recommend", "should"], "max_hops": 2}}

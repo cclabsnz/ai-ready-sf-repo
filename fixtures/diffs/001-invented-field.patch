@@ -1,0 +1,5 @@
+--- a/force-app/main/default/classes/RiskRatingService.cls
++++ b/force-app/main/default/classes/RiskRatingService.cls
+@@ -3 +3 @@
+-        List<Account> accts = [SELECT Id, Risk_Rating__c, Legacy_Score__c FROM Account WHERE Id IN :accountIds WITH USER_MODE];
++        List<Account> accts = [SELECT Id, Risk_Rating__c, Risk_Score__c FROM Account WHERE Id IN :accountIds WITH USER_MODE];

@@ -1,0 +1,2 @@
+{"diff_fixture": "fixtures/diffs/001-invented-field.patch", "target": "develop",
+ "assert": {"must_flag": ["Account.Risk_Score__c"], "must_not_flag": ["Account.Risk_Rating__c"], "verdict_in": ["Changes suggested"], "banned_phrases": ["Approve"]}}

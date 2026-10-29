@@ -1,0 +1,2 @@
+{"diff_fixture": "fixtures/diffs/002-clean-change.patch", "target": "develop",
+ "assert": {"must_flag": [], "verdict_in": ["Ready for human review"], "banned_phrases": ["Approve"]}}

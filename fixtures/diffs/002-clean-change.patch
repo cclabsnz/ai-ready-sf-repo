@@ -1,0 +1,5 @@
+--- a/force-app/main/default/classes/RiskRatingService.cls
++++ b/force-app/main/default/classes/RiskRatingService.cls
+@@ -5 +5 @@
+-            a.Risk_Rating__c = a.Legacy_Score__c > 70 ? 'High' : 'Low';
++            a.Risk_Rating__c = a.Legacy_Score__c > 75 ? 'High' : 'Low';

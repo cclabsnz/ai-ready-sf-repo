@@ -1,0 +1,4 @@
+--- a/force-app/main/default/classes/RiskRatingService.cls
++++ b/force-app/main/default/classes/RiskRatingService.cls
+@@ -3 +3,2 @@
++        List<LLC_BI__Collateral__c> coll = [SELECT Id, LLC_BI__Owner_Occupied__c FROM LLC_BI__Collateral__c WITH USER_MODE];

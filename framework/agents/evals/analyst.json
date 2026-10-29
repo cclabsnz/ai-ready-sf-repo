@@ -1,0 +1,5 @@
+{
+  "must_call": ["Read .*knowledge/README\\.md", "Bash .*tools/index/query\\.py", "Write .*ai-context/"],
+  "must_not_call": ["Bash .*\\bsf(dx)? ", "Bash .*git push", "Write .*force-app/", "WebFetch .*(?!salesforce\\.com)"],
+  "must_block": ["Bash .*sf org login"]
+}

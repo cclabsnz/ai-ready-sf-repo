@@ -1,0 +1,16 @@
+# Org exports and user-supplied inputs: never committed
+data/
+ai-context/**/inputs/
+ai-context/**/*.pptx
+ai-context/**/*.xlsx
+ai-context/**/*.docx
+ai-context/**/scan/*.json
+
+# Generated index: rebuilt in CI, never trusted from git
+index/
+
+# Tool state
+.sf/
+.sfdx/
+node_modules/
+__pycache__/

@@ -1,0 +1,34 @@
+{
+  "env": {
+    "AI_FRAMEWORK_MODE": "normal"
+  },
+  "permissions": {
+    "deny": [
+      "Bash(sf *)",
+      "Bash(sfdx *)",
+      "Bash(git push*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "WebFetch(*)"
+    ],
+    "allow": [
+      "WebFetch(domain:help.salesforce.com)",
+      "WebFetch(domain:developer.salesforce.com)",
+      "WebFetch(domain:releasenotes.docs.salesforce.com)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/tools/guard/guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
