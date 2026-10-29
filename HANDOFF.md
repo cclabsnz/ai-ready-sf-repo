@@ -50,15 +50,21 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
   paths and run the maintainer command allowlist in `tools/guard/policy.json`.
 - Changes to `tools/guard/`, `.claude/settings.json`, `.github/workflows/`, `.github/hooks/` and
   CODEOWNERS files are human-applied patches with a second reviewer: the guard blocks the
-  assistant's write tools and its Bash write patterns from touching those paths in every mode. Any
-  change under `.github/` (including the rendered `.github/instructions/` and similar trees that
-  `maintain` may write) also trips the tripwire until a human commits it. Raising a Salesforce CLI
+  assistant's write tools and its Bash write patterns from touching those paths in every mode. A
+  change under `.github/workflows/` or `.github/hooks/`, or to a CODEOWNERS file, also trips the
+  tripwire until a human commits it; the rendered `.github/instructions/` and similar trees that
+  `maintain` writes do not. Raising a Salesforce CLI
   level (`sf.mode_level`, `sf.allowed_orgs`) is such a patch. The human applies and commits guard
   files together.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
-  terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change. Until then the
-  tripwire blocks every write and non-read-only command. The guard blocks Bash lines that run it,
-  and it also refuses to run without a terminal.
+  terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
+  every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
+  every write and non-read-only command. The guard blocks Bash lines that run it, and it also
+  refuses to run without a terminal.
+- The guard runs on every tool call, MCP tools included (see "What the guard guarantees" in
+  `docs/DESIGN.md`), and blocks itself after 7 seconds rather than risk the 10-second hook timeout.
+- For a commit message with `$`, braces or a substitution, write it to a file under `ai-context/`
+  and run `git commit -F ai-context/<file>`.
 - Code the assistant runs can bypass laptop controls (see `docs/DESIGN.md`, Layer 1). That is why
   the server-side layer (CODEOWNERS, branch protection, CI, review) exists and is the guarantee.
   Read "Modes" and "What the guard guarantees" before relying on the guard.
@@ -82,8 +88,11 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
 ### WS0 guard hardening
 - [x] Four modes (advise, normal, build, maintain) with committed-`advise`-wins precedence.
 - [x] Allowlist-based Bash per mode and a git subcommand allowlist, rules in `tools/guard/policy.json`.
-- [x] Tripwire over guard, settings, CI and CODEOWNERS paths, `.git/config`, includes and hooks, with
-      a human-only `--rebaseline`.
+- [x] Tripwire over guard, settings, CI workflow, GitHub hook and CODEOWNERS paths, `.git/config`,
+      includes and hooks, with a human-only `--rebaseline`.
+- [x] Final review fixes: glob words that expand to options, a 7-second internal deadline and one walk
+      budget per call, `--amend` prefixes, framework-script output flags, every tool (MCP included)
+      through the hook.
 - [x] Salesforce CLI access levels (`none`, `offline`, `org-metadata`, `org-data`).
 - [x] `.gitattributes` line-ending rules for the wrapper and guard files.
 - [x] `docs/DESIGN.md`, `README.md` and this file describe the above.

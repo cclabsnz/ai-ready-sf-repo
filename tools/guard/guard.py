@@ -12,12 +12,18 @@ Policy:
     mode's level (policy.json sf.mode_level), never an always_blocked command.
   - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
   - Outside advise, every Bash command must also be on the mode's bash_allow list.
+  - In every mode, an unquoted glob word that could expand to an option ("-[o]", or "*" next to a file named
+    "--pre=sh") is blocked.
   - WebFetch only to the allowlist.
-  - Tripwire: while the guard, settings, CI or CODEOWNERS differ from HEAD, or .git/config or .git/hooks/ differ
-    from the baseline a human recorded with --rebaseline, every write and non-read-only Bash call is blocked.
+  - Every other tool: tools.read_only pass; MCP tools are blocked in advise and, in other modes, when their
+    name reads as a write (tools.mcp_write_pattern); any other tool is blocked in advise only.
+  - Tripwire: while the guard, settings, CI workflows, GitHub hooks or CODEOWNERS differ from HEAD, or .git/config
+    or .git/hooks/ differ from the baseline a human recorded with --rebaseline, every write and non-read-only Bash
+    call is blocked.
   - Mode advise blocks every write and every Bash call except read-only
     ones (the kill switch). The committed .claude/settings.json is the
     ceiling: committed advise beats any local AI_FRAMEWORK_MODE.
+  - The hook times out at 10 s, so the guard blocks itself after DEADLINE_SECONDS and gives git GIT_TIMEOUT.
 
 The rules live in policy.json next to this file. Any internal error,
 including an unreadable policy, blocks (exit 2): the hook runner treats
@@ -31,8 +37,16 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+import urllib.parse
+
+# ---- Policy, mode and limits ----
 
 MODES = ("advise", "normal", "build", "maintain")
+# The hook times out at 10 s, and a timed-out hook may let the call through, so the guard stops itself well before.
+DEADLINE_SECONDS = 7
+DEADLINE = [time.monotonic() + DEADLINE_SECONDS]  # reset at the start of main()
+GIT_TIMEOUT = 3
 NO_SCOPE_MSG = "no active story scope; run tools/impacts/start.py <storyId> (WS8)"
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Found through __file__ because the wrapper runs us with -I (no cwd, no script dir on sys.path).
@@ -48,6 +62,11 @@ def block(msg):
         # the interpreter's shutdown flush, which would fail again and exit 120.
         os._exit(2)
     sys.exit(2)
+
+
+def check_deadline():
+    if time.monotonic() > DEADLINE[0]:
+        block("guard ran out of time; failing closed")
 
 
 def load_policy(path):
@@ -93,6 +112,8 @@ def resolve_mode(committed, local):
         return local or "normal"
     return "advise"  # build and maintain are personal; a committed one is not trusted
 
+
+# ---- Tripwire and git trust ----
 
 BASELINE = "ai-guard-baseline"
 GIT_CONFIG_MARK = ".git config (unreadable include or hooksPath value)"
@@ -234,9 +255,14 @@ def git_env():
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
+def git_timeout():
+    """At most GIT_TIMEOUT, and never past the deadline. A timeout raises, which callers treat as unverifiable."""
+    return max(0.1, min(GIT_TIMEOUT, DEADLINE[0] - time.monotonic()))
+
+
 def run_git(root, *args):
     cmd = ["git", "-C", root, "-c", "core.fsmonitor=false"] + list(args)
-    return subprocess.run(cmd, capture_output=True, timeout=60, stdin=subprocess.DEVNULL, env=git_env())
+    return subprocess.run(cmd, capture_output=True, timeout=git_timeout(), stdin=subprocess.DEVNULL, env=git_env())
 
 
 def tripwire_dirty(root, paths):
@@ -280,11 +306,10 @@ def tripwire_reason(root, policy):
     return None
 
 
-def git_block_reason(root, cmd):
+def git_block_reason(root, segments):
     """Reason to refuse a Bash command that runs git while the git config or hooks cannot be trusted, else None.
-    Even read-only git runs whatever core.fsmonitor or a hook names."""
-    segments = parse_bash(cmd)
-    if segments is None or not any(command_base(command_words(seg)) == "git" for seg in segments):
+    Even read-only git runs whatever core.fsmonitor or a hook names. segments is main()'s non-strict parse."""
+    if not any(command_base(command_words(seg)) == "git" for seg in segments):
         return None
     problem = git_state_problem(root)
     if problem == "unverifiable":
@@ -296,10 +321,11 @@ def git_block_reason(root, cmd):
     return None
 
 
-def guard_token_reason(cmd):
+def guard_token_reason(segments):
     """Reason when a parsed (unquoted) word names guard.py or is --rebaseline, else None. Backs up the blocked_commands
-    regexes, which see the raw text: guard''.py and --rebasel''ine slip past them."""
-    for seg in parse_bash(cmd) or []:
+    regexes, which see the raw text: guard''.py and --rebasel''ine slip past them. segments is main()'s non-strict
+    parse, so a "$" elsewhere on the line cannot hide the words."""
+    for seg in segments:
         for word in command_words(seg):
             if word == "--rebaseline" or command_base([word]) == "guard.py":
                 return "the guard's own script and --rebaseline are for a human at a terminal. Write numbered steps for a human to run instead."
@@ -321,7 +347,7 @@ def rebaseline(start):
     if not interactive:
         block("--rebaseline must be run by a human in a terminal, not through a hook or a script.")
     try:
-        p = subprocess.run(["git", "-C", start, "rev-parse", "--show-toplevel"], capture_output=True, timeout=60,
+        p = subprocess.run(["git", "-C", start, "rev-parse", "--show-toplevel"], capture_output=True, timeout=GIT_TIMEOUT,
                            stdin=subprocess.DEVNULL, env=git_env())
         if p.returncode != 0 or not p.stdout.strip():
             block(f"--rebaseline: {start} is not inside a git work tree.")
@@ -331,6 +357,8 @@ def rebaseline(start):
     sys.stdout.write(f"baseline recorded in the git directory ({BASELINE})\n")
     sys.exit(0)
 
+
+# ---- Write paths ----
 
 def active_scope(root):
     return []  # WS8 fills this from the active story
@@ -360,6 +388,8 @@ def write_block_reason(rel, mode, policy, scope):
         return NO_SCOPE_MSG
     return f"write to {rel!r} is outside {allowed} in {mode.upper()} mode. The build is read-only; hand code to the squad."
 
+
+# ---- Bash parsing ----
 
 SEPARATORS = {";", "&&", "||", "|", "&"}
 REDIRECT_OP = re.compile(r"&>>?|[<>]+&?|>\|")
@@ -397,6 +427,65 @@ def mask_quotes(s):
             out.append(c)
         i += 1
     return "".join(out)[: len(s)]
+
+
+# Unquoted glob characters are swapped for private-use marks before parsing, so a parsed word still says whether
+# its "*", "?" or "[" is one the shell expands ("'*'" and "\*" are literal).
+GLOB_MARKS = {"*": "", "?": "", "[": ""}
+UNMARK = str.maketrans({v: k for k, v in GLOB_MARKS.items()})
+
+
+def mark_globs(cmd):
+    masked = mask_quotes(cmd)  # same length as cmd; an unquoted character is unchanged
+    return "".join(GLOB_MARKS.get(c, c) if m == c else c for c, m in zip(cmd, masked))
+
+
+def is_glob_word(word):
+    return any(m in word for m in GLOB_MARKS.values())
+
+
+def glob_pattern(word):
+    """A marked word as a Python glob pattern: quoted glob characters escaped, bash's "[^" spelled "[!"."""
+    out = []
+    for i, c in enumerate(word):
+        if c == GLOB_MARKS["["] and word[i + 1 : i + 2] == "^":
+            out.append("[!")
+        elif c in GLOB_MARKS.values():
+            out.append(c.translate(UNMARK))
+        elif c in "*?[":
+            out.append(f"[{c}]")
+        elif c == "^" and i and word[i - 1] == GLOB_MARKS["["]:
+            continue  # already written as "!"
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def glob_reason(marked, cwd):
+    """None unless an unquoted glob word could expand to an option: it starts with "-", it comes after a cd, it holds
+    an expansion, or it matches a name starting with "-" in the working directory. Applies in every mode."""
+    after_cd = False
+    for seg in marked:
+        for word in seg:
+            if not is_glob_word(word):
+                continue
+            plain = word.translate(UNMARK)
+            if plain.startswith("-"):
+                return f"the unquoted glob {plain!r} starts with '-' and the shell could turn it into an option; quote it."
+            if after_cd or cwd is None:
+                return f"the unquoted glob {plain!r} expands in a directory the guard cannot see (after a cd); quote it or drop the cd."
+            if any(c in plain for c in "${}`") or plain.startswith("~"):
+                return f"the unquoted glob {plain!r} holds an expansion, so the guard cannot tell what it matches; quote it."
+            for n, match in enumerate(glob.iglob(os.path.join(glob.escape(cwd), glob_pattern(word)))):
+                if n % 1000 == 0:
+                    check_deadline()
+                if not spend(1):
+                    return f"the unquoted glob {plain!r} matches too many names to check; narrow it."
+                if os.path.basename(match).startswith("-"):
+                    return (f"the unquoted glob {plain!r} matches {os.path.basename(match)!r}, which the shell would pass "
+                            "as an option; quote the glob or rename the file.")
+        after_cd = after_cd or command_base(command_words([w.translate(UNMARK) for w in seg])) in CD_COMMANDS
+    return None
 
 
 def has_expansion(cmd):
@@ -548,13 +637,17 @@ def advise_block_reason(cmd, patterns, root=None, cwd=None):
     return cwd_bound_reason(segments, root, cwd)
 
 
+# ---- Bash writers ----
+
 UNKNOWN_WRITE_MSG = "cannot determine what this command writes; run it as a human"
 SHELL_KEYWORDS = {"if", "then", "else", "elif", "while", "until", "do", "!", "{", "time"}
 CD_COMMANDS = {"cd", "pushd", "popd"}
 GLOB_CHARS = re.compile(r"[*?\[]")
 PYTHON = re.compile(r"python[0-9.]*|py")
 CHMOD_MODE = re.compile(r"[0-7]{3,4}|[ugoa]*[-+=][rwxXst]*(,[ugoa]*[-+=][rwxXst]*)*")
-WALK_LIMIT = 20000  # entries a recursive command may be expanded to before we give up and call it unknown
+WALK_LIMIT = 20000  # entries one guard call may enumerate (walks and glob matches) before it calls the command unknown
+BUDGET = [WALK_LIMIT]  # reset at the start of main()
+WALKED = {}  # path -> entries below it, so a tree named twice is walked once
 MODELLED = {"cp", "mv", "install", "rm", "rmdir", "mkdir", "touch", "truncate", "chmod", "chown", "chgrp", "dd", "tee", "sed",
             "find", "sort", "uniq", "git", "sf"}
 # Per command: single-dash flags that take no value, and single-dash options that take the next word.
@@ -584,14 +677,23 @@ def shell_glob(word, cwd):
     return sorted(glob.glob(os.path.join(cwd, word))) or [word]
 
 
+def spend(n):
+    """Take n entries from this call's budget; False once it is spent."""
+    BUDGET[0] -= n
+    return BUDGET[0] >= 0
+
+
 def walk_paths(path):
-    """Every file and directory below path, or None past WALK_LIMIT."""
+    """Every file and directory below path, or None once this call's budget is spent."""
+    if path in WALKED:
+        return WALKED[path]
     out = []
     for dirpath, dirs, files in os.walk(path):
-        for name in dirs + files:
-            out.append(os.path.join(dirpath, name))
-            if len(out) > WALK_LIMIT:
-                return None
+        check_deadline()
+        if not spend(len(dirs) + len(files)):
+            return None
+        out += [os.path.join(dirpath, name) for name in dirs + files]
+    WALKED[path] = out
     return out
 
 
@@ -778,16 +880,18 @@ def git_allowed(args, policy):
         if a == "--":
             break
         name = a.partition("=")[0]
-        # git accepts unambiguous prefixes, so "--out" is --output; "-O" runs a pager command in grep.
+        # git accepts unambiguous prefixes, so "--out" is --output and "--amen" is --amend; "-O" runs a pager command.
         if name.startswith("--output") or (name.startswith("--") and len(name) >= 4 and "--output".startswith(name)):
+            return False
+        if sub == "commit" and len(name) >= 4 and "--amend".startswith(name):
             return False
         if name.startswith("-O") or name.startswith("--open-files"):
             return False
     return True
 
 
-def copy_targets(base, ops, opts, cwd):
-    """Every path cp, mv or install writes: the destination, what lands inside it, and for trees each file below."""
+def copy_targets(base, ops, opts, cwd, walk=True):
+    """Every path cp, mv or install writes: the destination, what lands inside it, and (when walk) each file below a tree."""
     if base == "install" and ("d" in opts or "--directory" in opts):
         return ops
     ops = [p for w in ops for p in shell_glob(w, cwd)]
@@ -800,8 +904,8 @@ def copy_targets(base, ops, opts, cwd):
         dest, srcs = ops[-1], ops[:-1]
         is_dir = len(srcs) > 1 or dest.endswith("/") or os.path.isdir(os.path.join(cwd, dest))
     out = [os.path.join(dest, "") if is_dir else dest]
-    recursive = base == "mv" or any(k in opts for k in ("r", "R", "a", "--recursive", "--archive"))
-    for src in srcs:
+    recursive = walk and (base == "mv" or any(k in opts for k in ("r", "R", "a", "--recursive", "--archive")))
+    for src in dict.fromkeys(srcs):
         name = os.path.basename(os.path.normpath(src))
         if name in ("", ".", ".."):
             name = os.path.basename(os.path.realpath(os.path.join(cwd, src)))
@@ -944,7 +1048,7 @@ def pnpm_targets(args):
             fmt = val if eq else (a[2:] if a[:2] == "-f" and a != "-f" else (opts[i] if i < len(opts) else ""))
             if not eq and (a in ("-f", "--format")):
                 i += 1
-            if "/" in fmt or fmt.endswith((".js", ".cjs", ".mjs")):
+            if "/" in fmt or "\\" in fmt or fmt.endswith((".js", ".cjs", ".mjs")):
                 return None
             continue
         if name in PNPM_OUT_FLAGS:
@@ -962,8 +1066,76 @@ def pnpm_targets(args):
     return (out + operands, True) if write else (out, False)
 
 
-def command_targets(words, policy, cwd):
-    """(paths the command writes, whether directories among them are written recursively), or None when unknown."""
+SCRIPT_FLAGS = {  # argparse options of the framework scripts that choose where they write: name -> takes a value
+    "build_index.py": {"--root": True, "--out": True, "--version": False, "--help": False},
+    "write_report.py": {"--id": True, "--slug": True, "--classified": True, "--root": True, "--help": False},
+}
+
+
+def script_flag_values(args, flags):
+    """{option: [values]} for a script's argparse options, abbreviations included (argparse accepts any unique
+    prefix), or None when a value is missing or the shell rewrites it. Other words make argparse exit before writing."""
+    vals = {name: [] for name in flags}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            break
+        name, eq, val = a.partition("=")
+        if not name.startswith("--"):
+            continue
+        hits = [f for f in flags if f.startswith(name)]
+        if name in flags:
+            hits = [name]
+        if not any(flags[f] for f in hits):
+            continue  # unknown or ambiguous: argparse exits; a no-value flag writes nothing
+        if len(hits) > 1:
+            return None
+        if not eq:
+            if i >= len(args):
+                return None
+            val, i = args[i], i + 1
+        if any(c in val for c in "${}*?[") or val.startswith("~"):
+            return None
+        vals[hits[0]].append(val)
+    return vals
+
+
+def script_targets(script, args):
+    """(paths a framework script writes through its flags, False), or None when unknown. Other scripts: ([], False).
+
+    build_index.py writes <--root>/<--out>/{metadata,inventory}.json. write_report.py writes
+    ai-context/<--id>-<--slug>/impact.md under --root, and runs <--root>/tools/index/query.py, so a --root other
+    than "." is unknown. query.py prints to stdout only.
+    """
+    name = script.replace("\\", "/").rsplit("/", 1)[-1]
+    if name not in SCRIPT_FLAGS:
+        return [], False
+    vals = script_flag_values(args, SCRIPT_FLAGS[name])
+    if vals is None:
+        return None
+    out = []
+    if name == "build_index.py":
+        for root in vals["--root"] or ["."]:
+            for sub in vals["--out"] or ["index"]:
+                d = os.path.join(root, sub)
+                out += [os.path.join(d, ""), os.path.join(d, "metadata.json"), os.path.join(d, "inventory.json")]
+        return out, False
+    if any(os.path.normpath(r) != "." for r in vals["--root"]):
+        return None
+    if any("/" in v or "\\" in v or ".." in v for v in vals["--id"] + vals["--slug"]):
+        return None
+    for i in vals["--id"]:
+        for s in vals["--slug"]:
+            d = os.path.join("ai-context", f"{i}-{s}")
+            out += [os.path.join(d, ""), os.path.join(d, "impact.md")]
+    return out, False
+
+
+def command_targets(words, policy, cwd, walk=True):
+    """(paths the command writes, whether directories among them are written recursively), or None when unknown.
+    walk=False skips walking below directories: the lexical pass that runs before any walk."""
     name, args = words[0], words[1:]
     if any(c in name for c in "${}*?") or ("[" in name and name != "[") or name.startswith(("~", "=")) or name == "-":
         return None  # the shell decides which program runs
@@ -983,7 +1155,7 @@ def command_targets(words, policy, cwd):
             if a in ("-W", "-X"):
                 i += 1
             elif not a.startswith("-"):
-                return [], False
+                return script_targets(a, args[i:])
         return None
     if base == "pnpm":
         return pnpm_targets(args)
@@ -1016,7 +1188,7 @@ def command_targets(words, policy, cwd):
     ops, opts = parsed
     recursive = any(k in opts for k in ("r", "R", "--recursive"))
     if base in ("cp", "mv", "install"):
-        found = copy_targets(base, ops, opts, cwd)
+        found = copy_targets(base, ops, opts, cwd, walk)
         return None if found is None else (found, False)
     if base == "chmod":
         return (ops[1:] if ops and CHMOD_MODE.fullmatch(ops[0]) else ops), recursive
@@ -1028,10 +1200,10 @@ def command_targets(words, policy, cwd):
 def expand_targets(targets, recursive, cwd):
     """Absolute targets as written, plus what their globs match now and, if recursive, each file below a directory.
 
-    None past WALK_LIMIT. The unexpanded form is kept so the allowed-prefix check still sees the pattern.
+    None once the call's budget is spent. The unexpanded form is kept so the allowed-prefix check still sees the pattern.
     """
     out = []
-    for t in targets:
+    for t in dict.fromkeys(targets):
         full = os.path.join(cwd, t)
         out.append(full)
         matches = sorted(glob.glob(full)) if GLOB_CHARS.search(t) else []
@@ -1046,8 +1218,8 @@ def expand_targets(targets, recursive, cwd):
     return out
 
 
-def write_targets(seg, policy, cwd):
-    """Absolute paths one segment writes to (globs expanded), or None when they cannot be known."""
+def write_targets(seg, policy, cwd, walk=True):
+    """Absolute paths one segment writes to (globs expanded), or None when they cannot be known. walk=False: no walk."""
     words, redirects = split_redirects(seg)
     redirect_targets = []
     for op, target in redirects:
@@ -1066,11 +1238,11 @@ def write_targets(seg, policy, cwd):
     if words:
         if ASSIGNMENT.match(words[0]):
             return None  # GIT_CONFIG_*, PYTHONPATH and friends change what the command does
-        found = command_targets(words, policy, cwd)
+        found = command_targets(words, policy, cwd, walk)
         if found is None:
             return None
     a = expand_targets(redirect_targets, False, cwd)
-    b = expand_targets(found[0], found[1], cwd)
+    b = expand_targets(found[0], found[1] and walk, cwd)
     return None if a is None or b is None else a + b
 
 
@@ -1087,6 +1259,8 @@ def protected_overlap(rel, policy):
             return p
     return None
 
+
+# ---- Salesforce CLI ----
 
 UNPARSABLE_MSG = "the command cannot be parsed safely (unbalanced quote, substitution or subshell)."
 SF_NAMES = {"sf", "sf.cmd", "sf.exe"}
@@ -1169,6 +1343,8 @@ def sf_block_reason(words, mode, policy):
     return None
 
 
+# ---- Per-mode Bash checks ----
+
 def allowlist_block_reason(segments, mode, policy, root, cwd):
     """None if every segment is on the mode's allowlist, else the reason. A segment that passed the sf checks counts as listed."""
     groups = policy["modes"].get(mode, {}).get("bash_allow")
@@ -1183,45 +1359,74 @@ def allowlist_block_reason(segments, mode, policy, root, cwd):
     return cwd_bound_reason(segments, root, cwd)
 
 
-def bash_block_reason(cmd, mode, policy, scope, root, cwd):
+def bash_block_reason(segments, mode, policy, scope, root, cwd):
     """None if the command may run in this mode (not advise), else the reason: sf checks, then write targets, then the allowlist."""
-    segments = parse_bash(cmd, strict=False)
-    if segments is None:
-        return UNPARSABLE_MSG
     for seg in segments:
         words = sf_words(seg)
         if words and (reason := sf_block_reason(words, mode, policy)):
             return reason
-    return bash_write_block_reason(cmd, mode, policy, scope, root, cwd) or allowlist_block_reason(segments, mode, policy, root, cwd)
+    return bash_write_block_reason(segments, mode, policy, scope, root, cwd) or allowlist_block_reason(segments, mode, policy, root, cwd)
 
 
-def bash_write_block_reason(cmd, mode, policy, scope, root, cwd):
-    """None if every write the command makes is allowed in this mode, else the reason. cwd is where Bash runs."""
-    segments = parse_bash(cmd, strict=False)
-    if segments is None:
-        return UNPARSABLE_MSG
-    after_cd = False
-    for seg in segments:
-        targets = write_targets(seg, policy, cwd)
-        # After a cd the targets no longer resolve against cwd.
-        if targets is None or (after_cd and targets):
-            return UNKNOWN_WRITE_MSG
-        for t in targets:
-            rel = rel_path(root, t)
-            if rel is None:
-                return f"write to {t!r} is on a different drive from the repo."
-            # A directory is written as a prefix of its contents, so "docs" must read as "docs/".
-            reason = write_block_reason(rel + "/" if t.endswith("/") or os.path.isdir(t) else rel, mode, policy, scope)
-            # A glob that matched nothing stays a pattern; only concrete paths can be ancestors.
-            if reason is None and not GLOB_CHARS.search(rel) and (hit := protected_overlap(rel, policy)):
-                reason = f"write to {rel!r} would take {hit!r} with it, which is never allowed. Guard, settings, CI and git internals change by human-applied patch."
-            if reason:
-                return reason
-        after_cd = after_cd or command_base(command_words(seg)) in CD_COMMANDS
+def target_block_reason(t, mode, policy, scope, root):
+    rel = rel_path(root, t)
+    if rel is None:
+        return f"write to {t!r} is on a different drive from the repo."
+    # A directory is written as a prefix of its contents, so "docs" must read as "docs/".
+    reason = write_block_reason(rel + "/" if t.endswith("/") or os.path.isdir(t) else rel, mode, policy, scope)
+    # A glob that matched nothing stays a pattern; only concrete paths can be ancestors.
+    if reason is None and not GLOB_CHARS.search(rel) and (hit := protected_overlap(rel, policy)):
+        reason = f"write to {rel!r} would take {hit!r} with it, which is never allowed. Guard, settings, CI and git internals change by human-applied patch."
+    return reason
+
+
+def bash_write_block_reason(segments, mode, policy, scope, root, cwd):
+    """None if every write the command makes is allowed in this mode, else the reason. cwd is where Bash runs.
+
+    Two passes over every segment: first the targets as written (and what their globs match), so an always-blocked
+    target blocks before any time goes into walking; then what recursive commands reach below directories.
+    Each target is checked once.
+    """
+    seen = set()
+    for walk in (False, True):
+        after_cd = False
+        for seg in segments:
+            targets = write_targets(seg, policy, cwd, walk)
+            # After a cd the targets no longer resolve against cwd.
+            if targets is None or (after_cd and targets):
+                return UNKNOWN_WRITE_MSG
+            for t in targets:
+                if t in seen:
+                    continue
+                seen.add(t)
+                if len(seen) % 1000 == 0:
+                    check_deadline()
+                reason = target_block_reason(t, mode, policy, scope, root)
+                if reason:
+                    return reason
+            after_cd = after_cd or command_base(command_words(seg)) in CD_COMMANDS
     return None
 
 
+GIT_COMMIT = re.compile(r"(?<![\w./-])git\s+commit\b")
+COMMIT_ADVICE = (" A commit message with $, braces or a substitution cannot be checked: write it to a file under ai-context/ "
+                 "and run git commit -F ai-context/<file>.")
+
+
+def with_commit_advice(reason, cmd, mode, policy):
+    """reason, plus the -F advice when the line runs git commit with $, braces or backticks and the mode allows commits."""
+    patterns = [p for g in policy["modes"].get(mode, {}).get("bash_allow", []) for p in policy["bash_groups"][g]]
+    if GIT_COMMIT.search(cmd) and any(c in cmd for c in "${}`") and segment_matches(["git", "commit", "-F", "x"], patterns):
+        return reason.rstrip(".") + "." + COMMIT_ADVICE
+    return reason
+
+
+# ---- Main ----
+
 def main():
+    DEADLINE[0] = time.monotonic() + DEADLINE_SECONDS
+    BUDGET[0] = WALK_LIMIT
+    WALKED.clear()
     policy = load_policy(POLICY_PATH)
     if len(sys.argv) > 1:
         if sys.argv[1:] != ["--rebaseline"]:
@@ -1241,55 +1446,80 @@ def main():
         for pat in policy["blocked_commands"]:
             if re.search(pat, cmd):
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
-        reason = guard_token_reason(cmd) or git_block_reason(root, cmd)
+        # One non-strict parse serves every check that needs words ("$" and braces pass it; advise's strict rule is separate).
+        marked = parse_bash(mark_globs(cmd), strict=False)
+        if marked is None:
+            block(with_commit_advice(UNPARSABLE_MSG, cmd, mode, policy))
+        segments = [[w.translate(UNMARK) for w in seg] for seg in marked]
+        reason = guard_token_reason(segments) or git_block_reason(root, segments)
         if reason:
             block(reason)
+        # Claude Code keeps the shell's cwd between calls; the hook payload says where it is now.
         cwd = payload.get("cwd")
         cwd = root if cwd is None else (os.path.realpath(cwd) if isinstance(cwd, str) else None)
+        reason = glob_reason(marked, cwd)
+        if reason:
+            block(reason)
         if advise_block_reason(cmd, policy["bash_groups"]["read_only"], root, cwd):
+            check_deadline()
             reason = tripwire_reason(root, policy)
             if reason:
                 block(reason)
         if mode == "advise":
             patterns = [p for g in policy["modes"]["advise"]["bash_allow"] for p in policy["bash_groups"][g]]
-            cwd = payload.get("cwd")
-            cwd = root if cwd is None else (os.path.realpath(cwd) if isinstance(cwd, str) else None)
             reason = advise_block_reason(cmd, patterns, root, cwd)
             if reason:
                 block(f"framework is in ADVISE mode: {reason} Output recommendations, do not act.")
         else:
-            # Claude Code keeps the shell's cwd between calls; the hook payload says where it is now.
-            cwd = payload.get("cwd")
             if cwd is None:
-                cwd = root
-            elif not isinstance(cwd, str):
                 block("hook input has a non-string cwd; failing closed")
-            cwd = os.path.realpath(cwd)
             if cwd != root and not cwd.startswith(root + os.sep):
                 block(f"the shell's working directory {cwd!r} is outside the project; run it as a human.")
-            reason = bash_block_reason(cmd, mode, policy, active_scope(root), root, cwd)
+            reason = bash_block_reason(segments, mode, policy, active_scope(root), root, cwd)
             if reason:
-                block(reason)
+                block(with_commit_advice(reason, cmd, mode, policy) if reason == UNKNOWN_WRITE_MSG else reason)
 
     elif tool in WRITE_TOOLS:
-        path = (inp.get("file_path") or inp.get("path") or "").replace("\\", "/")
-        rel = rel_path(root, path)
-        if rel is None:
-            block(f"write to {path!r} is on a different drive from the repo.")
+        # NotebookEdit names its file notebook_path; every path field present is checked.
+        paths = [p.replace("\\", "/") for p in (inp.get("file_path"), inp.get("notebook_path"), inp.get("path")) if p] or [""]
+        rels = [rel_path(root, path) for path in paths]
+        for path, rel in zip(paths, rels):
+            if rel is None:
+                block(f"write to {path!r} is on a different drive from the repo.")
         reason = tripwire_reason(root, policy)
         if reason:
             block(reason)
-        reason = write_block_reason(rel, mode, policy, active_scope(root))
-        if reason:
-            block(reason)
+        for rel in rels:
+            reason = write_block_reason(rel, mode, policy, active_scope(root))
+            if reason:
+                block(reason)
 
     elif tool == "WebFetch":
         url = inp.get("url", "")
-        host = re.sub(r"^https?://", "", url).split("/")[0].lower()
+        try:
+            host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        except ValueError:
+            host = ""
+        if not host:
+            block(f"fetch URL {url!r} has no host; failing closed.")
         allowlist = policy["fetch_allowlist"]
         if not any(host == h or host.endswith("." + h) for h in allowlist):
             block(f"fetch to {host!r} is not on the allowlist {tuple(allowlist)}.")
 
+    elif tool in policy["tools"]["read_only"]:
+        pass  # no path or command effect
+
+    elif tool.startswith("mcp__"):
+        if mode == "advise":
+            block(f"framework is in ADVISE mode: MCP tool {tool!r} is not allowed. Output recommendations, do not act.")
+        if re.search(policy["tools"]["mcp_write_pattern"], tool.rsplit("__", 1)[-1]):
+            block(f"MCP tool {tool!r} looks like it writes or acts (tools.mcp_write_pattern in tools/guard/policy.json). "
+                  "Hand the action to a human.")
+
+    elif mode == "advise":
+        block(f"framework is in ADVISE mode: tool {tool!r} is not on tools.read_only. Output recommendations, do not act.")
+
+    check_deadline()
     sys.exit(0)
 
 

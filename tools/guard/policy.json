@@ -79,7 +79,6 @@
     "check-ignore",
     "blame",
     "branch",
-    "grep",
     "add",
     "commit"
   ],
@@ -89,10 +88,34 @@
     "releasenotes.docs.salesforce.com",
     "docs.ncino.com"
   ],
+  "tools": {
+    "read_only": [
+      "Read",
+      "Grep",
+      "Glob",
+      "LS",
+      "TodoWrite",
+      "WebSearch",
+      "Task",
+      "Agent",
+      "ToolSearch",
+      "BashOutput",
+      "KillShell",
+      "NotebookRead",
+      "ExitPlanMode",
+      "EnterPlanMode",
+      "AskUserQuestion",
+      "Skill",
+      "SlashCommand"
+    ],
+    "mcp_write_pattern": "(?i)(write|edit|create|delete|remove|move|rename|update|upload|send|post|put|patch|apply|push|deploy|trash|forward|reply|label|archive|set|add|insert|execute|run|install)"
+  },
   "tripwire_paths": [
     "tools/guard",
     ".claude/settings.json",
-    ".github",
+    ".github/workflows",
+    ".github/hooks",
+    ".github/CODEOWNERS",
     "CODEOWNERS"
   ],
   "always_blocked_writes": [

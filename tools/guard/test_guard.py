@@ -6,6 +6,7 @@ in a throwaway git repo, so nothing depends on the checkout the tests live in.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import importlib.util
 import tempfile
+import time
 from dataclasses import dataclass, field, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +30,9 @@ def registered_hook_command():
 
 
 HOOK_COMMAND = registered_hook_command()
-GIT = ["git", "-c", "user.name=guard-test", "-c", "user.email=guard-test@example.com"]
+# Per invocation, so a global commit.gpgsign or hooksPath cannot break the harness and nothing lands in the temp repo's .git/config.
+GIT = ["git", "-c", "user.name=guard-test", "-c", "user.email=guard-test@example.com", "-c", "commit.gpgsign=false",
+       "-c", "core.hooksPath=/dev/null"]
 
 
 @dataclass
@@ -959,6 +963,103 @@ for _tool, _payload in (("write", write("ai-context/x.md")), ("git status", bash
         Case(f"I2: quoted hooksPath fails closed ({_tool})", _payload, 2,
              git_append={".git/config": '[core]\n\thooksPath = "ai-context/hk"\n'}, stderr_has="simplify"),
     ]
+def tool(name, **inp):
+    return {"tool_name": name, "tool_input": inp}
+
+
+DASH_O = {"ai-context/-o": "", "ai-context/s.json": "{}\n"}
+PRE_SH = {"ai-context/--pre=sh": "", "ai-context/evil": ""}
+DASH_DELETE = {"ai-context/-delete": ""}
+WRITE_REPORT = "python3 framework/skills/story-impact/scripts/write_report.py"
+BUILD_INDEX = "python3 tools/index/build_index.py"
+# Final review fix wave (C1, I1-I5, minors, extras). C2 has its own runner (check_walk_budget, check_deadline).
+FINAL_CASES = [
+    # C1: an unquoted glob word can expand to an option.
+    Case("C1: cd then sort -[o] onto settings.local.json", bash("cd ai-context && sort -[o] ../.claude/settings.local.json s.json"), 2, files=DASH_O),
+    Case("C1: sort -[o] from payload cwd ai-context", at("ai-context", "sort -[o] ../.claude/settings.local.json s.json"), 2, files=DASH_O),
+    Case("C1: rg x * with --pre=sh in cwd (normal)", at("ai-context", "rg x *"), 2, files=PRE_SH),
+    Case("C1: rg x * with --pre=sh in cwd (advise)", at("ai-context", "rg x *"), 2, env_mode="advise", files=PRE_SH),
+    Case("C1: cd then find .. -delet[e] (advise)", bash("cd ai-context && find .. -delet[e]"), 2, env_mode="advise", files=DASH_DELETE),
+    Case("C1: cd then find .. -delet[e] (normal)", bash("cd ai-context && find .. -delet[e]"), 2, files=DASH_DELETE),
+    Case("C1: dash glob word blocked with no matching file", bash("grep -r --include=*.py foo ai-context"), 2, stderr_has="quote"),
+    Case("C1: dash glob word blocked in advise", bash("sort -[o] x y"), 2, env_mode="advise"),
+    Case("C1: glob matching a dash file at the root", bash("ls *"), 2, files={"-rf": ""}),
+    Case("C1: [^a]* matches a dash file as bash would", at("ai-context", "sort [^a]* s.json"), 2, files=DASH_O),
+    Case("C1: glob after cd blocked even with no dash files", bash("cd ai-context && ls *.md"), 2, files={"ai-context/a.md": ""}),
+    Case("C1: glob after pushd blocked", bash("pushd ai-context; ls *.md"), 2, env_mode="maintain", files={"ai-context/a.md": ""}),
+    Case("C1: glob word with an expansion blocked", bash("ls $D*"), 2),
+    Case("C1: harmless glob allowed", bash("ls ai-context/*.md"), 0, files={"ai-context/a.md": ""}),
+    Case("C1: harmless glob allowed in advise", bash("ls ai-context/*.md"), 0, env_mode="advise", files={"ai-context/a.md": ""}),
+    Case("C1: path-prefixed glob still blocked when a match is a dash file", bash("ls ai-context/*"), 2, files=DASH_O),
+    Case("C1: single-quoted dash glob is literal", at("ai-context", "find . -name '-*'"), 0, env_mode="advise", files=DASH_O),
+    Case("C1: double-quoted glob is literal", at("ai-context", 'grep -r "x*" .'), 0, files=PRE_SH),
+    Case("C1: escaped glob is literal", at("ai-context", "grep -r x\\* ."), 0, files=PRE_SH),
+    # I1: git accepts an unambiguous prefix of --amend.
+    Case("I1: git commit --amen blocked", bash("git commit --amen -m x"), 2, env_mode="build"),
+    Case("I1: git commit --am''end blocked", bash("git commit --am''end -m x"), 2, env_mode="build"),
+    Case("I1: git commit --am blocked", bash("git commit --am -m x"), 2, env_mode="build"),
+    Case("I1: git commit --ame= blocked", bash("git commit --ame=x -m y"), 2, env_mode="maintain"),
+    Case("I1: git commit --amen in maintain blocked", bash("git commit --amen -m x"), 2, env_mode="maintain"),
+    Case("I1: git commit --all allowed", bash("git commit --all -m x"), 0, env_mode="build"),
+    # I2: guard-token and git checks see the non-strict parse, so "$" no longer hides them.
+    Case("I2: quoted guard.py --rebaseline with $X blocked", bash("python3 tools/guard/gu''ard.py --rebasel''ine $X"), 2, env_mode="maintain"),
+    Case("I2: quoted guard.py with $X blocked in normal", bash("python3 tools/guard/gu''ard.py $X"), 2),
+    Case("I2: git with $X while .git is untrusted blocked", bash("git log $X"), 2, git_append={".git/config": FSMON}, stderr_has="rebaseline"),
+    Case("I2: git with $X while .git is untrusted blocked (advise)", bash("git log $X"), 2, env_mode="advise", git_append={".git/config": FSMON}),
+    # I3: framework-script flags that name a write target.
+    Case("I3: build_index --out tools/guard blocked", bash(f"{BUILD_INDEX} --out tools/guard"), 2),
+    Case("I3: build_index --out= force-app blocked", bash(f"{BUILD_INDEX} --out=force-app"), 2),
+    Case("I3: build_index --ou abbreviation blocked", bash(f"{BUILD_INDEX} --ou tools/guard"), 2),
+    Case("I3: build_index --root joins --out", bash(f"{BUILD_INDEX} --root tools --out guard"), 2),
+    Case("I3: build_index --r abbreviation joins --out", bash(f"{BUILD_INDEX} --r=tools --o guard"), 2),
+    Case("I3: build_index --out with an expansion blocked", bash(f"{BUILD_INDEX} --out $X"), 2),
+    Case("I3: build_index --out with no value blocked", bash(f"{BUILD_INDEX} --out"), 2),
+    Case("I3: build_index default allowed", bash(BUILD_INDEX), 0),
+    Case("I3: build_index smoke-test form allowed", bash(f"{BUILD_INDEX} --root fixtures --out ../index"), 0, files={"fixtures/.keep": ""}),
+    Case("I3: build_index into ai-context allowed", bash(f"{BUILD_INDEX} --out ai-context/idx"), 0),
+    Case("I3: write_report slug traversal blocked", bash(f"{WRITE_REPORT} --id 1 --slug ../../tools/guard --classified ai-context/c.json"), 2),
+    Case("I3: write_report slug with / blocked", bash(f"{WRITE_REPORT} --id 1 --slug a/b --classified ai-context/c.json"), 2),
+    Case("I3: write_report slug with backslash blocked", bash(f"{WRITE_REPORT} --id 1 --slug 'a\\b' --classified ai-context/c.json"), 2),
+    Case("I3: write_report id with .. blocked", bash(f"{WRITE_REPORT} --id .. --slug x --classified ai-context/c.json"), 2),
+    Case("I3: write_report --sl= abbreviation blocked", bash(f"{WRITE_REPORT} --id 1 --sl=../x --classified ai-context/c.json"), 2),
+    Case("I3: write_report --root elsewhere blocked", bash(f"{WRITE_REPORT} --id 1 --slug x --classified ai-context/c.json --root ai-context/x"), 2),
+    Case("I3: write_report ordinary run allowed", bash(f"{WRITE_REPORT} --id 1 --slug risk-rating --classified ai-context/c.json"), 0),
+    Case("I3: query.py has no write flags", bash("python3 tools/index/query.py stamp --index tools/guard --root ."), 0),
+    # I4: every tool goes through the guard.
+    Case("I4: mcp write tool on tools/guard blocked", tool("mcp__filesystem__write_file", path="tools/guard/x"), 2),
+    Case("I4: mcp send tool blocked in normal", tool("mcp__claude_ai_Gmail__send_message", to="a@example.com"), 2),
+    Case("I4: mcp verb match is case-insensitive", tool("mcp__x__CreateIssue"), 2),
+    Case("I4: mcp read tool allowed in normal", tool("mcp__filesystem__read_file", path="README.md"), 0),
+    Case("I4: mcp read tool blocked in advise", tool("mcp__filesystem__read_file", path="README.md"), 2, env_mode="advise"),
+    Case("I4: Read allowed in advise", tool("Read", file_path="README.md"), 0, env_mode="advise"),
+    Case("I4: Grep allowed in advise", tool("Grep", pattern="x"), 0, env_mode="advise"),
+    Case("I4: unknown tool blocked in advise", tool("Foo"), 2, env_mode="advise"),
+    Case("I4: unknown tool allowed in normal", tool("Foo"), 0),
+    Case("I4: NotebookEdit notebook_path in ai-context allowed", tool("NotebookEdit", notebook_path="ai-context/x.ipynb"), 0),
+    Case("I4: NotebookEdit notebook_path in force-app blocked", tool("NotebookEdit", notebook_path="force-app/x.ipynb"), 2),
+    Case("I4: NotebookEdit blocked in advise", tool("NotebookEdit", notebook_path="ai-context/x.ipynb"), 2, env_mode="advise"),
+    # I5: the tripwire watches workflows, hooks and CODEOWNERS only.
+    Case("I5: changed .github/instructions does not trip", write("docs/x.md"), 0, env_mode="maintain", dirty=(".github/instructions/x.md",)),
+    Case("I5: changed .github/instructions allows git add", bash("git add docs/x"), 0, env_mode="maintain", dirty=(".github/instructions/x.md",)),
+    Case("I5: changed .github/hooks still trips", write("docs/x.md"), 2, env_mode="maintain", dirty=(".github/hooks/x",), stderr_has="commit or revert"),
+    Case("I5: changed .github/CODEOWNERS still trips", write("docs/x.md"), 2, env_mode="maintain", dirty=(".github/CODEOWNERS",)),
+    # Commit-message usability.
+    Case("commit with $ in the message suggests -F", bash("git commit -m 'fix $5 bug'"), 2, env_mode="build", stderr_has="git commit -F ai-context/"),
+    Case("commit with substitution suggests -F", bash("git commit -m \"$(cat ai-context/m)\""), 2, env_mode="build", stderr_has="git commit -F ai-context/"),
+    Case("commit with braces suggests -F", bash("git commit -m 'a {b}'"), 2, env_mode="maintain", stderr_has="git commit -F ai-context/"),
+    Case("commit -F from ai-context allowed", bash("git commit -F ai-context/msg.txt"), 0, env_mode="build"),
+    # Cheap extras.
+    Case("eslint formatter with a backslash is a path", bash("pnpm exec eslint -f 'ai-context\\fmt' force-app"), 2, env_mode="build"),
+    Case("eslint --format= with a backslash is a path", bash("pnpm exec eslint --format='ai-context\\fmt' force-app"), 2, env_mode="build"),
+    Case("WebFetch ?-suffix host trick blocked", fetch("https://evil.example?.help.salesforce.com"), 2),
+    Case("WebFetch #-suffix host trick blocked", fetch("https://evil.example#.help.salesforce.com"), 2),
+    Case("WebFetch userinfo host trick blocked", fetch("https://help.salesforce.com@example.org/x"), 2),
+    Case("WebFetch with no host blocked", fetch("https:///x"), 2),
+    Case("WebFetch with no scheme blocked", fetch("help.salesforce.com/x"), 2),
+    Case("WebFetch upper-case host allowed", fetch("https://HELP.salesforce.com/x"), 0),
+    Case("WebFetch host with a port allowed", fetch("https://developer.salesforce.com:443/docs"), 0),
+    Case("git grep is not allowlisted for writes either", bash("git grep foo"), 2, policy=OPEN),
+]
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
 FAKE_PYTHON_CASES = [
     (1, Case("python3 exiting 1 fails closed", bash("git status"), 2)),
@@ -1413,6 +1514,123 @@ def check_fsmonitor_not_run():
     return ok
 
 
+def make_big_tree(project, dirs=19, files=1000):
+    """ai-context/big/d1..d<dirs>, each holding <files> empty files (left untracked: the tripwire never looks there)."""
+    for d in range(1, dirs + 1):
+        base = os.path.join(project, "ai-context", "big", f"d{d}")
+        os.makedirs(base)
+        for n in range(files):
+            open(os.path.join(base, str(n)), "w").close()
+
+
+BIG = "ai-context/big"
+BIG_DIRS = " ".join(f"{BIG}/d{d}" for d in range(1, 20))
+# C2: every target checked lexically before any walk, targets deduped, one walk budget per call, all well inside the hook timeout.
+WALK_CASES = [
+    (Case("C2: 30 big trees then tools/guard blocks fast (normal)", bash("rm -r " + " ".join([BIG] * 30) + " tools/guard"), 2, stderr_has="never allowed"), 8.0),
+    (Case("C2: 30 big trees then tools/guard blocks fast (maintain)", bash("rm -r " + " ".join([BIG] * 30) + " tools/guard"), 2,
+          env_mode="maintain", stderr_has="never allowed"), 8.0),
+    (Case("C2: the same big tree ten times is walked once", bash("rm -r " + " ".join([BIG] * 10)), 0, env_mode="maintain"), 8.0),
+    (Case("C2: walks of distinct targets share one budget", bash(f"rm -r {BIG_DIRS} {BIG}"), 2, env_mode="maintain",
+          stderr_has="cannot determine"), 8.0),
+]
+
+
+def check_walk_budget():
+    ok = True
+    for case, limit in WALK_CASES:
+        project = make_project(case.committed_mode, case.files)
+        try:
+            make_big_tree(project)
+            start = time.monotonic()
+            code, err = send(WRAPPER, case.payload, case_env(project, case.env_mode), project)
+            took = time.monotonic() - start
+        finally:
+            drop(project)
+        good = report(case, code, err) and took < limit
+        print(f"[{'PASS' if took < limit else 'FAIL'}] {case.name}: took {took:.2f}s (limit {limit}s)")
+        ok = ok and good
+    return ok
+
+
+def guard_exit(fn, *args):
+    """(exit code, stderr) of calling a guard function in-process; 0 when it returns normally."""
+    err = io.StringIO()
+    old = sys.stderr
+    sys.stderr = err
+    try:
+        fn(*args)
+        code = 0
+    except SystemExit as e:
+        code = e.code
+    finally:
+        sys.stderr = old
+    return code, err.getvalue()
+
+
+def check_deadline():
+    """Past the internal deadline the guard blocks; git subprocesses get at most 3 s and a timeout is unverifiable."""
+    g = guard_module()
+    ok = True
+
+    def check(name, good, detail=""):
+        nonlocal ok
+        print(f"[{'PASS' if good else 'FAIL'}] {name}{'' if good else ' ' + detail}")
+        ok = ok and good
+
+    project = make_project("normal", {"ai-context/x/a": ""})
+    saved_deadline, saved_run = g.DEADLINE[0], g.subprocess.run
+    try:
+        g.DEADLINE[0] = time.monotonic() - 1
+        code, err = guard_exit(g.walk_paths, os.path.join(project, "ai-context"))
+        check("C2: a walk past the deadline blocks", code == 2 and "ran out of time" in err, f"exit {code} {err!r}")
+        code, err = guard_exit(g.check_deadline)
+        check("C2: the deadline check itself blocks once passed", code == 2 and "failing closed" in err, f"exit {code} {err!r}")
+        g.DEADLINE[0] = time.monotonic() + 60
+        code, _ = guard_exit(g.check_deadline)
+        check("C2: the deadline check passes before the deadline", code == 0, f"exit {code}")
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append(kw.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+        g.subprocess.run = fake_run
+        dirty = g.tripwire_dirty(project, ["tools/guard"])
+        check("C2: every git subprocess timeout is at most 3 s", bool(seen) and all(t is not None and t <= 3 for t in seen), f"timeouts {seen}")
+        check("C2: a git timeout makes the tripwire unverifiable", dirty is None, f"got {dirty!r}")
+    finally:
+        g.DEADLINE[0], g.subprocess.run = saved_deadline, saved_run
+        drop(project)
+    return ok
+
+
+def check_hook_matcher():
+    """I4: the hook runs for every tool, so MCP and future tools cannot skip the guard."""
+    name = "settings hook matcher covers every tool"
+    try:
+        with open(os.path.join(HERE, "..", "..", ".claude", "settings.json"), encoding="utf-8") as f:
+            matcher = json.load(f)["hooks"]["PreToolUse"][0]["matcher"]
+    except Exception as e:
+        print(f"[FAIL] {name}: {e}")
+        return False
+    good = matcher == ".*"
+    print(f"[{'PASS' if good else 'FAIL'}] {name}" + ("" if good else f": matcher is {matcher!r}"))
+    return good
+
+
+def hook_command_results():
+    """The two registered-hook-command cases. A missing Msys bash is a SKIP on a laptop but a FAIL under CI."""
+    hook = run_hook_command(HOOK_COMMAND_CASE)
+    if hook is None:
+        if os.environ.get("CI"):
+            print("[FAIL] 2 registered hook command cases: no Git for Windows bash (Msys) on this CI runner")
+            return [False]
+        print("[SKIP] 2 registered hook command cases: no Git for Windows bash (Msys) here")
+        return []
+    return [report(HOOK_COMMAND_CASE, *hook), report(HOOK_NO_EXEC_CASE, *run_hook_command(HOOK_NO_EXEC_CASE, mode=0o644))]
+
+
 def report(case, code, err):
     ok = code == case.want and case.stderr_has in err
     note = "" if ok else f" stderr: {err.strip()!r}"
@@ -1422,20 +1640,19 @@ def report(case, code, err):
 
 def main():
     results = []
-    for case in CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES + ROUND2_CASES + list(no_allowlist_variants(CASES)):
+    for case in (CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES
+                 + ROUND2_CASES + FINAL_CASES + list(no_allowlist_variants(CASES))):
         results.append(report(case, *run_case(case)))
     results.append(check_settings_deny())
+    results.append(check_hook_matcher())
+    results.append(check_walk_budget())
+    results.append(check_deadline())
     results.append(check_rebaseline_cli())
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
     results.append(report(NO_POLICY_CASE, *run_without_policy(NO_POLICY_CASE)))
     results.append(check_gitattributes())
-    hook = run_hook_command(HOOK_COMMAND_CASE)
-    if hook is None:
-        print("[SKIP] 2 registered hook command cases: no Git for Windows bash (Msys) here")
-    else:
-        results.append(report(HOOK_COMMAND_CASE, *hook))
-        results.append(report(HOOK_NO_EXEC_CASE, *run_hook_command(HOOK_NO_EXEC_CASE, mode=0o644)))
+    results += hook_command_results()
     if os.name == "nt":  # fake interpreters and the sh wrapper are POSIX only
         print("[SKIP] 3 wrapper status cases: POSIX only")
     else:

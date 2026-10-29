@@ -45,7 +45,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
