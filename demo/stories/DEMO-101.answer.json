@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "storyId": "DEMO-101",
+  "squad": "Customer Care",
+  "seeds": ["CaseAccountSummaryController", "Case_Agent_Console", "Service_Agent"],
+  "hops": 2,
+  "assumptions": [
+    "Customer_Tier__c is shown in the existing account summary sidebar of the Case page, not in a new component."
+  ],
+  "decisions": [
+    {"text": "Who maintains Customer_Tier__c; Sales_Rep maintains Service_Level__c today.",
+     "ownerRole": "Customer Care lead"}
+  ],
+  "components": [
+    {"api": "Account.Customer_Tier__c", "type": "CustomField", "changeType": "new", "hop": null,
+     "why": "The new Customer Tier picklist on Account. It does not exist yet, so nothing in the index references it."},
+    {"api": "CaseAccountSummaryController", "type": "ApexClass", "changeType": "modify", "hop": 0,
+     "why": "Its Case query and AccountSummary class must carry the tier to the page. It builds the summary the Case page shows, and is a seed."},
+    {"api": "Case_Agent_Console", "type": "FlexiPage", "changeType": "review", "hop": 0,
+     "why": "Agents see the tier through this page; placement is checked, no change expected. It hosts the summary in its sidebar and is a seed."},
+    {"api": "Service_Agent", "type": "PermissionSet", "changeType": "modify", "hop": 0,
+     "why": "Needs read access to Customer_Tier__c: getSummary queries WITH USER_MODE (CaseAccountSummaryController.cls:14), so every permission set granting the class must also grant the new field. It is a seed."},
+    {"api": "Team_Lead", "type": "PermissionSet", "changeType": "modify", "hop": 1,
+     "why": "Needs read access to Customer_Tier__c: getSummary queries WITH USER_MODE (CaseAccountSummaryController.cls:14), so every permission set granting the class must also grant the new field. It grants the controller."},
+    {"api": "caseAccountSummary", "type": "LightningComponentBundle", "changeType": "modify", "hop": 1,
+     "why": "Must display the tier to agents. It imports the controller's getSummary."},
+    {"api": "CaseAccountSummaryController_Test", "type": "ApexClass", "changeType": "modify", "hop": 1,
+     "why": "Needs a case that asserts the tier value is returned. It tests the controller directly."},
+    {"api": "caseEscalationPanel", "type": "LightningComponentBundle", "changeType": "review", "hop": null, "source": "judgement",
+     "evidence": "demo/org/force-app/main/default/lwc/caseEscalationPanel/caseEscalationPanel.html:6",
+     "why": "Overlapping tier concept: the panel already labels a case Premium or Standard customer (caseEscalationPanel.html:6-7). Should the new tier replace or sit beside it?"},
+    {"api": "Account.Service_Level__c", "type": "CustomField", "changeType": "review", "hop": null, "source": "judgement",
+     "evidence": "demo/org/force-app/main/default/objects/Account/fields/Service_Level__c.field-meta.xml",
+     "why": "Overlapping tier concept: it is already the contracted support tier. Is Customer_Tier__c a different thing or a duplicate?"}
+  ]
+}

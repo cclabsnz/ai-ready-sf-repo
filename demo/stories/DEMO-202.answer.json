@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "storyId": "DEMO-202",
+  "squad": "Service Ops",
+  "seeds": ["CaseAssignmentService"],
+  "hops": 2,
+  "assumptions": [
+    "New cases are assigned on insert; today assign() only runs on before update (CaseTriggerHandler.cls:16)."
+  ],
+  "decisions": [
+    {"text": "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field.",
+     "ownerRole": "Service Ops lead"}
+  ],
+  "components": [
+    {"api": "CaseAssignmentService", "type": "ApexClass", "changeType": "modify", "hop": 0,
+     "why": "Must assign newly created cases, which it does not do today. It is the seed."},
+    {"api": "CaseAssignmentService_Test", "type": "ApexClass", "changeType": "modify", "hop": 1,
+     "why": "Needs cases that assert even distribution across agents. It tests CaseAssignmentService directly."},
+    {"api": "CaseTriggerHandler", "type": "ApexClass", "changeType": "modify", "hop": 1,
+     "why": "Calls assign() on before update only, so new cases need a before insert call. Shared with DEMO-201."},
+    {"api": "CaseTriggerHandler_Test", "type": "ApexClass", "changeType": "modify", "hop": 1,
+     "why": "Needs an insert case that proves assignment runs from the trigger path. It exercises the handler contexts."},
+    {"api": "CaseTrigger", "type": "ApexTrigger", "changeType": "modify", "hop": 2,
+     "why": "Subscribes to before and after update only, so it must also subscribe to before insert. Reached through CaseTriggerHandler."},
+    {"api": "Escalation_Agents", "type": "Queue", "changeType": "review", "hop": null, "source": "judgement",
+     "evidence": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml",
+     "why": "Is the escalation queue the right pool for new cases? CaseAssignmentService uses it as the agent pool (CaseAssignmentService.cls:13 and :47-51); the index holds no edge to it."}
+  ]
+}

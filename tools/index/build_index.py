@@ -19,7 +19,7 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-INDEX_VERSION = "0.3.0"
+INDEX_VERSION = "0.4.0"
 NS = {"m": "http://soap.sforce.com/2006/04/metadata"}
 
 
@@ -244,6 +244,14 @@ def build(root, namespaces):
                         edges.append({"from": api, "to": o, "kind": "objectPermission",
                                       "allowEdit": text(op, "allowEdit") == "true",
                                       "evidence": f"{r}:{ln}"})
+                pos = 0
+                for ca in el.findall("m:classAccesses", NS):
+                    c = text(ca, "apexClass")
+                    if c:
+                        ln, pos = find_line(src, f"<apexClass>{c}</apexClass>", pos)
+                        if text(ca, "enabled") == "true":
+                            edges.append({"from": api, "to": c, "kind": "classAccess",
+                                          "evidence": f"{r}:{ln}"})
 
         # FlexiPages
         elif name.endswith(".flexipage-meta.xml"):

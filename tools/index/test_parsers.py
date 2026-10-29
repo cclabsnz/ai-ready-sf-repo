@@ -492,8 +492,36 @@ def case_permission_set_repeated_field_distinct_evidence():
     assert other["evidence"].endswith(":13"), other
 
 
+def _class_access_perm(entries):
+    body = "".join(f'    <classAccesses>\n        <apexClass>{c}</apexClass>\n'
+                   f'        <enabled>{str(en).lower()}</enabled>\n    </classAccesses>\n' for c, en in entries)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSet xmlns="{MD}">\n{body}</PermissionSet>\n'
+
+
+def case_permission_set_class_access_enabled_only():
+    idx = build_tree({
+        f"{CLS}/EscalationNotifier.cls": "public with sharing class EscalationNotifier {}\n",
+        f"{CLS}/Other.cls": "public with sharing class Other {}\n",
+        f"{PERMS}/Agent.permissionset-meta.xml":
+            _class_access_perm([("EscalationNotifier", True), ("Other", False)]),
+    })
+    e = edge(idx, "Agent", "EscalationNotifier", "classAccess")
+    assert e and e["evidence"].endswith("Agent.permissionset-meta.xml:4"), e
+    assert not edge(idx, "Agent", "Other", "classAccess")
+
+
+def case_permission_set_repeated_class_distinct_evidence():
+    idx = build_tree({
+        f"{CLS}/EscalationNotifier.cls": "public with sharing class EscalationNotifier {}\n",
+        f"{PERMS}/Agent.permissionset-meta.xml":
+            _class_access_perm([("EscalationNotifier", True), ("EscalationNotifier", True)]),
+    })
+    lines = sorted(int(e["evidence"].rsplit(":", 1)[1]) for e in idx["edges"] if e["kind"] == "classAccess")
+    assert lines == [4, 8], lines
+
+
 def case_index_version():
-    assert build_index.INDEX_VERSION == "0.3.0"
+    assert build_index.INDEX_VERSION == "0.4.0"
 
 
 _TEMP_DIRS = []
