@@ -74,8 +74,9 @@ def main():
         n = nodes.get(a.arg)
         print(json.dumps({"api": a.arg, "node": n, "found": n is not None}))
     elif a.cmd == "consumers":
-        hits = consumers(idx, a.arg, min(a.hops, 2))
-        print(json.dumps({"api": a.arg, "hops": min(a.hops, 2), "count": len(hits), "consumers": hits,
+        hops = max(1, min(a.hops, 3))
+        hits = consumers(idx, a.arg, hops)
+        print(json.dumps({"api": a.arg, "hops": hops, "count": len(hits), "consumers": hits,
                           "note": None if hits else "zero consumers in index; edges searched: all kinds"}))
     elif a.cmd == "below-api-floor":
         floor = float(a.arg)

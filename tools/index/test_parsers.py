@@ -3,9 +3,12 @@
 
 Run: python3 tools/index/test_parsers.py
 """
+import atexit
 import importlib.util
+import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -468,6 +471,95 @@ def case_index_version():
     assert build_index.INDEX_VERSION == "0.3.0"
 
 
+_TEMP_DIRS = []
+
+
+def index_dir(files=None, root=None):
+    """Build an index with the real CLI into a fresh temp dir and return that dir.
+
+    Pass `files` (a temp tree is written, indexed, then removed) or `root` (an existing tree).
+    """
+    out = tempfile.mkdtemp()
+    _TEMP_DIRS.append(out)
+    tree = None
+    try:
+        if files is not None:
+            tree = tempfile.mkdtemp()
+            for rel_path, content in files.items():
+                full = os.path.join(tree, rel_path)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+            root = tree
+        if root is None:
+            raise ValueError("index_dir needs files or root")
+        subprocess.run([sys.executable, os.path.join(HERE, "build_index.py"),
+                        "--root", root, "--out", os.path.abspath(out)],
+                       check=True, capture_output=True, text=True)
+    finally:
+        if tree:
+            shutil.rmtree(tree, ignore_errors=True)
+    return out
+
+
+def _run_query(index, args):
+    r = subprocess.run([sys.executable, os.path.join(HERE, "query.py"), *args, "--index", index],
+                       check=True, capture_output=True, text=True)
+    return json.loads(r.stdout)
+
+
+def query(files, *args):
+    return _run_query(index_dir(files=files), args)
+
+
+def query_root(root, *args):
+    return _run_query(index_dir(root=root), args)
+
+
+def _hops_tree():
+    # field <- CaseEscalationService <- caseEscalationPanel (lwc) <- Case_Agent_Console (page)
+    return {
+        f"{BASE}/Account/fields/Service_Level__c.field-meta.xml": FIELD_XML("Picklist"),
+        f"{CLS}/CaseEscalationService.cls":
+            "public with sharing class CaseEscalationService {\n"
+            "    @AuraEnabled public static String level(Id i) { return Account.Service_Level__c; }\n}\n",
+        f"{LWC}/caseEscalationPanel/caseEscalationPanel.js":
+            "import level from '@salesforce/apex/CaseEscalationService.level';\n",
+        f"{FLEXI}/Case_Agent_Console.flexipage-meta.xml": FLEXI_XML(["c:caseEscalationPanel"], []),
+    }
+
+
+def case_hops_three_reaches_page():
+    out = query(_hops_tree(), "consumers", "Account.Service_Level__c", "--hops", "3")
+    assert out["hops"] == 3, out
+    assert any(c["api"] == "Case_Agent_Console" and c["hop"] == 3 for c in out["consumers"]), out
+    two = query(_hops_tree(), "consumers", "Account.Service_Level__c")
+    assert two["hops"] == 2 and not any(c["api"] == "Case_Agent_Console" for c in two["consumers"]), two
+
+
+def case_hops_clamped():
+    files = _hops_tree()
+    idx = index_dir(files=files)
+    assert _run_query(idx, ["consumers", "Account.Service_Level__c", "--hops", "9"])["hops"] == 3
+    assert _run_query(idx, ["consumers", "Account.Service_Level__c", "--hops", "0"])["hops"] == 1
+    assert _run_query(idx, ["consumers", "Account.Service_Level__c", "--hops", "-4"])["hops"] == 1
+
+
+def case_cycle_terminates_without_duplicates():
+    out = query({
+        f"{CLS}/A.cls": "public with sharing class A {\n    B b;\n}\n",
+        f"{CLS}/B.cls": "public with sharing class B {\n    A a;\n}\n",
+    }, "consumers", "A", "--hops", "3")
+    apis = [c["api"] for c in out["consumers"]]
+    assert apis == ["B"], out
+
+
+def case_query_root_runs_against_real_tree():
+    fixtures = os.path.join(os.path.dirname(os.path.dirname(HERE)), "fixtures")
+    out = query_root(fixtures, "exists", "Account.Risk_Rating__c")
+    assert out["exists"] is True, out
+
+
 def main():
     failures = 0
     for name, fn in sorted((n, f) for n, f in globals().items() if n.startswith("case_") and callable(f)):
@@ -479,6 +571,9 @@ def main():
             print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
     print(f"{'PASS' if not failures else 'FAIL'}: {failures} failing case(s)")
     return 1 if failures else 0
+
+
+atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True) for d in _TEMP_DIRS])
 
 
 if __name__ == "__main__":
