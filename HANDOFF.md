@@ -43,6 +43,25 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
   fix a behaviour, so it stays fixed.
 - Any change to `tools/guard/` needs a new case in `test_guard.py`.
 - Run `python3 tools/build/lint.py` before every commit.
+- The committed mode in `.claude/settings.json` stays `normal`. A framework maintainer enters
+  `maintain` for themselves only, through a personal git-ignored `.claude/settings.local.json`
+  containing `{"env": {"AI_FRAMEWORK_MODE": "maintain"}}`. It takes effect only over a committed
+  `normal`; a committed `advise` (the kill switch) always wins. `maintain` can write the framework
+  paths and run the maintainer command allowlist in `tools/guard/policy.json`.
+- Changes to `tools/guard/`, `.claude/settings.json`, `.github/workflows/`, `.github/hooks/` and
+  CODEOWNERS files are human-applied patches with a second reviewer: the guard blocks the
+  assistant's write tools and its Bash write patterns from touching those paths in every mode. Any
+  change under `.github/` (including the rendered `.github/instructions/` and similar trees that
+  `maintain` may write) also trips the tripwire until a human commits it. Raising a Salesforce CLI
+  level (`sf.mode_level`, `sf.allowed_orgs`) is such a patch. The human applies and commits guard
+  files together.
+- After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
+  terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change. Until then the
+  tripwire blocks every write and non-read-only command. The guard blocks Bash lines that run it,
+  and it also refuses to run without a terminal.
+- Code the assistant runs can bypass laptop controls (see `docs/DESIGN.md`, Layer 1). That is why
+  the server-side layer (CODEOWNERS, branch protection, CI, review) exists and is the guarantee.
+  Read "Modes" and "What the guard guarantees" before relying on the guard.
 - Keep `docs/DESIGN.md` in step with reality: if you change a layer's behaviour, change the doc in
   the same PR.
 
@@ -51,11 +70,29 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
 ### Gate 1 hardening (do first)
 - [x] `tools/guard/test_guard.py`: add a case that runs the wrapper with PATH cleared of every
       Python and asserts exit 2 (proves fail-closed on a laptop with no interpreter).
+- [x] `tools/guard/guard.sh`: runs with an empty PATH (shell builtins only), and the hook is
+      registered as `sh "$CLAUDE_PROJECT_DIR/tools/guard/guard.sh"`, so it needs no exec bit;
+      `test_guard.py` covers both.
 - [ ] `tools/index/build_index.py`: add parsers for custom metadata records, custom labels,
       named credentials, record types and FlexiPages; add `@AuraEnabled` method → LWC edges.
 - [ ] `tools/index/query.py`: add `inventory` subcommand that prints `inventory.json` sections.
 - [ ] Copilot hook registration under `.github/hooks/` pointing at the same guard; document the
       exact file Copilot expects once confirmed against current docs.
+
+### WS0 guard hardening
+- [x] Four modes (advise, normal, build, maintain) with committed-`advise`-wins precedence.
+- [x] Allowlist-based Bash per mode and a git subcommand allowlist, rules in `tools/guard/policy.json`.
+- [x] Tripwire over guard, settings, CI and CODEOWNERS paths, `.git/config`, includes and hooks, with
+      a human-only `--rebaseline`.
+- [x] Salesforce CLI access levels (`none`, `offline`, `org-metadata`, `org-data`).
+- [x] `.gitattributes` line-ending rules for the wrapper and guard files.
+- [x] `docs/DESIGN.md`, `README.md` and this file describe the above.
+- [ ] CODEOWNERS and branch protection on `tools/guard/`, `.claude/settings.json`, `.github/` and
+      `CODEOWNERS`: the Layer 2 backstop. Human-owned; confirm it is enabled on the remote.
+- [ ] First Windows CI run: confirms the Git Bash assumption (Inferred) and `guard.cmd` (Unverifiable
+      until then).
+- [ ] Optional: a human-owned jest config with `roots: ["<rootDir>/force-app"]` and
+      `<rootDir>/ai-context/` in `testPathIgnorePatterns`.
 
 ### Skills
 - [ ] `story-impact`: write `evals/expected/*.md` golden outputs for the three cases, produced by

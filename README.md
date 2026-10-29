@@ -23,7 +23,8 @@ framework/            the ONE source tree squads edit (guild-owned via CODEOWNER
   agents/             posture + skill table, nothing else; evals/ holds trajectory specs
 tools/
   index/              build_index.py (the index), query.py (what skills call instead of grep)
-  guard/              guard.py + guard.sh/.cmd (fail-closed PreToolUse hook), scan_data.py, test_guard.py
+  guard/              guard.py + guard.sh/.cmd (fail-closed PreToolUse hook), policy.json (its rules),
+                      scan_data.py, test_guard.py
   build/              render.py (framework/ -> .claude/ + .github/), lint.py
   evals/              run_skill.py (output assertions), run_agent.py (trajectory assertions)
 .claude/              GENERATED, plus the hand-written settings.json (hooks, deny rules, kill switch)
@@ -46,13 +47,47 @@ python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl -
 
 On Windows use `py -3` in place of `python3`. The guard wrapper finds the interpreter itself and
 exits 2 (block) if none is found, because Claude Code treats any other exit code as a warning
-and lets the tool call through.
+and lets the tool call through. The hook is registered through `sh` (Git Bash on Windows, which is
+Inferred, not yet tested there); `guard.cmd` is a fallback and Unverifiable until the Windows CI job runs.
 
 ## Kill switch
 
-Set `AI_FRAMEWORK_MODE=advise` in `.claude/settings.json` (or the environment) and the guard
-blocks every write and every non-read-only command; the assistant can only output recommendations.
-One line, programme-wide, no laptop changes.
+Set `AI_FRAMEWORK_MODE=advise` in `.claude/settings.json` and the guard blocks every write and
+every non-read-only command; the assistant can only output recommendations. One line,
+programme-wide, no laptop changes. The committed value is the ceiling: a committed `advise`
+always wins over a local override, and a local mode applies only over a committed `normal`.
+
+## Modes
+
+The guard has four modes: `advise` (kill switch, read-only), `normal` (the committed default;
+writes to `ai-context/` and `index/`, runs the framework scripts), `build` (adds local dev
+tooling) and `maintain` (adds the framework paths and a maintainer command allowlist). To pick
+`build` or `maintain` for yourself, put `{"env": {"AI_FRAMEWORK_MODE": "build"}}` in your own
+git-ignored `.claude/settings.local.json`. Bash is allowlist-based outside `advise`. The full table is in
+`docs/DESIGN.md` under "Modes"; what the guard does and does not guarantee is under "What the
+guard guarantees". The laptop layer is best effort; CODEOWNERS, branch protection, CI and review
+are the hard guarantee.
+
+## One-time step after applying the guard patches
+
+While the guard's tripwire has no recorded baseline for `.git/config` and `.git/hooks/`, every write
+and every non-read-only command is blocked. A human records the baseline once, in a terminal
+(the command refuses to run without one, and the hook blocks the assistant from running it):
+
+```sh
+python3 tools/guard/guard.py --rebaseline
+```
+
+Run it again whenever `.git/config` or `.git/hooks/` legitimately change, for example when
+installing husky hooks. Adding a remote or setting branch tracking does not need it.
+
+## Salesforce CLI levels
+
+The assistant gets only local, offline `sf` commands by default (none at all in `advise`). A
+programme can opt in to read-only metadata or data queries against named non-production orgs by a
+reviewed change to `tools/guard/policy.json` (`sf.mode_level`, `sf.allowed_orgs`). Login, deploy,
+data writes and `apex run` stay blocked at every level. Levels, the always-blocked list and the
+`org-data` warning are in `docs/DESIGN.md` under "Salesforce CLI access levels".
 
 ## Onboarding a squad member (15 minutes)
 
