@@ -12,11 +12,15 @@ Policy:
     mode's level (policy.json sf.mode_level), never an always_blocked command.
   - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
   - Outside advise, every Bash command must also be on the mode's bash_allow list.
-  - In every mode, an unquoted glob word that could expand to an option ("-[o]", or "*" next to a file named
-    "--pre=sh") is blocked.
+  - In every mode, a "$", a brace or a "[[:class:]]" bracket outside single quotes blocks the line: the shell
+    could expand it into an option or path the guard never sees. So does a heredoc, whose body the quote masker
+    cannot read. An unquoted glob word that could expand to an
+    option ("-[o]", or "*" next to a file named "--pre=sh") is blocked too, and so is a line with more than
+    GLOB_WORD_LIMIT glob words.
   - WebFetch only to the allowlist.
-  - Every other tool: tools.read_only pass; MCP tools are blocked in advise and, in other modes, when their
-    name reads as a write (tools.mcp_write_pattern); any other tool is blocked in advise only.
+  - Every other tool: tools.read_only pass; MCP tools are blocked in advise and, in other modes, when a whole
+    segment of their name is a write verb (tools.mcp_write_pattern); the rest are blocked in advise only. Before
+    all of that, any tool but Bash whose input has a "command" is blocked in every mode.
   - Tripwire: while the guard, settings, CI workflows, GitHub hooks or CODEOWNERS differ from HEAD, or .git/config
     or .git/hooks/ differ from the baseline a human recorded with --rebaseline, every write and non-read-only Bash
     call is blocked.
@@ -29,6 +33,7 @@ The rules live in policy.json next to this file. Any internal error,
 including an unreadable policy, blocks (exit 2): the hook runner treats
 every other exit code as a warning and would let the call through.
 """
+import fnmatch
 import glob
 import hashlib
 import json
@@ -461,14 +466,57 @@ def glob_pattern(word):
     return "".join(out)
 
 
+GLOB_WORD_LIMIT = 64  # unquoted glob words per command; more is not worth the time it takes to check
+GLOBBED = {}  # pattern -> matches, so a pattern named twice is scanned once
+
+
+def glob_scan(pattern):
+    """What glob.glob(pattern) matches, reading the directories here so every entry scanned (not only each match)
+    is charged to this call's budget and the deadline is checked as it goes. None once the budget is spent."""
+    if pattern in GLOBBED:
+        return GLOBBED[pattern]
+    if not glob.has_magic(pattern):
+        return [pattern] if os.path.lexists(pattern) else []
+    dirname, base = os.path.split(pattern)
+    parents = glob_scan(dirname) if dirname != pattern and glob.has_magic(dirname) else [dirname]
+    if parents is None:
+        return None
+    out = []
+    for d in parents:
+        if not glob.has_magic(base):
+            if not spend(1):
+                return None
+            if os.path.lexists(os.path.join(d, base)) if base else os.path.isdir(d):
+                out.append(os.path.join(d, base))
+            continue
+        try:
+            with os.scandir(d or os.curdir) as entries:
+                for entry in entries:
+                    if not spend(1):
+                        return None
+                    if BUDGET[0] % 256 == 0:
+                        check_deadline()
+                    # As glob (and bash without dotglob): a leading "." is matched only by a pattern that starts with one.
+                    if (entry.name[:1] != "." or base[:1] == ".") and fnmatch.fnmatch(entry.name, base):
+                        out.append(os.path.join(d, entry.name))
+        except OSError:
+            continue  # not a directory, or unreadable: glob skips it too
+    GLOBBED[pattern] = out
+    return out
+
+
 def glob_reason(marked, cwd):
     """None unless an unquoted glob word could expand to an option: it starts with "-", it comes after a cd, it holds
     an expansion, or it matches a name starting with "-" in the working directory. Applies in every mode."""
-    after_cd = False
+    count = sum(is_glob_word(word) for seg in marked for word in seg)
+    if count > GLOB_WORD_LIMIT:
+        return f"too many glob patterns ({count}, at most {GLOB_WORD_LIMIT}) to check in time; run it as a human."
+    after_cd, done = False, set()
     for seg in marked:
         for word in seg:
             if not is_glob_word(word):
                 continue
+            check_deadline()
             plain = word.translate(UNMARK)
             if plain.startswith("-"):
                 return f"the unquoted glob {plain!r} starts with '-' and the shell could turn it into an option; quote it."
@@ -476,11 +524,13 @@ def glob_reason(marked, cwd):
                 return f"the unquoted glob {plain!r} expands in a directory the guard cannot see (after a cd); quote it or drop the cd."
             if any(c in plain for c in "${}`") or plain.startswith("~"):
                 return f"the unquoted glob {plain!r} holds an expansion, so the guard cannot tell what it matches; quote it."
-            for n, match in enumerate(glob.iglob(os.path.join(glob.escape(cwd), glob_pattern(word)))):
-                if n % 1000 == 0:
-                    check_deadline()
-                if not spend(1):
-                    return f"the unquoted glob {plain!r} matches too many names to check; narrow it."
+            if word in done:
+                continue  # the same word in the same directory matches the same names
+            done.add(word)
+            matches = glob_scan(os.path.join(glob.escape(cwd), glob_pattern(word)))
+            if matches is None:
+                return f"the unquoted glob {plain!r} matches too many names to check; narrow it."
+            for match in matches:
                 if os.path.basename(match).startswith("-"):
                     return (f"the unquoted glob {plain!r} matches {os.path.basename(match)!r}, which the shell would pass "
                             "as an option; quote the glob or rename the file.")
@@ -488,10 +538,16 @@ def glob_reason(marked, cwd):
     return None
 
 
+HEREDOC = re.compile(r"(?<!<)<<(?!<)")  # "<<" and "<<-", not the here-string "<<<"
+BRACKET_CLASS = re.compile(r"\[[:=.]")  # "[[:punct:]]", "[[=a=]]", "[[.a.]]": Python's glob reads none of them as bash does
+
+
 def has_expansion(cmd):
-    """True when the shell would expand cmd in a way token inspection cannot see: any unquoted or double-quoted "$", or any unquoted brace (nested braces defeat pattern matching, so no brace form is tried)."""
+    """True when the shell would expand cmd in a way token inspection cannot see: any unquoted or double-quoted "$",
+    any unquoted brace (nested braces defeat pattern matching, so no brace form is tried), or an unquoted bracket
+    expression holding a class, an equivalence class or a collating symbol."""
     masked = mask_quotes(cmd)
-    return any(c in masked for c in "${}")
+    return any(c in masked for c in "${}") or bool(BRACKET_CLASS.search(masked))
 
 
 def mark_fds(line):
@@ -529,7 +585,7 @@ def parse_bash(cmd, strict=True):
 
     None means block: unbalanced quotes, substitution, process substitution, subshells and any
     operator other than the plain separators and redirects. strict (advise) also refuses every
-    "$" and brace; otherwise they pass and write_targets judges the words that name a path.
+    "$" and brace; otherwise they pass here and main() blocks them with its expansion rule.
     """
     if FD_MARK in cmd:
         return None
@@ -671,10 +727,12 @@ SED_FLAGS = "nErsuz"
 
 
 def shell_glob(word, cwd):
-    """Absolute matches of a glob word, or the word itself when nothing matches (as the shell leaves it)."""
+    """Absolute matches of a glob word, or the word itself when nothing matches (as the shell leaves it). None once
+    the budget is spent."""
     if not GLOB_CHARS.search(word):
         return [word]
-    return sorted(glob.glob(os.path.join(cwd, word))) or [word]
+    matches = glob_scan(os.path.join(cwd, word))
+    return None if matches is None else sorted(matches) or [word]
 
 
 def spend(n):
@@ -894,7 +952,13 @@ def copy_targets(base, ops, opts, cwd, walk=True):
     """Every path cp, mv or install writes: the destination, what lands inside it, and (when walk) each file below a tree."""
     if base == "install" and ("d" in opts or "--directory" in opts):
         return ops
-    ops = [p for w in ops for p in shell_glob(w, cwd)]
+    expanded = []
+    for w in ops:
+        matches = shell_glob(w, cwd)
+        if matches is None:
+            return None
+        expanded += matches
+    ops = expanded
     tdir = opts.get("t")
     if tdir is not None:
         dest, srcs, is_dir = tdir, ops, True
@@ -1162,8 +1226,9 @@ def command_targets(words, policy, cwd, walk=True):
     if base not in MODELLED:
         return [], False
     # A word the shell rewrites can be an option or a path that we never see: the whole segment is unknown.
+    # main() has already blocked every "$" and brace outside single quotes, so any left in a word are literal.
     for a in args:
-        if any(c in a for c in "${}") or a.startswith("~") or (GLOB_CHARS.search(a) and ".." in a.split("/")):
+        if a.startswith("~") or (GLOB_CHARS.search(a) and ".." in a.split("/")):
             return None
     if base == "sf":
         found = sf_targets(words)
@@ -1206,7 +1271,10 @@ def expand_targets(targets, recursive, cwd):
     for t in dict.fromkeys(targets):
         full = os.path.join(cwd, t)
         out.append(full)
-        matches = sorted(glob.glob(full)) if GLOB_CHARS.search(t) else []
+        matches = glob_scan(full) if GLOB_CHARS.search(t) else []
+        if matches is None:
+            return None
+        matches = sorted(matches)
         out += matches
         if recursive:
             for p in matches or [full]:
@@ -1263,6 +1331,11 @@ def protected_overlap(rel, policy):
 # ---- Salesforce CLI ----
 
 UNPARSABLE_MSG = "the command cannot be parsed safely (unbalanced quote, substitution or subshell)."
+HEREDOC_MSG = ("a heredoc (<<) is not allowed in any mode: the shell expands its body in ways the guard cannot see. "
+               "Write the text to a file under ai-context/ and point the command at it.")
+EXPANSION_MSG = ("the command holds a $, a brace or a [[:class:]] bracket outside single quotes, so the guard cannot see what "
+                 "the shell expands it to. Quote that text in single quotes, or put it in a file (for a commit message: "
+                 "git commit -F ai-context/<file>).")
 SF_NAMES = {"sf", "sf.cmd", "sf.exe"}
 
 
@@ -1427,6 +1500,7 @@ def main():
     DEADLINE[0] = time.monotonic() + DEADLINE_SECONDS
     BUDGET[0] = WALK_LIMIT
     WALKED.clear()
+    GLOBBED.clear()
     policy = load_policy(POLICY_PATH)
     if len(sys.argv) > 1:
         if sys.argv[1:] != ["--rebaseline"]:
@@ -1446,7 +1520,9 @@ def main():
         for pat in policy["blocked_commands"]:
             if re.search(pat, cmd):
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
-        # One non-strict parse serves every check that needs words ("$" and braces pass it; advise's strict rule is separate).
+        if any(m in cmd for m in GLOB_MARKS.values()):
+            block(UNPARSABLE_MSG)  # the glob marks would be read as unquoted glob characters
+        # One non-strict parse serves every check that needs words ("$" and braces pass it; the expansion rule below blocks them).
         marked = parse_bash(mark_globs(cmd), strict=False)
         if marked is None:
             block(with_commit_advice(UNPARSABLE_MSG, cmd, mode, policy))
@@ -1454,6 +1530,12 @@ def main():
         reason = guard_token_reason(segments) or git_block_reason(root, segments)
         if reason:
             block(reason)
+        # Every mode: an expansion can turn into an option or a path the guard never sees ("--o${U}ut", "{--out,x}").
+        if has_expansion(cmd):
+            block(EXPANSION_MSG)
+        # In a heredoc body "'" is an ordinary character, so the masker would hide a "$(...)" that the shell runs.
+        if HEREDOC.search(mask_quotes(cmd)):
+            block(HEREDOC_MSG)
         # Claude Code keeps the shell's cwd between calls; the hook payload says where it is now.
         cwd = payload.get("cwd")
         cwd = root if cwd is None else (os.path.realpath(cwd) if isinstance(cwd, str) else None)
@@ -1478,6 +1560,11 @@ def main():
             reason = bash_block_reason(segments, mode, policy, active_scope(root), root, cwd)
             if reason:
                 block(with_commit_advice(reason, cmd, mode, policy) if reason == UNKNOWN_WRITE_MSG else reason)
+
+    elif isinstance(inp, dict) and "command" in inp:
+        # Before read_only and MCP names: an unmodelled shell (a PowerShell or Monitor tool, an MCP shell) would skip
+        # every Bash rule, whatever its name says.
+        block(f"tool {tool!r} runs a command the guard does not model, in any mode. Use Bash, or hand it to a human.")
 
     elif tool in WRITE_TOOLS:
         # NotebookEdit names its file notebook_path; every path field present is checked.
@@ -1512,7 +1599,9 @@ def main():
     elif tool.startswith("mcp__"):
         if mode == "advise":
             block(f"framework is in ADVISE mode: MCP tool {tool!r} is not allowed. Output recommendations, do not act.")
-        if re.search(policy["tools"]["mcp_write_pattern"], tool.rsplit("__", 1)[-1]):
+        # Whole name segments ("_", "-" or camelCase), so get_dataset and settings do not read as "set".
+        parts = re.split(r"[_-]+|(?<=[a-z0-9])(?=[A-Z])", tool.rsplit("__", 1)[-1])
+        if any(re.fullmatch(policy["tools"]["mcp_write_pattern"], seg) for seg in parts):
             block(f"MCP tool {tool!r} looks like it writes or acts (tools.mcp_write_pattern in tools/guard/policy.json). "
                   "Hand the action to a human.")
 

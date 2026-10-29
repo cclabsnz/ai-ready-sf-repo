@@ -62,9 +62,13 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
   every write and non-read-only command. The guard blocks Bash lines that run it, and it also
   refuses to run without a terminal.
 - The guard runs on every tool call, MCP tools included (see "What the guard guarantees" in
-  `docs/DESIGN.md`), and blocks itself after 7 seconds rather than risk the 10-second hook timeout.
-- For a commit message with `$`, braces or a substitution, write it to a file under `ai-context/`
-  and run `git commit -F ai-context/<file>`.
+  `docs/DESIGN.md`). Any tool other than Bash that takes a `command` is blocked in every mode.
+- The guard checks an internal 7-second deadline and blocks itself once past it; a cap of 64 glob
+  words per line and a 20000-entry scan budget keep it under the 10-second hook timeout. Best
+  effort, not a hard bound.
+- In every mode, a Bash line with `$`, braces or a `[[:class:]]` bracket outside single quotes, or a
+  heredoc, is blocked. Single-quote the text, or write it to a file under `ai-context/` (for a commit message:
+  `git commit -F ai-context/<file>`).
 - Code the assistant runs can bypass laptop controls (see `docs/DESIGN.md`, Layer 1). That is why
   the server-side layer (CODEOWNERS, branch protection, CI, review) exists and is the guarantee.
   Read "Modes" and "What the guard guarantees" before relying on the guard.
@@ -93,6 +97,8 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
 - [x] Final review fixes: glob words that expand to options, a 7-second internal deadline and one walk
       budget per call, `--amend` prefixes, framework-script output flags, every tool (MCP included)
       through the hook.
+- [x] Extra fix round: shell expansion blocked in every mode, glob-word cap and charged glob scans,
+      MCP verbs matched by whole name segments, unmodelled command tools blocked.
 - [x] Salesforce CLI access levels (`none`, `offline`, `org-metadata`, `org-data`).
 - [x] `.gitattributes` line-ending rules for the wrapper and guard files.
 - [x] `docs/DESIGN.md`, `README.md` and this file describe the above.

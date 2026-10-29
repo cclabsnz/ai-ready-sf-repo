@@ -64,8 +64,11 @@ writes to `ai-context/` and `index/`, runs the framework scripts), `build` (adds
 tooling) and `maintain` (adds the framework paths and a maintainer command allowlist). To pick
 `build` or `maintain` for yourself, put `{"env": {"AI_FRAMEWORK_MODE": "build"}}` in your own
 git-ignored `.claude/settings.local.json`. Bash is allowlist-based outside `advise`. The hook runs
-on every tool, MCP tools included; MCP tools are blocked in `advise`, and elsewhere when their name
-reads as a write. The full table is in
+on every tool, MCP tools included; MCP tools are blocked in `advise`, and elsewhere when a
+segment of their name is a write verb. Any tool other than Bash that takes a `command` (a PowerShell
+tool, `Monitor`, an MCP shell) is blocked in every mode. In every mode, a Bash line holding `$`, braces
+or a `[[:class:]]` bracket outside single quotes is blocked, and so is a heredoc: single-quote that
+text or put it in a file (`git commit -F ai-context/<file>`). The full table is in
 `docs/DESIGN.md` under "Modes"; what the guard does and does not guarantee is under "What the
 guard guarantees". The laptop layer is best effort; CODEOWNERS, branch protection, CI and review
 are the hard guarantee.

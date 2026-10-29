@@ -220,9 +220,9 @@ CASES = [
     Case("maintain: mkdir under demo allowed", bash("mkdir -p demo/org/force-app"), 0, env_mode="maintain"),
     Case("normal: redirect into ai-context allowed", bash("python3 tools/index/query.py stamp > ai-context/s.json"), 0),
     Case("normal: redirect into force-app blocked", bash("python3 tools/index/query.py stamp > force-app/s.json"), 2),
-    Case("maintain: touch with ${X} target blocked", bash("touch docs/${X}.md"), 2, env_mode="maintain", stderr_has="cannot determine what this command writes"),
+    Case("maintain: touch with ${X} target blocked", bash("touch docs/${X}.md"), 2, env_mode="maintain", stderr_has="single quotes"),
     Case("maintain: touch with brace expansion blocked", bash("touch docs/{a,b}.md"), 2, env_mode="maintain"),
-    Case("maintain: $ in a non-target argument allowed", bash('echo "$HOME" > docs/x.md'), 0, env_mode="maintain"),
+    Case("maintain: double-quoted $ in a non-target argument blocked (R1)", bash('echo "$HOME" > docs/x.md'), 2, env_mode="maintain"),
     Case("maintain: rm glob inside docs allowed", bash("rm docs/*.md"), 0, env_mode="maintain"),
     Case("maintain: command substitution blocked", bash("echo $(id) > docs/x"), 2, env_mode="maintain"),
     Case("maintain: backtick blocked", bash("echo `id` > docs/x"), 2, env_mode="maintain"),
@@ -230,7 +230,7 @@ CASES = [
     Case("maintain: process substitution into tee blocked", bash("echo a | tee >(cat) docs/x"), 2, env_mode="maintain"),
     Case("maintain: single-quoted substitution text allowed", bash("echo '$(id)' > docs/x"), 0, env_mode="maintain"),
     Case("normal: $VAR in target blocked", bash("echo a > $OUT"), 2),
-    Case("normal: $ in an echo argument allowed", bash('echo "$HOME"'), 0),
+    Case("normal: double-quoted $ in an echo argument blocked (R1)", bash('echo "$HOME"'), 2),
     Case("maintain: tools/* glob blocked (would match tools/guard)", bash("rm -r tools/*"), 2, env_mode="maintain"),
     Case("maintain: rm -rf tools (parent of tools/guard) blocked", bash("rm -rf tools"), 2, env_mode="maintain"),
     Case("maintain: mv tools blocked", bash("mv tools docs/old-tools"), 2, env_mode="maintain"),
@@ -347,7 +347,7 @@ CASES = [
     Case("B: ANSI-C quote carries -t", bash("cp $'-t' tools/guard ai-context/e"), 2),
     Case("B: ${X}= in dd blocked", bash("dd ${X}=tools/guard/guard.py if=ai-context/e"), 2),
     Case("B: $X in sed blocked", bash("sed $X s/a/b/ tools/guard/guard.py"), 2),
-    Case("B: $ in a non-writer command still allowed", bash('echo "$HOME" > ai-context/ok'), 0),
+    Case("B: double-quoted $ in a non-writer command blocked (R1)", bash('echo "$HOME" > ai-context/ok'), 2),
     # C: GNU long options.
     Case("C: --t= abbreviation of --target-directory", bash("cp --t=tools/guard ai-context/e"), 2),
     Case("C: --in-pl abbreviation of --in-place", bash("sed --in-pl s/a/b/ tools/guard/guard.py"), 2),
@@ -1044,9 +1044,9 @@ FINAL_CASES = [
     Case("I5: changed .github/hooks still trips", write("docs/x.md"), 2, env_mode="maintain", dirty=(".github/hooks/x",), stderr_has="commit or revert"),
     Case("I5: changed .github/CODEOWNERS still trips", write("docs/x.md"), 2, env_mode="maintain", dirty=(".github/CODEOWNERS",)),
     # Commit-message usability.
-    Case("commit with $ in the message suggests -F", bash("git commit -m 'fix $5 bug'"), 2, env_mode="build", stderr_has="git commit -F ai-context/"),
+    Case("commit with single-quoted $ in the message allowed (R1)", bash("git commit -m 'fix $5 bug'"), 0, env_mode="build"),
     Case("commit with substitution suggests -F", bash("git commit -m \"$(cat ai-context/m)\""), 2, env_mode="build", stderr_has="git commit -F ai-context/"),
-    Case("commit with braces suggests -F", bash("git commit -m 'a {b}'"), 2, env_mode="maintain", stderr_has="git commit -F ai-context/"),
+    Case("commit with single-quoted braces allowed (R1)", bash("git commit -m 'a {b}'"), 0, env_mode="maintain"),
     Case("commit -F from ai-context allowed", bash("git commit -F ai-context/msg.txt"), 0, env_mode="build"),
     # Cheap extras.
     Case("eslint formatter with a backslash is a path", bash("pnpm exec eslint -f 'ai-context\\fmt' force-app"), 2, env_mode="build"),
@@ -1059,6 +1059,72 @@ FINAL_CASES = [
     Case("WebFetch upper-case host allowed", fetch("https://HELP.salesforce.com/x"), 0),
     Case("WebFetch host with a port allowed", fetch("https://developer.salesforce.com:443/docs"), 0),
     Case("git grep is not allowlisted for writes either", bash("git grep foo"), 2, policy=OPEN),
+]
+R1_FILES = dict(DASH_O, **{"ai-context/evil": "touch PWNED\n"})
+MD_FILE = {"ai-context/a.md": ""}
+# Owner-approved extra round: R1 (shell expansion blocks in every mode), R3 (tool names). R2 timing is in WALK_CASES.
+EXTRA_CASES = [
+    # R1: "$", braces and [[:class:]] brackets outside single quotes block in every mode.
+    Case("R1: sort [[:punct:]]o from cwd ai-context blocked", at("ai-context", "sort [[:punct:]]o ../.claude/settings.local.json s.json"), 2,
+         files=R1_FILES, stderr_has="single quotes"),
+    Case("R1: sort [[:punct:]]o blocked in maintain", at("ai-context", "sort [[:punct:]]o ../.claude/settings.local.json s.json"), 2,
+         env_mode="maintain", files=R1_FILES),
+    Case("R1: rg x {--pre=sh,evil} blocked", at("ai-context", "rg x {--pre=sh,evil}"), 2, files=R1_FILES),
+    Case("R1: rg x --pr${U}e=sh blocked", at("ai-context", "rg x --pr${U}e=sh evil"), 2, files=R1_FILES),
+    Case("R1: rg x --pr$@e=sh blocked", at("ai-context", "rg x --pr$@e=sh evil"), 2, files=R1_FILES),
+    Case("R1: build_index --o${U}ut blocked", bash(f"{BUILD_INDEX} --o${{U}}ut tools/guard"), 2),
+    Case("R1: build_index --o${U}ut blocked in maintain", bash(f"{BUILD_INDEX} --o${{U}}ut tools/guard"), 2, env_mode="maintain"),
+    Case("R1: build_index {--out,tools/guard} blocked", bash(f"{BUILD_INDEX} {{--out,tools/guard}}"), 2),
+    Case("R1: build_index {--out,tools/guard} blocked in maintain", bash(f"{BUILD_INDEX} {{--out,tools/guard}}"), 2, env_mode="maintain"),
+    Case("R1: [[=a=]] equivalence class blocked", bash("ls ai-context/[[=a=]]*"), 2, files=MD_FILE),
+    Case("R1: [[.a.]] collating symbol blocked", bash("ls ai-context/[[.a.]]*"), 2, files=MD_FILE),
+    Case("R1: double-quoted $ blocked with the -F advice", bash('git commit -m "fix $5 bug"'), 2, env_mode="build",
+         stderr_has="git commit -F ai-context/"),
+    Case("R1: double-quoted $ blocked in maintain", bash('echo "$HOME" > ai-context/x.txt'), 2, env_mode="maintain"),
+    Case("R1: unquoted brace blocked in normal", bash("echo {a,b} > ai-context/x.txt"), 2),
+    Case("R1: private marker character in the command blocked", bash("ls ai-context/\ue000"), 2, stderr_has="parsed"),
+    Case("R1: single-quoted braces allowed", bash("echo '{a,b}' > ai-context/x.txt"), 0, env_mode="build"),
+    Case("R1: single-quoted braces allowed in normal", bash("echo '{a,b}' > ai-context/x.txt"), 0),
+    Case("R1: double-quoted braces are literal", bash('echo "{a,b}" > ai-context/x.txt'), 0),
+    Case("R1: escaped $ is literal", bash("echo \\$HOME > ai-context/x.txt"), 0),
+    Case("R1: single-quoted [[:punct:]] is literal", bash("grep '[[:punct:]]' ai-context/a.md"), 0, files=MD_FILE),
+    # R1 class, beyond the literal ruling: in a heredoc body "'" is not a quote, so "$(...)" and backticks run.
+    Case("R1: heredoc with a substitution in its body blocked", bash("cat <<-X\necho '`touch PWNED`'\npwd"), 2, stderr_has="heredoc"),
+    Case("R1: heredoc blocked in maintain", bash("cat <<X\necho '$(touch PWNED)'\nX"), 2, env_mode="maintain", stderr_has="heredoc"),
+    Case("R1: heredoc with a quoted delimiter blocked too", bash("cat <<'X'\nhello\nX"), 2, stderr_has="heredoc"),
+    Case("R1: here-string allowed", bash("cat <<< 'x'"), 0),
+    Case("R1: commit -F allowed in maintain", bash("git commit -F ai-context/msg.txt"), 0, env_mode="maintain"),
+    # R2: the glob-word cap (timed probes are in WALK_CASES).
+    Case("R2: 64 glob words allowed", bash("ls" + " ai-context/*.md" * 64), 0, files=MD_FILE),
+    Case("R2: 65 glob words blocked", bash("ls" + " ai-context/*.md" * 65), 2, files=MD_FILE, stderr_has="too many glob patterns"),
+    Case("R2: the cap counts words across segments", bash("ls ai-context/*.md; " * 65), 2, files=MD_FILE, stderr_has="too many glob patterns"),
+    # R3: MCP verbs match whole name segments; task tools are read-only; an unmodelled shell tool blocks.
+    Case("R3: mcp copy tool blocked", tool("mcp__fs__copy_file", source="a", destination="tools/guard/x"), 2),
+    Case("R3: mcp upsert tool blocked", tool("mcp__db__upsert_record"), 2),
+    Case("R3: mcp save tool blocked", tool("mcp__x__save_note"), 2),
+    Case("R3: mcp store tool blocked", tool("mcp__x__store"), 2),
+    Case("R3: mcp commit tool blocked", tool("mcp__git__commit"), 2),
+    Case("R3: mcp merge tool blocked", tool("mcp__git__merge_branch"), 2),
+    Case("R3: mcp mkdir tool blocked", tool("mcp__fs__mkdir"), 2),
+    Case("R3: mcp get_dataset allowed (set is not a segment)", tool("mcp__x__get_dataset"), 0),
+    Case("R3: mcp settings allowed (set is not a segment)", tool("mcp__x__settings"), 0),
+    Case("R3: mcp camelCase getDataset allowed", tool("mcp__x__getDataset"), 0),
+    Case("R3: mcp camelCase setValue blocked", tool("mcp__x__setValue"), 2),
+    Case("R3: TaskCreate allowed in advise", tool("TaskCreate", subject="x"), 0, env_mode="advise"),
+    Case("R3: SendMessage allowed in advise", tool("SendMessage", to="a", message="x"), 0, env_mode="advise"),
+    Case("R3: PowerShell command blocked in normal", tool("PowerShell", command="Remove-Item tools/guard -Recurse"), 2),
+    Case("R3: PowerShell command blocked in maintain", tool("PowerShell", command="Get-ChildItem"), 2, env_mode="maintain"),
+    Case("R3: unknown tool with a command blocked in advise", tool("Shell", command="ls"), 2, env_mode="advise"),
+    Case("R3: unknown tool without a command still allowed in normal", tool("Foo", query="x"), 0),
+    # Follow-up rulings: the command rule runs before read_only and MCP names; more MCP write verbs.
+    Case("R3f: Monitor with a command blocked in normal", tool("Monitor", command="touch tools/guard/x", description="x"), 2, stderr_has="command"),
+    Case("R3f: Monitor with a command blocked in advise", tool("Monitor", command="touch tools/guard/x", description="x"), 2, env_mode="advise"),
+    Case("R3f: read-named MCP tool with a command blocked", tool("mcp__x__get_status", command="ls"), 2, stderr_has="command"),
+    Case("R3f: mcp untrash blocked", tool("mcp__gmail__untrash_message"), 2),
+    Case("R3f: mcp cancel blocked", tool("mcp__vercel__cancel_deployment"), 2),
+    Case("R3f: mcp form_input blocked", tool("mcp__chrome__form_input"), 2),
+    Case("R3f: mcp camelCase restoreBackup blocked", tool("mcp__x__restoreBackup"), 2),
+    Case("R3f: mcp get_dataset still allowed", tool("mcp__x__get_dataset"), 0),
 ]
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
 FAKE_PYTHON_CASES = [
@@ -1533,6 +1599,19 @@ WALK_CASES = [
     (Case("C2: the same big tree ten times is walked once", bash("rm -r " + " ".join([BIG] * 10)), 0, env_mode="maintain"), 8.0),
     (Case("C2: walks of distinct targets share one budget", bash(f"rm -r {BIG_DIRS} {BIG}"), 2, env_mode="maintain",
           stderr_has="cannot determine"), 8.0),
+    # R2: glob scanning is charged and capped, so these probes block well inside the hook timeout.
+    (Case("R2: 1500 identical glob words then rm tools/guard", bash("ls" + f" {BIG}/*/z?" * 1500 + " ; rm -rf tools/guard"), 2,
+          stderr_has="too many glob patterns"), 8.0),
+    (Case("R2: 400 identical glob words then rm tools/guard", bash("ls" + f" {BIG}/*/z?" * 400 + " ; rm -rf tools/guard"), 2,
+          stderr_has="too many glob patterns"), 8.0),
+    (Case("R2: distinct glob words under the cap share the scan budget", bash("ls" + "".join(f" {BIG}/*/{n}?" for n in range(1, 60))), 2,
+          stderr_has="too many names"), 8.0),
+    (Case("R2: quoted globs in write targets are charged too", bash(f"rm '{BIG}/*/z?' ; " * 1500 + "rm -rf tools/guard"), 2), 8.0),
+    (Case("R2: literal names below a glob are charged too", bash("".join(f"rm '{BIG}/*/z{n}' ; " for n in range(1500)) + "ls"), 2,
+          env_mode="maintain", stderr_has="cannot determine"), 8.0),
+    (Case("R2: quoted globs in cp sources share the scan budget", bash(f"cp '{BIG}/*/1?' '{BIG}/*/2?' ai-context/x"), 2,
+          env_mode="maintain", stderr_has="cannot determine"), 8.0),
+    (Case("R2: one glob over the big tree is still allowed", bash(f"ls {BIG}/*/1?"), 0), 8.0),
 ]
 
 
@@ -1605,6 +1684,51 @@ def check_deadline():
     return ok
 
 
+def check_glob_scan():
+    """R2: the guard's charged glob matcher finds what glob.glob finds, charges every scanned entry, and stops at the deadline."""
+    import glob as globmod
+    g = guard_module()
+    ok = True
+
+    def check(name, good, detail=""):
+        nonlocal ok
+        print(f"[{'PASS' if good else 'FAIL'}] {name}{'' if good else ' ' + detail}")
+        ok = ok and good
+
+    files = {"a/x.md": "", "a/.h.md": "", "a/-o": "", "a/b/y.md": "", "a/[k]/z": "", "c/x.md": ""}
+    project = make_project("normal", {f"ai-context/{k}": v for k, v in files.items()})
+    saved_deadline = g.DEADLINE[0]
+    g.DEADLINE[0] = time.monotonic() + 60  # the module's own deadline was set when it was imported
+    try:
+        base = os.path.join(os.path.realpath(project), "ai-context")
+        for pat in ("*/*.md", "a/*", "a/.*", "*/", "a/[!x]*", "a/[[]k]/*", "?/b/*", "a/../c/*", "nope/*", "a/b/y.md"):
+            full = os.path.join(globmod.escape(base), pat)
+            g.BUDGET[0], g.GLOBBED = g.WALK_LIMIT, {}
+            got, want = g.glob_scan(full), globmod.glob(full)
+            check(f"R2: glob_scan matches glob.glob for {pat!r}", got is not None and sorted(got) == sorted(want), f"{got} != {want}")
+        g.BUDGET[0], g.GLOBBED = g.WALK_LIMIT, {}
+        g.glob_scan(os.path.join(globmod.escape(base), "a/*.none"))
+        check("R2: every scanned entry is charged, not only matches", g.BUDGET[0] == g.WALK_LIMIT - 5, f"budget {g.BUDGET[0]}")
+        g.BUDGET[0], g.GLOBBED = 3, {}
+        check("R2: glob_scan returns None once the budget is spent", g.glob_scan(os.path.join(globmod.escape(base), "a/*")) is None)
+        g.BUDGET[0], g.GLOBBED = g.WALK_LIMIT, {}
+        g.DEADLINE[0] = time.monotonic() - 1
+        code, err = guard_exit(g.glob_reason, [["ls", "ai-context/a/\ue000"]], os.path.realpath(project))
+        check("R2: glob checking past the deadline blocks", code == 2 and "ran out of time" in err, f"exit {code} {err!r}")
+        many = os.path.join(base, "many")
+        os.makedirs(many)
+        for n in range(300):
+            open(os.path.join(many, str(n)), "w").close()
+        g.BUDGET[0], g.GLOBBED = g.WALK_LIMIT, {}
+        code, err = guard_exit(g.glob_scan, os.path.join(globmod.escape(many), "*"))
+        check("R2: a long directory scan checks the deadline as it goes", code == 2 and "ran out of time" in err, f"exit {code} {err!r}")
+    finally:
+        g.DEADLINE[0] = saved_deadline
+        g.BUDGET[0], g.GLOBBED = g.WALK_LIMIT, {}
+        drop(project)
+    return ok
+
+
 def check_hook_matcher():
     """I4: the hook runs for every tool, so MCP and future tools cannot skip the guard."""
     name = "settings hook matcher covers every tool"
@@ -1641,12 +1765,13 @@ def report(case, code, err):
 def main():
     results = []
     for case in (CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES
-                 + ROUND2_CASES + FINAL_CASES + list(no_allowlist_variants(CASES))):
+                 + ROUND2_CASES + FINAL_CASES + EXTRA_CASES + list(no_allowlist_variants(CASES))):
         results.append(report(case, *run_case(case)))
     results.append(check_settings_deny())
     results.append(check_hook_matcher())
     results.append(check_walk_budget())
     results.append(check_deadline())
+    results.append(check_glob_scan())
     results.append(check_rebaseline_cli())
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
