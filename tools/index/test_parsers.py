@@ -197,6 +197,160 @@ def case_line_of():
     assert f("a\nb", "zzz") == 1
 
 
+CLS = "force-app/main/default/classes"
+TRG = "force-app/main/default/triggers"
+LWC = "force-app/main/default/lwc"
+
+
+def _apex_tree(extra=None):
+    files = {
+        f"{TRG}/CaseTrigger.trigger":
+            "trigger CaseTrigger on Case (before insert) {\n    CaseTriggerHandler.run(Trigger.new);\n}\n",
+        f"{CLS}/CaseTriggerHandler.cls":
+            "public with sharing class CaseTriggerHandler {\n"
+            "    public static void run(List<Case> cs) {\n"
+            "        CaseEscalationService.escalate(cs);\n"
+            "    }\n}\n",
+        f"{CLS}/CaseEscalationService.cls":
+            "public with sharing class CaseEscalationService {\n"
+            "    public static void escalate(List<Case> cs) {}\n"
+            "    @AuraEnabled(cacheable=true)\n"
+            "    public static String getEscalationState(Id caseId) { return null; }\n"
+            "    public static String notExposed() { return null; }\n"
+            "}\n",
+        f"{CLS}/EscalationNotifier.cls":
+            "public with sharing class EscalationNotifier {\n"
+            "    @InvocableMethod(label='Notify')\n"
+            "    public static void notify(List<Id> ids) {}\n}\n",
+        f"{LWC}/caseEscalationPanel/caseEscalationPanel.js":
+            "import getState from '@salesforce/apex/CaseEscalationService.getEscalationState';\n"
+            "import nope from '@salesforce/apex/CaseEscalationService.notExposed';\n"
+            "import ghost from '@salesforce/apex/MissingClass.whatever';\n",
+    }
+    files.update(extra or {})
+    return build_tree(files)
+
+
+def case_trigger_on_object():
+    idx = _apex_tree()
+    assert edge(idx, "CaseTrigger", "Case", "triggerOn")["evidence"].endswith("CaseTrigger.trigger:1")
+    assert idx["nodes"]["Case"] == {"type": "CustomObject", "path": None, "namespace": None}
+
+
+def case_trigger_on_keeps_real_object_node():
+    idx = _apex_tree({f"{BASE}/Case/Case.object-meta.xml": "<CustomObject/>"})
+    assert idx["nodes"]["Case"]["path"].endswith("Case.object-meta.xml")
+    assert edge(idx, "CaseTrigger", "Case", "triggerOn")
+
+
+def case_trigger_on_ignores_comment_and_evidence_line():
+    idx = build_tree({f"{TRG}/T.trigger":
+                      "// trigger Fake on Ghost (before insert)\n/* a\n b */\ntrigger T on Account (after update) {}\n"})
+    assert edge(idx, "T", "Account", "triggerOn")["evidence"].endswith("T.trigger:4")
+    assert not edge(idx, "T", "Ghost", "triggerOn")
+
+
+def case_class_to_class():
+    idx = _apex_tree()
+    assert edge(idx, "CaseTrigger", "CaseTriggerHandler", "apexClassRef")["evidence"].endswith("CaseTrigger.trigger:2")
+    assert edge(idx, "CaseTriggerHandler", "CaseEscalationService", "apexClassRef")["evidence"].endswith(
+        "CaseTriggerHandler.cls:3")
+    assert not edge(idx, "CaseEscalationService", "CaseTriggerHandler", "apexClassRef")
+
+
+def case_class_ref_ignores_comment_string_substring_self():
+    idx = _apex_tree({
+        f"{CLS}/Quiet.cls":
+            "public with sharing class Quiet {\n"
+            "    // CaseEscalationService\n"
+            "    /* CaseTriggerHandler\n       EscalationNotifier */\n"
+            "    String s = 'CaseEscalationService';\n"
+            "    String t = 'it\\'s CaseTriggerHandler';\n"
+            "    Object o = MyCaseEscalationService.x + CaseEscalationService_Test.y + CaseEscalationServiceX.z;\n"
+            "    Quiet q;\n}\n",
+    })
+    refs = [e for e in idx["edges"] if e["kind"] == "apexClassRef" and e["from"] == "Quiet"]
+    assert not refs, refs
+
+
+def case_class_ref_real_token_after_comment_and_string_one_edge_first_line():
+    idx = _apex_tree({
+        f"{CLS}/Loud.cls":
+            "public with sharing class Loud {\n"
+            "    String s = 'x'; /* a\n b */ // c\n"
+            "    void m() {\n        CaseEscalationService.escalate(null);\n        CaseEscalationService.escalate(null);\n    }\n}\n",
+    })
+    refs = [e for e in idx["edges"] if e["kind"] == "apexClassRef" and e["from"] == "Loud"]
+    assert len(refs) == 1 and refs[0]["to"] == "CaseEscalationService", refs
+    assert refs[0]["evidence"].endswith("Loud.cls:5"), refs
+
+
+def case_class_ref_url_in_string_does_not_hide_code():
+    idx = _apex_tree({
+        f"{CLS}/Url.cls":
+            "public with sharing class Url {\n    String u = 'http://x'; CaseEscalationService s;\n}\n",
+    })
+    assert edge(idx, "Url", "CaseEscalationService", "apexClassRef")["evidence"].endswith("Url.cls:2")
+
+
+def case_invocable_and_aura_enabled():
+    idx = _apex_tree()
+    assert idx["nodes"]["EscalationNotifier"]["invocable"] is True
+    assert idx["nodes"]["CaseEscalationService"]["invocable"] is False
+    assert idx["nodes"]["CaseEscalationService"]["auraEnabledMethods"] == ["getEscalationState"]
+    assert idx["nodes"]["EscalationNotifier"]["auraEnabledMethods"] == []
+    e = edge(idx, "caseEscalationPanel", "CaseEscalationService", "lwcApexImport")
+    assert e["method"] == "getEscalationState" and e["auraEnabled"] is True, e
+
+
+def case_lwc_import_non_aura_and_unknown_class():
+    idx = _apex_tree()
+    lwc = [e for e in idx["edges"] if e["kind"] == "lwcApexImport"]
+    by_method = {e["method"]: e for e in lwc}
+    assert by_method["notExposed"]["auraEnabled"] is False
+    assert by_method["notExposed"]["to"] == "CaseEscalationService"  # still the class, hop depth unchanged
+    assert by_method["whatever"]["to"] == "MissingClass" and by_method["whatever"]["auraEnabled"] is None
+
+
+def case_aura_enabled_forms():
+    idx = build_tree({
+        f"{CLS}/A.cls":
+            "public with sharing class A {\n"
+            "    @AuraEnabled public String n;\n"
+            "    public static W build() { return null; }\n"
+            "    @AuraEnabled(cacheable=true) public static String getX() { return null; }\n"
+            "    @AuraEnabled\n    @TestVisible\n    public static Foo.Bar getY() { return null; }\n"
+            "    @AuraEnabled public static String[] getZ() { return null; }\n"
+            "    @AuraEnabled(cacheable=true)\n    global static List<Map<String,Object>> getW() { return null; }\n"
+            "    @AuraEnabled public static Database.QueryLocator getQ() { return null; }\n}\n",
+    })
+    assert idx["nodes"]["A"]["auraEnabledMethods"] == ["getQ", "getW", "getX", "getY", "getZ"], idx["nodes"]["A"]
+
+
+def case_trigger_header_forms():
+    idx = build_tree({
+        f"{TRG}/T1.trigger": "trigger T1 on Case(before insert) {}\n",
+        f"{TRG}/T2.trigger": "trigger T2\n  on\n  Case\n  (before insert) {}\n",
+        f"{CLS}/Eof.cls": "public with sharing class Eof {}\n// CaseTriggerHandler",
+        f"{CLS}/CaseTriggerHandler.cls": "public with sharing class CaseTriggerHandler {}\n",
+    })
+    assert edge(idx, "T1", "Case", "triggerOn")
+    assert edge(idx, "T2", "Case", "triggerOn")["evidence"].endswith("T2.trigger:1")
+    assert not edge(idx, "Eof", "CaseTriggerHandler", "apexClassRef")
+
+
+def case_commented_out_annotations_do_not_count():
+    idx = build_tree({
+        f"{CLS}/C.cls":
+            "public with sharing class C {\n"
+            "    // @InvocableMethod\n"
+            "    /* @AuraEnabled\n    public static String old() {} */\n"
+            "    public static String live() { return 'x'; }\n}\n",
+    })
+    assert idx["nodes"]["C"]["invocable"] is False
+    assert idx["nodes"]["C"]["auraEnabledMethods"] == []
+
+
 def case_index_version():
     assert build_index.INDEX_VERSION == "0.3.0"
 

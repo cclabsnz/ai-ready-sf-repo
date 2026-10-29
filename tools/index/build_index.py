@@ -69,12 +69,24 @@ def parse_xml(path):
 
 
 _LITERALS = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|/\*.*?\*/", re.S)
+# Apex: '...' strings, /* */ and // comments. Alternatives are tried left to right at each offset,
+# so a quote inside a comment, or // inside a string, is consumed by whichever starts first.
+_APEX_LITERALS = re.compile(r"'(?:\\.|[^'\\])*'|/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _blank(pattern, s):
+    return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), s)
 
 
 def blank_literals(formula):
     """Blank '...' and "..." literals (with \\ escapes) and /* ... */ comments, keeping newlines so
     offsets and line numbers are unchanged."""
-    return _LITERALS.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), formula)
+    return _blank(_LITERALS, formula)
+
+
+def blank_apex(src):
+    """Blank '...' strings, /* ... */ and // comments in Apex, keeping newlines and offsets."""
+    return _blank(_APEX_LITERALS, src)
 
 
 def read_src(path):
@@ -151,6 +163,21 @@ def build(root, namespaces):
                           "sharing": sharing, "isTest": "@isTest" in src or "@IsTest" in src}
             if meta_bad:
                 nodes[api]["parseError"] = True
+            code = blank_apex(src)
+            if kind == "ApexClass":
+                nodes[api]["invocable"] = re.search(r"@InvocableMethod\b", code, re.I) is not None
+                nodes[api]["auraEnabledMethods"] = sorted(set(re.findall(
+                    r"@AuraEnabled\b(?:\s*\([^)]*\))?(?:\s*@\w+(?:\s*\([^)]*\))?)*"
+                    r"\s+(?:public|global)\s+static\s+[\w.<>,\[\]\s]+?\s+(\w+)\s*\(",
+                    code, re.I)))
+            else:
+                tm = re.search(r"\btrigger\s+\w+\s+on\s+(\w+)\s*\(", code, re.I)
+                if tm:
+                    obj = tm.group(1)
+                    nodes.setdefault(obj, {"type": "CustomObject", "path": None,
+                                           "namespace": namespace_of(obj, namespaces)})
+                    edges.append({"from": api, "to": obj, "kind": "triggerOn",
+                                  "evidence": f"{r}:{line_of(code, tm.group(0))}"})
 
         # Flows
         elif name.endswith(".flow-meta.xml"):
@@ -226,8 +253,11 @@ def build(root, namespaces):
             api = os.path.basename(os.path.dirname(path))
             nodes.setdefault(api, {"type": "LightningComponentBundle", "path": os.path.dirname(r)})
             src = read_src(path)
-            for m in re.finditer(r"@salesforce/apex/([A-Za-z0-9_]+)\.", src):
+            for m in re.finditer(r"@salesforce/apex/([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)", src):
+                # `to` stays the class (not a method node) so hop depth is unchanged;
+                # auraEnabled is resolved in the post-pass once every class is known.
                 edges.append({"from": api, "to": m.group(1), "kind": "lwcApexImport",
+                              "method": m.group(2), "auraEnabled": None,
                               "evidence": f"{r}:{src[:m.start()].count(chr(10)) + 1}"})
         elif "/aura/" in r and name.endswith(".cmp"):
             api = name[:-4]
@@ -248,6 +278,24 @@ def build(root, namespaces):
                 if tok in nodes and nodes[tok]["type"] == "CustomObject":
                     edges.append({"from": api, "to": tok, "kind": "apexObjectRef",
                                   "evidence": f"{r}:{i}"})
+
+    # Apex class/trigger -> Apex class. Comments and strings are blanked first (newlines kept), so
+    # tokens are whole identifiers outside both. One edge per (from, to) at the first matching line.
+    class_names = {k for k, v in nodes.items() if v["type"] == "ApexClass"}
+    for api, (r, src) in apex_sources.items():
+        seen_to = set()
+        for m in re.finditer(r"\b([A-Z][A-Za-z0-9_]*)\b", blank_apex(src)):
+            tok = m.group(1)
+            if tok == api or tok not in class_names or tok in seen_to:
+                continue
+            seen_to.add(tok)
+            edges.append({"from": api, "to": tok, "kind": "apexClassRef",
+                          "evidence": f"{r}:{src.count(chr(10), 0, m.start()) + 1}"})
+
+    # LWC -> Apex import: is the imported method @AuraEnabled on that class?
+    for e in edges:
+        if e["kind"] == "lwcApexImport" and nodes.get(e["to"], {}).get("type") == "ApexClass":
+            e["auraEnabled"] = e["method"] in nodes[e["to"]]["auraEnabledMethods"]  # None = class not indexed
 
     # Validation rule formulas -> fields. Bare X__c is a field on the rule's own object;
     # Obj.X__c is used only when Obj is an object node. Edges only to field nodes that exist.
