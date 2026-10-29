@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RecordType xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Premium_Support</fullName>
+    <active>true</active>
+    <businessProcess>Premium_Support_Process</businessProcess>
+    <description>Cases raised under a premium support contract.</description>
+    <label>Premium Support</label>
+    <picklistValues>
+        <picklist>Escalation_Level__c</picklist>
+        <values>
+            <fullName>Level 1</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Level 2</fullName>
+            <default>false</default>
+        </values>
+        <values>
+            <fullName>Not Escalated</fullName>
+            <default>true</default>
+        </values>
+    </picklistValues>
+</RecordType>

@@ -1,0 +1,22 @@
+<template>
+    <lightning-card title="Escalation" icon-name="standard:case">
+        <div class="slds-p-horizontal_small">
+            <template lwc:if={hasState}>
+                <dl class="slds-list_horizontal slds-wrap">
+                    <dt class="slds-item_label slds-text-color_weak">Customer</dt>
+                    <dd class="slds-item_detail">{tierLabel}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">Level</dt>
+                    <dd class="slds-item_detail">{levelLabel}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">SLA</dt>
+                    <dd class="slds-item_detail">{slaLabel}</dd>
+                </dl>
+                <template lwc:if={slaBreached}>
+                    <p class="slds-text-color_error slds-m-top_x-small">Premium SLA breached</p>
+                </template>
+            </template>
+            <template lwc:elseif={error}>
+                <p class="slds-text-color_error">{errorMessage}</p>
+            </template>
+        </div>
+    </lightning-card>
+</template>

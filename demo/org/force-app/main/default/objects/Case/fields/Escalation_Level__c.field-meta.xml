@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Escalation_Level__c</fullName>
+    <description>Set by the case trigger when a case is escalated. Level 2 starts the premium notification flow.</description>
+    <externalId>false</externalId>
+    <label>Escalation Level</label>
+    <required>false</required>
+    <trackFeedHistory>false</trackFeedHistory>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Not Escalated</fullName>
+                <default>true</default>
+                <label>Not Escalated</label>
+            </value>
+            <value>
+                <fullName>Level 1</fullName>
+                <default>false</default>
+                <label>Level 1</label>
+            </value>
+            <value>
+                <fullName>Level 2</fullName>
+                <default>false</default>
+                <label>Level 2</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>

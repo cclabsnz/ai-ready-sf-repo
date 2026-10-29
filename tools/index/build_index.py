@@ -335,8 +335,10 @@ def build(root, namespaces):
     short_fields = {}
     for full in field_names:
         short_fields.setdefault(full.split(".", 1)[1], []).append(full)
+    # Comments and strings are blanked first (newlines kept), as for apexClassRef below, so a field
+    # named only in a comment or a string literal makes no edge and line numbers are unchanged.
     for api, (r, src) in apex_sources.items():
-        for i, line in enumerate(src.splitlines(), 1):
+        for i, line in enumerate(blank_apex(src).splitlines(), 1):
             for m in re.finditer(r"\b([A-Za-z0-9_]+__c)\b", line):
                 tok = m.group(1)
                 for full in short_fields.get(tok, []):

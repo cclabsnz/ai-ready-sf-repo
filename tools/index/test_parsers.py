@@ -296,6 +296,31 @@ def case_class_ref_url_in_string_does_not_hide_code():
     assert edge(idx, "Url", "CaseEscalationService", "apexClassRef")["evidence"].endswith("Url.cls:2")
 
 
+def case_apex_field_ref_ignores_comment_and_string():
+    idx = build_tree({
+        f"{BASE}/Account/fields/Service_Level__c.field-meta.xml": FIELD_XML("Picklist"),
+        f"{CLS}/Quiet.cls":
+            "public with sharing class Quiet {\n"
+            "    // reads Service_Level__c later\n"
+            "    /* Service_Level__c */\n"
+            "    String s = 'Service_Level__c';\n}\n",
+        f"{CLS}/Loud.cls":
+            "public with sharing class Loud {\n"
+            "    // Service_Level__c in a comment first\n"
+            "    String q = 'x'; Object v = [SELECT Service_Level__c FROM Account LIMIT 1];\n}\n",
+    })
+    assert not [e for e in idx["edges"] if e["from"] == "Quiet" and e["kind"] == "apexFieldRef"], idx["edges"]
+    refs = [e for e in idx["edges"] if e["from"] == "Loud" and e["kind"] == "apexFieldRef"]
+    assert len(refs) == 1 and refs[0]["to"] == "Account.Service_Level__c", refs
+    assert refs[0]["evidence"].endswith("Loud.cls:3"), refs
+
+
+def case_fixtures_risk_rating_consumers():
+    fixtures = os.path.join(REPO, "fixtures")
+    out = query_root(fixtures, "consumers", "Account.Risk_Rating__c")
+    assert out["count"] == 5, out
+
+
 def case_invocable_and_aura_enabled():
     idx = _apex_tree()
     assert idx["nodes"]["EscalationNotifier"]["invocable"] is True
@@ -558,6 +583,31 @@ def case_query_root_runs_against_real_tree():
     fixtures = os.path.join(os.path.dirname(os.path.dirname(HERE)), "fixtures")
     out = query_root(fixtures, "exists", "Account.Risk_Rating__c")
     assert out["exists"] is True, out
+
+
+REPO = os.path.dirname(os.path.dirname(HERE))
+_qspec = importlib.util.spec_from_file_location("query_py", os.path.join(HERE, "query.py"))
+query_py = importlib.util.module_from_spec(_qspec)
+_qspec.loader.exec_module(query_py)
+
+
+def build_root(rel_root):
+    """Run build() in-process on a real directory under the repo root (no temp copy)."""
+    nodes, edges = build_index.build(os.path.realpath(os.path.join(REPO, rel_root)), [])
+    return {"nodes": nodes, "edges": edges}
+
+
+def consumers_of(idx, api, hops):
+    return query_py.consumers(idx, api, hops)
+
+
+def case_demo_core_chain():
+    idx = build_root("demo/org")
+    c = {x["api"]: x["hop"] for x in consumers_of(idx, "Account.Service_Level__c", 3)}
+    assert c["CaseEscalationService"] == 1
+    assert c["CaseTriggerHandler"] == 2 and c["EscalationNotifier"] == 2 and c["caseEscalationPanel"] == 2
+    assert c["CaseTrigger"] == 3 and c["Case_Escalate_Premium"] == 3 and c["Case_Agent_Console"] == 3
+    assert all(n.get("parseError") is not True for n in idx["nodes"].values())
 
 
 def main():

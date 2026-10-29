@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Escalation_Needs_Level</fullName>
+    <active>true</active>
+    <description>An escalated case must carry an escalation level. The case trigger sets one on escalation; this stops it being cleared by hand.</description>
+    <errorConditionFormula>AND(
+    IsEscalated,
+    OR(
+        ISBLANK(TEXT(Escalation_Level__c)),
+        ISPICKVAL(Escalation_Level__c, &quot;Not Escalated&quot;)
+    )
+)</errorConditionFormula>
+    <errorDisplayField>Escalation_Level__c</errorDisplayField>
+    <errorMessage>An escalated case needs an escalation level of Level 1 or Level 2.</errorMessage>
+</ValidationRule>

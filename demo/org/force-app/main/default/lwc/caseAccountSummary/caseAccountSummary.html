@@ -1,0 +1,24 @@
+<template>
+    <lightning-card title="Account" icon-name="standard:account">
+        <div class="slds-p-horizontal_small">
+            <template lwc:if={hasSummary}>
+                <p class="slds-text-heading_small">{summary.name}</p>
+                <dl class="slds-list_horizontal slds-wrap slds-m-top_x-small">
+                    <dt class="slds-item_label slds-text-color_weak">Type</dt>
+                    <dd class="slds-item_detail">{summary.type}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">Industry</dt>
+                    <dd class="slds-item_detail">{summary.industry}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">Rating</dt>
+                    <dd class="slds-item_detail">{summary.rating}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">Phone</dt>
+                    <dd class="slds-item_detail">{summary.phone}</dd>
+                    <dt class="slds-item_label slds-text-color_weak">Owner</dt>
+                    <dd class="slds-item_detail">{summary.ownerName}</dd>
+                </dl>
+            </template>
+            <template lwc:elseif={noAccount}>
+                <p class="slds-text-color_weak">No account on this case.</p>
+            </template>
+        </div>
+    </lightning-card>
+</template>

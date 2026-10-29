@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Queue xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Escalation_Agents</fullName>
+    <doesSendEmailToMembers>false</doesSendEmailToMembers>
+    <name>Escalation Agents</name>
+    <queueSobject>
+        <sobjectType>Case</sobjectType>
+    </queueSobject>
+</Queue>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Service_Level__c</fullName>
+    <description>Contracted support tier. Drives case escalation level and premium notifications.</description>
+    <externalId>false</externalId>
+    <inlineHelpText>Premium customers get faster escalation and owner notification.</inlineHelpText>
+    <label>Service Level</label>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Standard</fullName>
+                <default>true</default>
+                <label>Standard</label>
+            </value>
+            <value>
+                <fullName>Premium</fullName>
+                <default>false</default>
+                <label>Premium</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
