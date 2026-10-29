@@ -28,7 +28,8 @@
   ],
   "modes": {
     "advise": {
-      "writes": []
+      "writes": [],
+      "bash_allow": ["read_only"]
     },
     "normal": {
       "writes": ["ai-context/", "index/"]
@@ -66,12 +67,14 @@
   },
   "bash_groups": {
     "read_only": [
-      "cat",
-      "ls",
-      "dir",
-      "git\\s+(status|diff|log|show|rev-parse)",
-      "python3?\\s+tools/index/query\\.py",
-      "py\\s+-3\\s+tools/index/query\\.py"
+      "(cat|ls|dir|head|tail|wc|pwd|echo|grep|diff|cd)(\\s.*)?",
+      "rg(\\s+(?!--pre|--hostname-bin)\\S+)*",
+      "sort(\\s+(?!-[A-Za-z]*o|--o|--c)\\S+)*",
+      "git\\s+(status|diff|log|show|rev-parse|ls-files|check-ignore|blame)(\\s+(?!--ou)\\S+)*",
+      "git\\s+branch\\s+--show-current",
+      "find(\\s+(?!-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)(\\s|$))\\S+)*",
+      "python3?\\s+tools/index/query\\.py(\\s.*)?",
+      "py\\s+-3\\s+tools/index/query\\.py(\\s.*)?"
     ]
   }
 }

@@ -22,6 +22,7 @@ every other exit code as a warning and would let the call through.
 import json
 import os
 import re
+import shlex
 import sys
 
 MODES = ("advise", "normal", "build", "maintain")
@@ -115,6 +116,143 @@ def write_block_reason(rel, mode, policy, scope):
     return f"write to {rel!r} is outside {allowed} in {mode.upper()} mode. The build is read-only; hand code to the squad."
 
 
+SEPARATORS = {";", "&&", "||", "|", "&"}
+REDIRECT_OP = re.compile(r"&>>?|[<>]+&?")
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# Advise allows no redirect target but these; a "&" operator takes a file descriptor.
+ADVISE_REDIRECT_TARGETS = {"/dev/null"}
+ADVISE_FD_TARGETS = {"1", "2"}
+
+
+FD_MARK = "\x01"  # prefixed to a digit glued to a redirect operator, so shlex output keeps that fact
+
+
+def mask_quotes(s):
+    """s with every quoted or escaped character replaced by "x", except "$" inside double quotes (it still expands there)."""
+    out, q, i = [], None, 0
+    while i < len(s):
+        c = s[i]
+        if q == "'":
+            q = None if c == "'" else q
+            out.append("x")
+        elif q == '"':
+            if c == "\\":
+                out.append("xx")
+                i += 1
+            else:
+                q = None if c == '"' else q
+                out.append("$" if c == "$" else "x")
+        elif c == "\\":
+            out.append("xx")
+            i += 1
+        else:
+            if c in "'\"":
+                q = c
+                c = "x"
+            out.append(c)
+        i += 1
+    return "".join(out)[: len(s)]
+
+
+def has_expansion(cmd):
+    """True when the shell would expand cmd in a way token inspection cannot see: any unquoted or double-quoted "$", or any unquoted brace (nested braces defeat pattern matching, so no brace form is tried)."""
+    masked = mask_quotes(cmd)
+    return any(c in masked for c in "${}")
+
+
+def mark_fds(line):
+    """Prefix FD_MARK to digits glued to a following redirect operator ("2>" yes, "2 >" no)."""
+    masked = mask_quotes(line)
+    starts = [m.start() for m in re.finditer(r"(?<![^\s;&|()])\d+(?=[<>])", masked)]
+    for s in reversed(starts):
+        line = line[:s] + FD_MARK + line[s:]
+    return line
+
+
+def parse_bash(cmd):
+    """Split a command line into segments of shell words, or None when it cannot be read safely.
+
+    None means block: unbalanced quotes, substitution, process substitution, subshells and any
+    operator other than the plain separators and redirects.
+    """
+    if "$(" in cmd or "`" in cmd or "<(" in cmd or FD_MARK in cmd or has_expansion(cmd):
+        return None
+    segments = []
+    # shlex drops newlines as whitespace, so split on them first. A quote spanning lines is unbalanced here: blocked.
+    for line in cmd.split("\n"):
+        lex = shlex.shlex(mark_fds(line), posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""  # shlex would drop everything after a mid-word "#"; bash does not
+        try:
+            tokens = list(lex)
+        except ValueError:
+            return None
+        seg = []
+        for tok in tokens:
+            if tok in SEPARATORS:
+                if seg:
+                    segments.append(seg)
+                seg = []
+            elif all(c in "();<>|&" for c in tok) and not REDIRECT_OP.fullmatch(tok):
+                return None
+            else:
+                seg.append(tok)
+        if seg:
+            segments.append(seg)
+    return segments
+
+
+def split_redirects(seg):
+    """(words, redirects). A redirect is (operator, target); target is None when the operator ends the segment."""
+    words, redirects = [], []
+    i = 0
+    prev_word = False
+    while i < len(seg):
+        tok = seg[i]
+        if REDIRECT_OP.fullmatch(tok):
+            if prev_word and words[-1].startswith(FD_MARK):
+                words.pop()  # the fd number in "2>x" belongs to the redirect
+            target = seg[i + 1] if i + 1 < len(seg) else None
+            redirects.append((tok, target))
+            i += 2
+            prev_word = False
+            continue
+        words.append(tok)
+        prev_word = True
+        i += 1
+    return words, redirects
+
+
+def segment_command(seg):
+    words, _ = split_redirects(seg)
+    while words and ASSIGNMENT.match(words[0]):
+        words.pop(0)
+    return words
+
+
+def segment_matches(seg, patterns):
+    text = " ".join(segment_command(seg))
+    return any(re.fullmatch(p, text) for p in patterns)
+
+
+def advise_block_reason(cmd, patterns):
+    """None if every segment of cmd is read-only, else the reason."""
+    segments = parse_bash(cmd)
+    if segments is None:
+        return "the command cannot be parsed safely (unbalanced quote, substitution or subshell)."
+    for seg in segments:
+        words, redirects = split_redirects(seg)
+        for op, target in redirects:
+            fd_dup = op.endswith("&") and target in ADVISE_FD_TARGETS
+            if not fd_dup and target not in ADVISE_REDIRECT_TARGETS:
+                return f"redirect {op} {target or ''} is not allowed; only /dev/null and &1/&2 are."
+        if words and ASSIGNMENT.match(words[0]):
+            return "environment assignments before a command are not allowed."
+        if not segment_matches(seg, patterns):
+            return "only read-only commands are allowed."
+    return None
+
+
 def main():
     policy = load_policy(POLICY_PATH)
     try:
@@ -131,9 +269,11 @@ def main():
         for pat in policy["blocked_commands"]:
             if re.search(pat, cmd):
                 block(f"command matches blocked pattern {pat!r}. Write numbered steps for a human to run instead.")
-        read_only = re.compile(r"^\s*(" + "|".join(policy["bash_groups"]["read_only"]) + r")\b")
-        if mode == "advise" and not read_only.match(cmd):
-            block("framework is in ADVISE mode: only read-only commands are allowed. Output recommendations, do not act.")
+        if mode == "advise":
+            patterns = [p for g in policy["modes"]["advise"]["bash_allow"] for p in policy["bash_groups"][g]]
+            reason = advise_block_reason(cmd, patterns)
+            if reason:
+                block(f"framework is in ADVISE mode: {reason} Output recommendations, do not act.")
 
     elif tool in WRITE_TOOLS:
         path = (inp.get("file_path") or inp.get("path") or "").replace("\\", "/")
