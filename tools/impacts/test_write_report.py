@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
+from _testutil import run_tests, symlink  # noqa: E402
 from validate import validate  # noqa: E402
 
 SCRIPT = os.path.join(REPO, "framework", "skills", "story-impact", "scripts", "write_report.py")
@@ -126,13 +127,13 @@ def test_out_dir_outside_ai_context_refused():
         code, out = run(root, "--classified", c, "--meta", m, story="../x")
         assert code == 2 and "--id '../x' does not match" in out, out
         assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
-        os.symlink(outside, os.path.join(root, "ai-context"))
+        symlink(outside, os.path.join(root, "ai-context"))
         code, out = run(root, "--classified", c, "--meta", m)
         assert code == 2 and "resolves outside <root>/ai-context/" in out, out
         assert os.listdir(outside) == [], os.listdir(outside)
         os.remove(os.path.join(root, "ai-context"))
         os.makedirs(os.path.join(root, "ai-context"))
-        os.symlink(outside, out_dir(root))
+        symlink(outside, out_dir(root))
         code, out = run(root, "--classified", c, "--meta", m)
         assert code == 2 and "resolves outside <root>/ai-context/" in out, out
         assert os.listdir(outside) == [], os.listdir(outside)
@@ -149,7 +150,7 @@ def test_symlinked_output_file_refused():
         write(target, "original\n")
         try:
             os.makedirs(out_dir(root))
-            os.symlink(target, os.path.join(out_dir(root), name))
+            symlink(target, os.path.join(out_dir(root), name))
             code, out = run(root, "--classified", c, "--meta", m)
             assert code != 0, (name, out)
             assert "symlink" in out, (name, out)
@@ -270,17 +271,7 @@ def test_rendered_copies_find_repo_root():
 
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    passed = failed = 0
-    for t in tests:
-        try:
-            t()
-            passed += 1
-            print("PASS", t.__name__)
-        except Exception as exc:
-            failed += 1
-            print("FAIL", t.__name__, "-", exc)
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests([(t.__name__, t) for t in tests], show_pass=True)
 
 
 if __name__ == "__main__":

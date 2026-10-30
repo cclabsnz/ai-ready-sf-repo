@@ -9,6 +9,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+from _testutil import run_tests, symlink  # noqa: E402
+
 SCRIPT = os.path.join(HERE, "render_register.py")
 
 
@@ -91,7 +95,7 @@ def test_out_symlink_refused():
         victim = os.path.join(outside, "victim.html")
         with open(victim, "w", encoding="utf-8") as fh:
             fh.write("keep")
-        os.symlink(victim, default_out(root))
+        symlink(victim, default_out(root))
         code, _, _ = run("--root", root)
         assert code == 2, code
         with open(victim, encoding="utf-8") as fh:
@@ -203,16 +207,7 @@ def test_deterministic():
 
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = failed = 0
-    for t in tests:
-        try:
-            t()
-            passed += 1
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("FAIL %s: %r" % (t.__name__, exc))
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests([(t.__name__, t) for t in tests])
 
 
 if __name__ == "__main__":

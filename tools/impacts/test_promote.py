@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
+from _testutil import run_tests, symlink  # noqa: E402
 from validate import validate  # noqa: E402
 
 PROMOTE = os.path.join(HERE, "promote.py")
@@ -140,7 +141,7 @@ def case_refuses_symlink_destination():
     root = make_root()
     target = tempfile.mkdtemp(prefix="promote_target_")
     os.makedirs(os.path.join(root, "impacts"))
-    os.symlink(target, os.path.join(root, DEST))
+    symlink(target, os.path.join(root, DEST))
     code, out = run(root, "--replace")
     assert code == 1 and "symlink" in out, out
     assert os.listdir(target) == []
@@ -149,7 +150,7 @@ def case_refuses_symlink_destination():
 def case_refuses_symlinked_impacts_folder():
     root = make_root()
     outside = tempfile.mkdtemp(prefix="promote_outside_")
-    os.symlink(outside, os.path.join(root, "impacts"))
+    symlink(outside, os.path.join(root, "impacts"))
     code, out = run(root)
     assert code == 1 and "symlink" in out, out
     assert os.listdir(outside) == []
@@ -160,7 +161,7 @@ def case_refuses_symlink_destination_file():
     target = os.path.join(tempfile.mkdtemp(prefix="promote_target_"), "victim.txt")
     write(target, "keep\n")
     os.makedirs(os.path.join(root, DEST))
-    os.symlink(target, os.path.join(root, DEST, "impact.md"))
+    symlink(target, os.path.join(root, DEST, "impact.md"))
     code, out = run(root, "--replace")
     assert code == 1 and "symlink" in out, out
     with open(target, encoding="utf-8") as fh:
@@ -169,16 +170,7 @@ def case_refuses_symlink_destination_file():
 
 def main():
     cases = [(n, f) for n, f in sorted(globals().items()) if n.startswith("case_") and callable(f)]
-    passed = failed = 0
-    for name, fn in cases:
-        try:
-            fn()
-            passed += 1
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("FAIL %s: %r" % (name, exc))
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests(cases)
 
 
 if __name__ == "__main__":
