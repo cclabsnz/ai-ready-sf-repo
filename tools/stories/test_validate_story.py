@@ -48,13 +48,15 @@ def good():
              "source": "edge-case"}],
         "edgeCases": [
             {"id": "EC-1", "category": "blank", "component": "Case.Priority",
+             "detail": "field is not required; value left blank",
              "evidence": "a.cls:3", "confidence": "Confirmed", "becameCriterion": "AC-2",
              "reason": None},
             {"id": "EC-2", "category": "bulk", "component": "Case",
+             "detail": "a bulk change of 200 records or more",
              "evidence": None, "confidence": "Unverifiable", "becameCriterion": None,
              "reason": "bulk loads are out of scope"}],
         "droppedSeeds": [{"category": "record-type", "component": "Case",
-                          "reason": "one record type"}],
+                          "detail": "record type Case.Support", "reason": "one record type"}],
         "overlaps": [
             {"api": "Case", "type": "CustomObject", "kind": "watch",
              "stories": [{"storyId": "DEMO-202", "squad": "Service Ops", "status": "in-flight",
@@ -156,6 +158,16 @@ def test_ids_unique_and_gapless():
     d = good()
     d["acceptanceCriteria"][1]["id"] = "AC-1"
     assert has(v(d), "duplicate id")
+
+
+def test_seed_detail_required():
+    for key in ("edgeCases", "droppedSeeds"):
+        d = good()
+        del d[key][0]["detail"]
+        assert has(v(d), "missing key 'detail'"), (key, v(d))
+        d = good()
+        d[key][0]["detail"] = " "
+        assert has(v(d), "detail is not a non-empty string"), (key, v(d))
 
 
 def test_dropped_seed_needs_reason():

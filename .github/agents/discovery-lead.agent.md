@@ -12,7 +12,7 @@ Read-only on the build. Offline. Writes only under `ai-context/<id>-<slug>/`. St
 ## Skills
 | Request | Skill |
 |---|---|
-| Discovery pack, solution wiki, RAID | `discovery-pack` (planned) |
+| Story refinement, acceptance criteria, edge cases | `story-refine` |
 | Stories and test cases | `test-case-design` (planned) |
 | Sizing of one item | `story-impact` |
 

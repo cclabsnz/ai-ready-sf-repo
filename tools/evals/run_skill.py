@@ -9,13 +9,27 @@ N times (default 5) by producing N outputs and passing them all; the case passes
       --output ai-context/9001-risk-rating-field/impact.md [--output ...]
 
 Assertions supported in case JSON: must_reference, must_not_flag, must_flag, must_contain_label,
-must_label_every_claim, banned_phrases, verdict_in, max_hops, impact_json_valid, must_flag_overlap.
+must_label_every_claim, banned_phrases, verdict_in, max_hops, impact_json_valid, must_flag_overlap,
+story_json_valid, must_keep_edge, must_list_overlap, edges_from_seeds_only, seeds_accounted.
 Every cited `path:line` must exist.
 
 impact_json_valid: the impact.json beside each --output validates as a draft, evidence checked.
 must_flag_overlap: each api is the exact backticked Component cell of a row in the table under
 `## Overlaps with other stories`. Rows in that table carry no confidence label and are skipped by
 must_label_every_claim.
+
+story-refine assertions (story_json_valid, must_keep_edge, must_list_overlap,
+edges_from_seeds_only, seeds_accounted). A seed is identified by (component, category, detail).
+story_json_valid: the story.json beside each --output passes validate_story as a draft, evidence
+checked, and check_ac has no findings.
+must_keep_edge: each name matches an edgeCases row of that story.json whose triple is a seed in
+scan/edge-seeds.json: the name equals the row's component, or appears as a whole word in its detail.
+must_list_overlap: as must_flag_overlap, for story.md.
+edges_from_seeds_only: every edgeCases triple of that story.json is in the `seeds` list of
+scan/edge-seeds.json beside --output (the query.py edge-seeds output the skill saved), with the
+seed's evidence and confidence copied unchanged.
+seeds_accounted: every seed in scan/edge-seeds.json is an edgeCases or droppedSeeds triple.
+For these three, a missing story.json or edge-seeds.json fails.
 """
 import argparse
 import json
@@ -24,9 +38,12 @@ import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(ROOT, "tools", "stories"))
 sys.path.insert(0, os.path.join(ROOT, "tools", "impacts"))
 
 from validate import validate  # noqa: E402
+from validate_story import validate_story  # noqa: E402
+from check_ac import check_ac, load_vague  # noqa: E402
 
 LABELS = ("Confirmed", "Inferred", "Unverifiable")
 EVIDENCE_RE = re.compile(r"`((?:force-app|pkg-[A-Za-z0-9_-]+|fixtures|demo)/[^`:]+):(\d+)`")
@@ -78,6 +95,111 @@ def check_impact_json(output_path):
     return [f"impact.json invalid: {e}" for e in validate(doc, "draft", ROOT, check_evidence=True)]
 
 
+def load_sibling(output_path, rel, name):
+    """(parsed JSON of <dir of output>/<rel>, None) or (None, failure text)."""
+    if not output_path:
+        return None, f"{name}: no output path to locate {rel}"
+    path = os.path.join(os.path.dirname(output_path), rel)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (OSError, ValueError) as exc:
+        return None, f"{rel} unreadable at {path}: {exc}"
+
+
+def story_edge_cases(doc):
+    ecs = doc.get("edgeCases") if isinstance(doc, dict) else None
+    return [c for c in ecs if isinstance(c, dict)] if isinstance(ecs, list) else []
+
+
+def check_story_json(output_path):
+    doc, err = load_sibling(output_path, "story.json", "story_json_valid")
+    if err:
+        return [err]
+    fails = [f"story.json invalid: {e}" for e in validate_story(doc, "draft", ROOT, check_evidence=True)]
+    if isinstance(doc, dict):
+        fails += [f"story.json criterion {f['id']}: {f['rule']}: {f['detail']}"
+                  for f in check_ac(doc, load_vague())]
+    return fails
+
+
+def triple(row):
+    """A seed's identity: (component, category, detail)."""
+    return (row.get("component"), row.get("category"), row.get("detail"))
+
+
+def fmt(t):
+    return "(%s, %s, %s)" % t
+
+
+def edge_matches(ec, name):
+    """name equals the row's component, or appears as a whole word in its detail."""
+    if ec.get("component") == name:
+        return True
+    detail = ec.get("detail")
+    return isinstance(detail, str) and re.search(
+        r"(?<!\w)" + re.escape(name) + r"(?!\w)", detail) is not None
+
+
+def seed_index(rows):
+    """triple -> {(evidence, confidence)} over the scan's seeds."""
+    index = {}
+    for s in rows:
+        index.setdefault(triple(s), set()).add((s.get("evidence"), s.get("confidence")))
+    return index
+
+
+def check_keep_edge(output_path, wanted):
+    """Only edge cases that are real seeds (triple in scan/edge-seeds.json) count."""
+    doc, rows, fails = load_seed_rows(output_path, "must_keep_edge")
+    if fails:
+        return fails
+    known = seed_index(rows)
+    ecs = [ec for ec in story_edge_cases(doc) if triple(ec) in known]
+    return [f"edge case not kept for {w}" for w in wanted if not any(edge_matches(ec, w) for ec in ecs)]
+
+
+def load_seed_rows(output_path, name):
+    """(story doc, seed rows, []) or (None, None, [failure])."""
+    doc, err = load_sibling(output_path, "story.json", name)
+    if err:
+        return None, None, [err]
+    seeds, err = load_sibling(output_path, "scan/edge-seeds.json", name)
+    if err:
+        return None, None, [err]
+    rows = seeds.get("seeds") if isinstance(seeds, dict) else None
+    if not isinstance(rows, list):
+        return None, None, ["scan/edge-seeds.json has no seeds list"]
+    return doc, [s for s in rows if isinstance(s, dict)], []
+
+
+def check_edges_from_seeds(output_path):
+    doc, rows, fails = load_seed_rows(output_path, "edges_from_seeds_only")
+    if fails:
+        return fails
+    known = seed_index(rows)
+    fails = []
+    for ec in story_edge_cases(doc):
+        t = triple(ec)
+        if t not in known:
+            fails.append(f"edge case {ec.get('id')} {fmt(t)} is not in scan/edge-seeds.json")
+        elif (ec.get("evidence"), ec.get("confidence")) not in known[t]:
+            fails.append(f"edge case {ec.get('id')} {fmt(t)}: evidence {ec.get('evidence')!r} and "
+                         f"confidence {ec.get('confidence')!r} differ from the seed's")
+    return fails
+
+
+def check_seeds_accounted(output_path):
+    doc, rows, fails = load_seed_rows(output_path, "seeds_accounted")
+    if fails:
+        return fails
+    dropped = doc.get("droppedSeeds") if isinstance(doc, dict) else None
+    dropped = [d for d in dropped if isinstance(d, dict)] if isinstance(dropped, list) else []
+    seen = {triple(r) for r in story_edge_cases(doc) + dropped}
+    return [f"seed {fmt(triple(s))} is neither an edge case nor a dropped seed"
+            for s in rows if triple(s) not in seen]
+
+
 def check(output_text, asserts, output_path=None):
     fails = []
     for ref in asserts.get("must_reference", []):
@@ -124,6 +246,18 @@ def check(output_text, asserts, output_path=None):
     for api in asserts.get("must_flag_overlap", []):
         if api not in flagged:
             fails.append(f"overlap not flagged for {api}")
+    if asserts.get("story_json_valid"):
+        fails += check_story_json(output_path)
+    if asserts.get("must_keep_edge"):
+        fails += check_keep_edge(output_path, asserts["must_keep_edge"])
+    listed = overlap_components(output_text) if asserts.get("must_list_overlap") else set()
+    for api in asserts.get("must_list_overlap", []):
+        if api not in listed:
+            fails.append(f"overlap not listed for {api}")
+    if asserts.get("edges_from_seeds_only"):
+        fails += check_edges_from_seeds(output_path)
+    if asserts.get("seeds_accounted"):
+        fails += check_seeds_accounted(output_path)
     return fails
 
 

@@ -1,0 +1,2 @@
+{"id": "DEMO-101", "slug": "customer-tier-refined", "indexRoot": "demo/org", "input": "DEMO-101 Customer Tier on the Case page. Add a Customer Tier picklist on Account, shown to agents on the Case page. It should work quickly for agents, properly shown. Squad: Customer Care",
+ "assert": {"story_json_valid": true, "edges_from_seeds_only": true}}

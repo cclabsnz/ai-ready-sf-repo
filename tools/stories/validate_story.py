@@ -37,8 +37,8 @@ TOP_REQUIRED = ("schemaVersion", "storyId", "slug", "status", "squad", "persona"
                 "acceptanceCriteria", "edgeCases", "droppedSeeds", "overlaps", "seeds")
 TOP_ALLOWED = TOP_REQUIRED + ("confirmedBy",)
 AC_KEYS = ("id", "given", "when", "then", "examples", "source")
-EC_KEYS = ("id", "category", "component", "evidence", "confidence", "becameCriterion", "reason")
-DS_KEYS = ("category", "component", "reason")
+EC_KEYS = ("id", "category", "component", "detail", "evidence", "confidence", "becameCriterion", "reason")
+DS_KEYS = ("category", "component", "detail", "reason")
 OQ_KEYS = ("id", "text", "ownerRole", "answer", "deferred")
 OV_KEYS = ("api", "type", "kind", "stories")
 OV_STORY_KEYS = ("storyId", "squad", "status", "changeType", "type", "commit")
@@ -122,8 +122,9 @@ def _check_ec(items, ac_ids, root, check_evidence, errors):
         _keys(tag, c, EC_KEYS, errors)
         if "category" in c and c["category"] not in CATEGORIES:
             errors.append("%s: category '%s' is not one of %s" % (tag, c["category"], ", ".join(CATEGORIES)))
-        if "component" in c and not _nonempty(c["component"]):
-            errors.append("%s: component is not a non-empty string" % tag)
+        for k in ("component", "detail"):
+            if k in c and not _nonempty(c[k]):
+                errors.append("%s: %s is not a non-empty string" % (tag, k))
         if "confidence" in c and c["confidence"] not in CONFIDENCE:
             errors.append("%s: confidence '%s' is not one of %s" % (tag, c["confidence"], ", ".join(CONFIDENCE)))
         if "evidence" in c:
@@ -161,7 +162,7 @@ def _check_dropped(items, errors):
         _keys(tag, d, DS_KEYS, errors)
         if "category" in d and d["category"] not in CATEGORIES:
             errors.append("%s: category '%s' is not one of %s" % (tag, d["category"], ", ".join(CATEGORIES)))
-        for k in ("component", "reason"):
+        for k in ("component", "detail", "reason"):
             if k in d and not _nonempty(d[k]):
                 errors.append("%s: %s is not a non-empty string" % (tag, k))
 

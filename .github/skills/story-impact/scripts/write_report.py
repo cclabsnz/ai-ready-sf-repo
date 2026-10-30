@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.join(REPO, "tools", "impacts"))
 
 from validate import STORY_RE, SLUG_RE, COMP_KEYS, validate  # noqa: E402
 from register import load_register, overlaps, register_commit  # noqa: E402
+from safe_write import checkout_out_dir, write_nofollow  # noqa: E402
 
 QUERY = os.path.join(REPO, "tools", "index", "query.py")
 
@@ -79,33 +80,22 @@ def to_component(r):
     return c
 
 
-def _ctx_of(top):
-    """realpath of <top>/ai-context, or None when ai-context itself is a symlink."""
-    ctx = os.path.join(os.path.realpath(top), "ai-context")
-    if os.path.realpath(os.path.join(top, "ai-context")) != ctx:
-        return None
-    return ctx
-
-
 def out_dir_for(root, story, slug):
     """Return <root>/ai-context/<story>-<slug>, or None when it is refused.
 
-    Refused when <root>/ai-context or this checkout's ai-context is a symlink, or when the
-    folder resolves (realpath) outside <root>/ai-context/ or outside this checkout's
-    ai-context/ (REPO, from __file__). With --root . both anchors are the same folder.
+    The check is safe_write.checkout_out_dir (tools/impacts/safe_write.py): refused when
+    <root>/ai-context or this checkout's ai-context is a symlink, or when the folder resolves
+    (realpath) outside <root>/ai-context/ or outside this checkout's ai-context/.
     """
-    root_ctx, repo_ctx = _ctx_of(root), _ctx_of(REPO)
-    if root_ctx is None or repo_ctx is None:
+    try:
+        return checkout_out_dir(root, "%s-%s" % (story, slug))
+    except ValueError:
         return None
-    out = os.path.join(root, "ai-context", "%s-%s" % (story, slug))
-    real = os.path.realpath(out)
-    if not (real.startswith(root_ctx + os.sep) and real.startswith(repo_ctx + os.sep)):
-        return None
-    return out
 
 
 def cell(v):
-    return "" if v is None else str(v).replace("|", "\\|").replace("\n", " ")
+    """One markdown table cell: backslashes escaped first, then pipes; newlines become spaces."""
+    return "" if v is None else str(v).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
 def overlap_lines(found, invalid, reg_commit):
@@ -156,17 +146,6 @@ def render_md(doc, rows, st, found, invalid, reg_commit):
                   "manual-check findings above the tables. The Overlaps section comes from the "
                   "register and is reported as written._"]
     return "\n".join(lines) + "\n"
-
-
-def write_nofollow(path, text):
-    """Write text to path, never through a symlink. O_NOFOLLOW where the platform has it
-    (not Windows); the caller's islink check covers the rest."""
-    if os.path.islink(path):
-        raise OSError("%s is a symlink" % path)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o644)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(text.encode("utf-8"))
 
 
 def usage(msg):
@@ -237,8 +216,8 @@ def main(argv=None):
             return usage("%s is a symlink; nothing written" % p)
     os.makedirs(out_dir, exist_ok=True)
     try:
-        write_nofollow(jpath, json.dumps(doc, indent=2, sort_keys=True) + "\n")
-        write_nofollow(mpath, md)
+        write_nofollow(jpath, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+        write_nofollow(mpath, md.encode("utf-8"))
     except OSError as exc:
         return usage("cannot write output without following a symlink: %s" % exc)
     print(json.dumps({"impactJson": jpath, "impactMd": mpath, "overlaps": len(found),

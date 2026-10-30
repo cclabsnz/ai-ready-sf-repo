@@ -1,0 +1,2 @@
+{"id": "DEMO-201", "slug": "premium-escalation-refined", "indexRoot": "demo/org", "input": "DEMO-201 Premium case escalation. Change case escalation for premium customers. Squad: Customer Care",
+ "assert": {"story_json_valid": true, "must_keep_edge": ["Escalation_Needs_Level"], "seeds_accounted": true, "edges_from_seeds_only": true}}

@@ -250,6 +250,24 @@ def test_no_register_says_none():
         cleanup(root, scan)
 
 
+def test_md_cells_escape_backslash_before_pipe():
+    root = make_root()
+    rows = [{"api": "WidgetService", "layer": "Ap\\|ex", "type": "ApexClass", "ownership": "Custom\\",
+             "changeType": "modify", "impact": "High", "scale": "S", "hop": "0",
+             "evidence": CLS + ":2", "confidence": "Confirmed", "note": "entry point"}]
+    scan, c, m = inputs(root, rows=rows)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        row = [l for l in md.splitlines() if l.startswith("| `WidgetService` | Ap")][0]
+        assert "| Ap\\\\\\|ex | ApexClass | Custom\\\\ |" in row, row
+        plain = row.replace("\\\\", "").replace("\\|", "")
+        assert len(plain.strip("|").split("|")) == 10, row
+    finally:
+        cleanup(root, scan)
+
+
 def test_bad_evidence_writes_nothing():
     root = make_root()
     rows = [{"api": "WidgetService", "type": "ApexClass", "changeType": "modify", "impact": "High",

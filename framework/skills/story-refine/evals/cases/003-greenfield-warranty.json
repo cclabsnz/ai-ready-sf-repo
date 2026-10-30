@@ -1,0 +1,2 @@
+{"id": "DEMO-301", "slug": "warranty-claim-intake", "indexRoot": "demo/org", "input": "DEMO-301 Warranty claim intake. As a service agent I need a new Warranty Claim object (Warranty_Claim__c) linked to Case, so claims are tracked apart from the case itself. Squad: Customer Care",
+ "assert": {"story_json_valid": true, "edges_from_seeds_only": true, "seeds_accounted": true}}
