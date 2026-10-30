@@ -33,8 +33,10 @@ Six principles, in order of precedence:
 - **Impact record and register** (`tools/impacts/`, `impacts/`): a validated `impact.json`
   schema, a human promotion step into `impacts/`, and the register of in-flight stories. Two
   overlap checks read it. At story time, story-impact lists the other stories that touch the same
-  components; that section never fails anything. At PR time, `pr_check.py` reports code overlap
-  and scope drift as comments, unless `.ai-framework.json` sets a finding class to `fail`. The PR
+  components; that section never fails anything. At PR time, `pr_check.py` maps the changed
+  files to components and lists the registered stories and other open PRs that touch the same
+  components; that listing never fails anything. It also reports scope drift (`outOfScope`,
+  `noImpact`) as comments, unless `.ai-framework.json` sets a finding class to `fail`. The PR
   check runs in CI only once the owner applies the WS2 patches (see
   [Running the checks](#running-the-checks)).
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
@@ -246,8 +248,8 @@ To compare with the answer key:
 
 - Open `demo/stories/DEMO-201.answer.json` next to `impact.md` and check each component, its
   change type and hop by hand.
-- Run the automated part of eval case 004. It scores the files this step's story-impact run
-  wrote: `ai-context/DEMO-201-<slug>/impact.md` and the `impact.json` beside it, where `<slug>`
+- Run the automated part of eval case 004. It scores the files the story-impact run in this
+  step (quick start step 8) wrote: `ai-context/DEMO-201-<slug>/impact.md` and the `impact.json` beside it, where `<slug>`
   is the one the assistant picked. In a fresh clone, run story-impact first; the command has
   nothing to read until then. Any draft at that path works too. It checks that the report names
   the three hop-3 components, labels every table row, stays within 3 hops and avoids banned phrases. It also
@@ -261,9 +263,10 @@ To compare with the answer key:
   Expected: `case 004-escalation-hops-3: PASS over 1 run(s)`.
 
 Not automated yet: scoring a report against the answer key, and running the same story several
-times to show the answers match (WS3). Today `run_skill.py` also checks that cited paths exist
-only when they start with `force-app/`, `pkg-*/` or `fixtures/`, so it does not check the
-`demo/org/...` evidence in this report. Spot-check a few `path:line` cites yourself.
+times to show the answers match (WS3). `run_skill.py` also checks each backticked `path:line`
+cite that starts with `force-app/`, `pkg-*/`, `fixtures/` or `demo/`: the file must exist and
+have at least that many lines. That covers the `demo/org/...` evidence in this report. It does
+not check that the cited line says what the report claims, so spot-check a few cites yourself.
 
 ## Promoting an impact
 
@@ -300,8 +303,10 @@ To look at the register:
 Until the owner applies the WS2 guard patch, run these from your own terminal, because the
 assistant cannot run them in `normal` mode. To tell which mode you are in, read
 `AI_FRAMEWORK_MODE` in the committed `.claude/settings.json`, then check for a git-ignored
-`.claude/settings.local.json` that overrides it (see [Using the modes](#using-the-modes)). With
-no local file you are in the committed mode, `normal` by default. The schema, the PR check and its `.ai-framework.json`
+`.claude/settings.local.json`. A committed `advise` always wins. The local file's mode applies
+only while the committed value is `normal`, and a committed `build` or `maintain` is treated as
+`advise` (see [Using the modes](#using-the-modes)). With no local file and the committed default
+`normal`, you are in `normal`. The schema, the PR check and its `.ai-framework.json`
 switch are described under
 [Impact record and register](docs/DESIGN.md#impact-record-and-register) in `docs/DESIGN.md`.
 

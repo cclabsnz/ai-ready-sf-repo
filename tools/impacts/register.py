@@ -29,11 +29,31 @@ from validate import validate  # noqa: E402
 
 CONFLICT_TYPES = ("new", "modify", "delete")
 
+# `git -C <root>` reads the config of whatever repo encloses --root, which may be one planted
+# under ai-context/. These overrides neutralise the config keys known to run a command.
+# core.hooksPath points at a folder that does not exist, so no hook can be found.
+_NO_HOOKS = os.path.join(os.path.abspath(os.sep), "nonexistent-ai-framework-hooks")
+GIT_SAFE = ["--no-pager",
+            "-c", "core.fsmonitor=false",
+            "-c", "core.hooksPath=" + _NO_HOOKS,
+            "-c", "core.pager=cat",
+            "-c", "core.sshCommand=",
+            "-c", "diff.external=",
+            "-c", "core.editor=true"]
+
+
+def _git_env():
+    env = dict(os.environ)
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
 
 def _git(root, args):
+    """Run one read-only git command against root; "" on any failure."""
     try:
-        out = subprocess.run(["git", "-C", root] + args, capture_output=True, text=True,
-                             timeout=30)
+        out = subprocess.run(["git", "-C", root] + GIT_SAFE + args, capture_output=True,
+                             text=True, timeout=30, env=_git_env())
     except (OSError, subprocess.SubprocessError):
         return ""
     if out.returncode != 0:

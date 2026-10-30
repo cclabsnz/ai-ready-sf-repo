@@ -1,7 +1,8 @@
 """Shared helpers for the plain-script tests in tools/impacts/.
 
-Symlink creation can fail on Windows runners (no privilege, or not implemented). A test that cannot
-create its symlink is reported as skipped. It is neither a failure nor a silent pass.
+Symlink creation can fail on Windows runners (no privilege, or not implemented), and git may be
+missing. A test that cannot create its symlink, or raises SkipTest itself, is reported as skipped
+with the reason. It is neither a failure nor a silent pass.
 """
 import os
 
@@ -27,9 +28,9 @@ def run_tests(tests, show_pass=False):
     for name, fn in tests:
         try:
             fn()
-        except SkipTest:
+        except SkipTest as exc:
             skipped += 1
-            print("SKIP %s: symlinks unavailable" % name)
+            print("SKIP %s: %s" % (name, exc))
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print("FAIL %s: %r" % (name, exc))

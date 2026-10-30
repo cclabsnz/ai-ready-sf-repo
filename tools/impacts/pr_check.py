@@ -6,8 +6,13 @@ Usage:
               [--root .] [--base-root <dir>]
 
 Maps the PR's changed files to index components, then reports:
-  - impact records changed in the PR, their validation errors and their register overlaps
+  - impact records changed in the PR (story and squad), their validation errors and their
+    register overlaps; a changed record that is a symlink, or sits under one, is not read
   - the components the PR changes, plus unmapped files (never a finding)
+  - registered stories touching these components: every register entry (other than the
+    branch's own story) on a component the PR changes, as conflict (the entry creates,
+    modifies or deletes it) or watch (it reviews it); the PR's changes count as modifying.
+    Informational only: no finding class, never fails
   - scope: components outside the story's committed impact record (finding outOfScope),
     or no story id / no impact on record while code changes (finding noImpact)
   - other open PRs that touch the same components
@@ -40,13 +45,14 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools", "index"))
 
-from register import load_register, overlaps, register_commit, scope  # noqa: E402
+from register import (CONFLICT_TYPES, component_map, load_register, overlaps,  # noqa: E402
+                      register_commit, scope)
 from validate import STORY_RE, validate  # noqa: E402
 from query import load  # noqa: E402
 
 # Matches only [A-Z][A-Z0-9]*-[0-9]+, so a story id found this way is safe to print as is.
 STORY_SEARCH = re.compile(STORY_RE.pattern.lstrip("^").rstrip("$"))
-IMPACT_PATH_RE = re.compile(r"^impacts/[^/]+/impact\.json$")
+IMPACT_PATH_RE = re.compile(r"^impacts/(?!\.\.?/)[^/]+/impact\.json$")
 SETTING_KEYS = ("noImpact", "outOfScope")
 SETTING_VALUES = ("comment", "fail")
 BUNDLE_TYPES = {"lwc": "LightningComponentBundle", "aura": "AuraDefinitionBundle"}
@@ -168,10 +174,62 @@ def _story_entry(s):
         code_span(s.get("status")), code_span(s.get("commit")))
 
 
+def _is_redirected(root, rel):
+    """True when the path, or any folder on it under root, is a symlink."""
+    full = os.path.join(root, *rel.split("/"))
+    if os.path.islink(full):
+        return True
+    if not os.path.lexists(full):
+        return False
+    return os.path.realpath(full) != os.path.join(os.path.realpath(root), *rel.split("/"))
+
+
+def _story_cell(value):
+    """A story id that fully matches the story pattern prints as is; anything else goes
+    through code_span. fullmatch, since STORY_RE's $ also matches before a trailing newline."""
+    if isinstance(value, str) and STORY_SEARCH.fullmatch(value):
+        return value
+    return code_span(value)
+
+
+def _cell(value):
+    """A table cell: an inert code span with | escaped, since GFM splits cells on it."""
+    return code_span(value).replace("|", "\\|")
+
+
+def _registered_section(touched, register_impacts, own_story):
+    """Rows for every register entry on a touched component, other than own_story's."""
+    cmap = component_map(register_impacts)
+    rows = []
+    for api in sorted(touched):
+        for e in cmap.get(api, []):
+            if own_story is not None and e["storyId"] == own_story:
+                continue
+            kind = "conflict" if e["changeType"] in CONFLICT_TYPES else "watch"
+            rows.append((0 if kind == "conflict" else 1, api, str(e["storyId"]), kind, e))
+    rows.sort(key=lambda r: r[:3])
+    lines = ["", "### Registered stories touching these components", ""]
+    if not rows:
+        lines.append("No other story on the register lists these components.")
+        return lines
+    lines += ["This PR's changes count as modifying each component. A conflict means the other "
+              "story creates, modifies or deletes it; a watch means it only reviews it.", "",
+              "| Component | Kind | Story | Squad | Status | Their change | Record commit |",
+              "|---|---|---|---|---|---|---|"]
+    for _, api, _, kind, e in rows:
+        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (
+            _cell(api), kind, _story_cell(e["storyId"]).replace("|", "\\|"), _cell(e["squad"]),
+            _cell(e["status"]), _cell(e["changeType"]), _cell(e["commit"])))
+    return lines
+
+
 def _impact_section(root, impact_paths, register_impacts):
     lines = []
     for rel in sorted(set(impact_paths)):
         full = os.path.join(root, rel)
+        if _is_redirected(root, rel):
+            lines.append("- %s: symlink, not read" % code_span(rel))
+            continue
         if not os.path.isfile(full):
             lines.append("- %s: removed in this PR" % code_span(rel))
             continue
@@ -185,8 +243,10 @@ def _impact_section(root, impact_paths, register_impacts):
         errs = validate(doc, "promoted", root)
         found = overlaps(doc, register_impacts) if isinstance(doc, dict) else []
         story = doc.get("storyId") if isinstance(doc, dict) else None
-        lines.append("- %s (story %s)" % (code_span(rel), code_span(story)
-                                           if story is not None else "unknown"))
+        squad = doc.get("squad") if isinstance(doc, dict) else None
+        lines.append("- %s (story %s, squad %s)" % (
+            code_span(rel), code_span(story) if story is not None else "unknown",
+            code_span(squad) if squad is not None else "unknown"))
         if errs:
             lines.append("  - Validation errors:")
             lines.extend("    - %s" % code_span(e) for e in errs)
@@ -254,6 +314,7 @@ def report(root, idx, changed, branch, open_prs, base_root=None):
 
     if touched:
         story = story_from_branch(branch)
+        out += _registered_section(touched, reg["impacts"], story)
         out += ["", "### Scope", ""]
         on_record = scope(story, reg["impacts"]) if story else None
         if story is None:

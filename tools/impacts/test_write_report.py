@@ -2,6 +2,8 @@
 """Tests for story-impact's write_report.py. Plain script: python3 tools/impacts/test_write_report.py
 
 The checkout's script runs by subprocess with --root <temp root>. The temp root holds data only.
+Temp roots are made inside the checkout's ai-context/ and removed afterwards, because the writer
+refuses any output outside it.
 """
 import json
 import os
@@ -23,6 +25,8 @@ RENDERED = [os.path.join(REPO, d, "skills", "story-impact", "scripts", "write_re
 INDEX_COMMIT = "feedc0de1234567"
 CLS = "force-app/main/default/classes/WidgetService.cls"
 STORY, SLUG = "DEMO-901", "widget-change"
+# Temp roots live inside the checkout's ai-context/, the only place the writer may write.
+CTX = os.path.join(REPO, "ai-context")
 
 PLANT = ("import os\n"
          "open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname("
@@ -48,7 +52,8 @@ def other_record():
 
 
 def make_root(register=True):
-    root = tempfile.mkdtemp(prefix="write_report_")
+    os.makedirs(CTX, exist_ok=True)
+    root = tempfile.mkdtemp(prefix="write_report_", dir=CTX)
     write(os.path.join(root, CLS), "public with sharing class WidgetService {\n"
                                    "    public static void run() {}\n}\n")
     write(os.path.join(root, "VERSION"), "9.9.9\n")
@@ -139,6 +144,22 @@ def test_out_dir_outside_ai_context_refused():
         assert os.listdir(outside) == [], os.listdir(outside)
     finally:
         cleanup(root, outside, scan)
+
+
+def test_root_outside_checkout_refused():
+    """A --root outside the checkout's ai-context/ cannot move the output there."""
+    inside = make_root()
+    root = tempfile.mkdtemp(prefix="write_report_elsewhere_")
+    for rel in (CLS, "VERSION", os.path.join("index", "metadata.json")):
+        os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+        shutil.copyfile(os.path.join(inside, rel), os.path.join(root, rel))
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 2 and "outside the checkout's ai-context/" in out, out
+        assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
+    finally:
+        cleanup(root, inside, scan)
 
 
 def test_symlinked_output_file_refused():

@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import register  # noqa: E402
+from _testutil import SkipTest, run_tests  # noqa: E402
 
 SCRIPT = os.path.join(HERE, "register.py")
 
@@ -172,18 +173,50 @@ def test_deep_json_listed_invalid():
         shutil.rmtree(root)
 
 
+def _plain_git(repo, *args):
+    """Test setup only: git with hooks off and a fixed identity."""
+    return subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=" + os.devnull,
+                           "-c", "user.name=Test", "-c", "user.email=test-identity",
+                           "-c", "commit.gpgsign=false"] + list(args),
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_planted_git_config_does_not_run():
+    if shutil.which("git") is None:
+        raise SkipTest("git unavailable")
+    repo = tempfile.mkdtemp()
+    try:
+        write_doc(repo, doc("DEMO-1", [comp("X", "modify")]))
+        if _plain_git(repo, "init", "-q").returncode != 0:
+            raise SkipTest("git init failed")
+        _plain_git(repo, "add", "-A")
+        assert _plain_git(repo, "commit", "-q", "-m", "seed").returncode == 0
+        marker = os.path.join(repo, "FSMONITOR_RAN")
+        hook = os.path.join(repo, "fsmonitor.sh")
+        with open(hook, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("#!/bin/sh\ntouch '%s'\nexit 1\n" % marker)
+        os.chmod(hook, 0o755)
+        assert _plain_git(repo, "config", "core.fsmonitor", hook).returncode == 0
+        # Control: an unhardened git command runs the planted script.
+        subprocess.run(["git", "-C", repo, "status"], capture_output=True, timeout=60)
+        if os.path.exists(marker):
+            os.remove(marker)
+        else:
+            print("NOTE test_planted_git_config_does_not_run: the fsmonitor vector did not "
+                  "reproduce unhardened on this platform; the assertions below still run")
+        assert register._git(repo, ["status", "--porcelain"]) is not None
+        reg = register.load_register(repo)
+        assert [d["storyId"] for d in reg["impacts"]] == ["DEMO-1"], reg
+        assert reg["impacts"][0]["_commit"] not in ("", "uncommitted"), reg["impacts"][0]
+        assert register.register_commit(repo) != "unknown"
+        assert not os.path.exists(marker), "planted core.fsmonitor ran"
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = failed = 0
-    for t in tests:
-        try:
-            t()
-            passed += 1
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("FAIL %s: %r" % (t.__name__, exc))
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests([(t.__name__, t) for t in tests])
 
 
 if __name__ == "__main__":

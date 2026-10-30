@@ -8,9 +8,12 @@ The page shows the HEAD short commit, the components that two or more in-flight 
 list (conflicts first), every story on record, and the files that failed validation.
 It has inline CSS only: no scripts and no external URLs. All text is HTML-escaped.
 
---out defaults to <root>/ai-context/register/register.html; a relative --out resolves
-against --root. The tool refuses (exit 2, nothing written) when the out file's folder
-resolves outside <root>/ai-context/ or the out file is a symlink.
+--root is data only: it says which impacts/ to read and never where to write.
+--out defaults to <checkout>/ai-context/register/register.html, where <checkout> is the repo
+this script lives in (located from __file__). A relative --out resolves against <checkout>.
+The tool refuses (exit 2, nothing written) when the out file's folder resolves (realpath)
+outside <checkout>/ai-context/, when <checkout>/ai-context itself is a symlink, or when the
+out file is a symlink.
 
 Prints the written path on stdout. Exit codes: 0 ok, 2 bad usage or refused path.
 Stdlib only. Data comes from --root; code never does.
@@ -31,16 +34,19 @@ def esc(v):
     return html.escape("" if v is None else str(v), quote=True)
 
 
-def resolve_out(root, out):
-    """Return the absolute out path, or None when it is refused."""
-    base = os.path.realpath(root)
+def resolve_out(out):
+    """Return the absolute out path, or None when it is refused.
+
+    The anchor is the checkout's ai-context/ (from __file__), never --root.
+    """
+    base = os.path.realpath(ROOT)
     ctx = os.path.join(base, "ai-context")
-    if os.path.realpath(os.path.join(root, "ai-context")) != ctx:
+    if os.path.realpath(os.path.join(ROOT, "ai-context")) != ctx:
         return None
     if out is None:
         out = os.path.join("ai-context", "register", "register.html")
     if not os.path.isabs(out):
-        out = os.path.join(root, out)
+        out = os.path.join(ROOT, out)
     folder = os.path.realpath(os.path.dirname(out))
     if folder != ctx and not folder.startswith(ctx + os.sep):
         return None
@@ -276,14 +282,14 @@ def main(argv=None):
         args = ap.parse_args(argv)
     except SystemExit as exc:
         return 2 if exc.code else 0
-    path = resolve_out(args.root, args.out)
+    path = resolve_out(args.out)
     if path is None:
-        print("refused: --out resolves outside <root>/ai-context/ or is a symlink",
+        print("refused: --out resolves outside the checkout's ai-context/ or is a symlink",
               file=sys.stderr)
         return 2
     page = render(load_register(args.root), register_commit(args.root))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if resolve_out(args.root, path) != path:
+    if resolve_out(path) != path:
         print("refused: output folder changed during the run", file=sys.stderr)
         return 2
     try:

@@ -16,12 +16,15 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "tools", "impacts"))
 
 from validate import validate  # noqa: E402
+from _testutil import run_tests, symlink  # noqa: E402
 
 TOOL = os.path.join(HERE, "answer_to_draft.py")
 BUILD = os.path.join(REPO, "tools", "index", "build_index.py")
 KEY = os.path.join(REPO, "demo", "stories", "DEMO-202.answer.json")
 
-ROOT = tempfile.mkdtemp(prefix="answer_to_draft_")
+# The writer refuses output outside the checkout's ai-context/, so the temp root lives there.
+os.makedirs(os.path.join(REPO, "ai-context"), exist_ok=True)
+ROOT = tempfile.mkdtemp(prefix="answer_to_draft_", dir=os.path.join(REPO, "ai-context"))
 atexit.register(shutil.rmtree, ROOT, True)
 INDEX = os.path.join(ROOT, "index")
 
@@ -69,19 +72,40 @@ def case_unplaceable_index_component_exits_1():
     assert not os.path.exists(os.path.join(ROOT, "ai-context", "DEMO-202-bad-key", "impact.json"))
 
 
+def case_symlinked_scan_file_not_followed():
+    outside = tempfile.mkdtemp(prefix="answer_to_draft_outside_")
+    scan = os.path.join(ROOT, "ai-context", "DEMO-202-symlink-scan", "scan")
+    try:
+        os.makedirs(scan)
+        victim = os.path.join(outside, "victim.json")
+        with open(victim, "w", encoding="utf-8") as fh:
+            fh.write("keep")
+        symlink(victim, os.path.join(scan, "classified.json"))
+        code, out = run(slug="symlink-scan")
+        assert code == 2 and "symlink" in out, out
+        with open(victim, encoding="utf-8") as fh:
+            assert fh.read() == "keep"
+        assert not os.path.exists(os.path.join(scan, "meta.json"))
+    finally:
+        shutil.rmtree(outside)
+
+
+def case_root_outside_checkout_refused():
+    root = tempfile.mkdtemp(prefix="answer_to_draft_elsewhere_")
+    try:
+        p = subprocess.run([sys.executable, TOOL, "--key", KEY, "--slug", "elsewhere",
+                            "--index", INDEX, "--root", root], capture_output=True, text=True)
+        assert p.returncode == 2, p.stdout + p.stderr
+        assert "outside the checkout's ai-context/" in p.stderr, p.stderr
+        assert not os.path.exists(os.path.join(root, "ai-context"))
+    finally:
+        shutil.rmtree(root)
+
+
 def main():
     setup()
     cases = [(n, f) for n, f in sorted(globals().items()) if n.startswith("case_") and callable(f)]
-    passed = failed = 0
-    for name, fn in cases:
-        try:
-            fn()
-            passed += 1
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("FAIL %s: %r" % (name, exc))
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests(cases)
 
 
 if __name__ == "__main__":

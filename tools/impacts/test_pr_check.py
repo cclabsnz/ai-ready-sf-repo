@@ -2,6 +2,7 @@
 """Tests for pr_check.py. Plain script: python3 tools/impacts/test_pr_check.py"""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import pr_check  # noqa: E402
+from _testutil import run_tests, symlink  # noqa: E402
 
 SCRIPT = os.path.join(HERE, "pr_check.py")
 BASE = "demo/org/force-app/main/default"
@@ -207,6 +209,9 @@ def test_impact_pr_overlap():
         part = md.split("### Impact records in this PR", 1)[1].split("###", 1)[0]
         assert rel in part and "conflict" in part and "DEMO-201" in part, md
         assert "`CaseTriggerHandler`" in part
+        # names both stories and both squads: the PR's own record and the register's
+        assert "(story `DEMO-202`, squad `Service Ops`)" in part, part
+        assert "squad `Customer Care`" in part, part
         md, _ = pr_check.report(root, IDX, ["impacts/DEMO-9-gone/impact.json"], "main", [])
         assert "removed in this PR" in md, md
     finally:
@@ -360,6 +365,8 @@ def test_neutral_wording():
     outs = _all_branch_outputs()
     joined = "\n".join(outs)
     for needed in ("### Impact records in this PR", "### Components this PR changes",
+                   "### Registered stories touching these components",
+                   "No other story on the register lists these components.",
                    "### Scope", "### Other open PRs", "removed in this PR",
                    "No story id in branch", "No impact on record for", "Set to fail by",
                    "Findings only; a reviewer decides.", "Unmapped files"):
@@ -373,18 +380,94 @@ def test_neutral_wording():
         assert word not in src, "script source contains '%s'" % word
 
 
+def _section(md, header):
+    return md.split(header, 1)[1].split("\n###", 1)[0]
+
+
+def _table_rows(part):
+    return [ln for ln in part.splitlines() if ln.startswith("| ") and not ln.startswith("| Component")]
+
+
+def _cells(row):
+    """Split a GFM row on unescaped pipes."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip())[1:-1]]
+
+
+def test_registered_story_touching_component():
+    root = make_root(doc("DEMO-202", [comp("CaseTriggerHandler", "modify")], squad="Service Ops"),
+                     doc("DEMO-203", [comp("CaseTriggerHandler", "review")], squad="Billing"),
+                     doc("DEMO-201", [comp("CaseTriggerHandler", "modify")]),
+                     settings={"impactChecks": {"outOfScope": "fail", "noImpact": "fail"}})
+    try:
+        code, out, _ = run_cli(root, [CLS], "feature/DEMO-201-x")
+        assert code == 0, out
+        header = "### Registered stories touching these components"
+        assert out.index("### Components this PR changes") < out.index(header) \
+            < out.index("### Scope"), out
+        rows = [_cells(r) for r in _table_rows(_section(out, header))]
+        assert rows == [
+            ["`CaseTriggerHandler`", "conflict", "DEMO-202", "`Service Ops`", "`in-flight`",
+             "`modify`", "`uncommitted`"],
+            ["`CaseTriggerHandler`", "watch", "DEMO-203", "`Billing`", "`in-flight`",
+             "`review`", "`uncommitted`"]], rows
+        assert "Findings only; a reviewer decides." in out
+        # no story id in the branch: nothing is excluded, and the section never fails
+        md, fail = pr_check.report(root, IDX, [CLS], "main", [])
+        rows = [_cells(r) for r in _table_rows(_section(md, header))]
+        assert [r[2] for r in rows] == ["DEMO-201", "DEMO-202", "DEMO-203"], rows
+        assert fail  # noImpact is set to fail; the registered section adds nothing to it
+        assert "Set to fail by .ai-framework.json: noImpact" in md, md
+        md, _ = pr_check.report(root, IDX, [SVC], "feature/DEMO-201-x", [])
+        assert "No other story on the register lists these components." in md, md
+    finally:
+        shutil.rmtree(root)
+
+
+def test_story_cell_raw_only_on_full_match():
+    assert pr_check._story_cell("DEMO-202") == "DEMO-202"
+    assert pr_check._story_cell("DEMO-202\n") == "`DEMO-202`"
+    assert pr_check._story_cell("x DEMO-202") == "`x DEMO-202`"
+    assert pr_check._story_cell(None) == "`None`"
+
+
+def test_registered_section_cells_are_inert():
+    reg = doc("DEMO-202", [comp("CaseTriggerHandler", "modify")], squad="A|B`x\n### Scope")
+    reg["status"] = "in-flight"
+    root = make_root(reg)
+    try:
+        md, _ = pr_check.report(root, IDX, [CLS], "feature/DEMO-201-x", [])
+        _assert_inert(md)
+        rows = _table_rows(_section(md, "### Registered stories touching these components"))
+        assert len(rows) == 1, md
+        assert len(_cells(rows[0])) == 7, rows[0]
+        assert "\\|" in rows[0], rows[0]
+    finally:
+        shutil.rmtree(root)
+
+
+def test_symlinked_changed_record_not_read():
+    root = make_root()
+    outside = tempfile.mkdtemp()
+    try:
+        target = os.path.join(outside, "impact.json")
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(doc("DEMO-202", [comp("CaseTriggerHandler", "modify")]), fh)
+        os.makedirs(os.path.join(root, "impacts", "DEMO-202-demo"))
+        symlink(target, os.path.join(root, "impacts", "DEMO-202-demo", "impact.json"))
+        symlink(outside, os.path.join(root, "impacts", "DEMO-203-demo"))
+        md, _ = pr_check.report(root, IDX, ["impacts/DEMO-202-demo/impact.json",
+                                            "impacts/DEMO-203-demo/impact.json"], "main", [])
+        part = _section(md, "### Impact records in this PR")
+        assert part.count("symlink, not read") == 2, md
+        assert "story" not in part, md
+    finally:
+        shutil.rmtree(root)
+        shutil.rmtree(outside)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = failed = 0
-    for t in tests:
-        try:
-            t()
-            passed += 1
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("FAIL %s: %r" % (t.__name__, exc))
-    print("%d passed, %d failed" % (passed, failed))
-    return 1 if failed else 0
+    return run_tests([(t.__name__, t) for t in tests])
 
 
 if __name__ == "__main__":

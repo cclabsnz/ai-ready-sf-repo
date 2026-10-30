@@ -9,6 +9,9 @@ write_report.py (from this checkout) by subprocess. Evidence comes from the inde
 '<node path>:1'; any other index component takes the edge evidence for its smallest hop; a
 judgement component takes its evidence path with ':1'. A component the index cannot place exits 1.
 
+The scan folder must resolve (realpath) inside both <root>/ai-context/ and this checkout's
+ai-context/, and the scan files are never written through a symlink; otherwise exit 2.
+
 Exit codes: 0 ok, 1 component not found / writer failed validation, 2 bad usage or malformed key.
 Code comes from this checkout (located from __file__); data comes from --root.
 """
@@ -89,8 +92,36 @@ def build(key, idx):
 
 
 def write_json(path, obj):
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(obj, indent=2, sort_keys=True) + "\n")
+    """Write obj to path, never through a symlink. O_NOFOLLOW where the platform has it
+    (not Windows); the islink check covers the rest."""
+    if os.path.islink(path):
+        raise OSError("%s is a symlink" % path)
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_BINARY", 0))
+    fd = os.open(path, flags, 0o644)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write((json.dumps(obj, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+
+
+def _ctx_of(top):
+    """realpath of <top>/ai-context, or None when ai-context itself is a symlink."""
+    ctx = os.path.join(os.path.realpath(top), "ai-context")
+    if os.path.realpath(os.path.join(top, "ai-context")) != ctx:
+        return None
+    return ctx
+
+
+def scan_dir_for(root, story, slug):
+    """<root>/ai-context/<story>-<slug>/scan, or None when it resolves (realpath) outside
+    <root>/ai-context/ or outside this checkout's ai-context/ (REPO, from __file__)."""
+    root_ctx, repo_ctx = _ctx_of(root), _ctx_of(REPO)
+    if root_ctx is None or repo_ctx is None:
+        return None
+    scan = os.path.join(root, "ai-context", "%s-%s" % (story, slug), "scan")
+    real = os.path.realpath(scan)
+    if not (real.startswith(root_ctx + os.sep) and real.startswith(repo_ctx + os.sep)):
+        return None
+    return scan
 
 
 def main(argv=None):
@@ -122,20 +153,21 @@ def main(argv=None):
                   file=sys.stderr)
         return 1
 
-    base = os.path.realpath(a.root)
-    ctx = os.path.join(base, "ai-context")
-    scan = os.path.join(a.root, "ai-context", "%s-%s" % (key["storyId"], a.slug), "scan")
-    if os.path.realpath(os.path.join(a.root, "ai-context")) != ctx or \
-            not os.path.realpath(scan).startswith(ctx + os.sep):
-        return usage("output folder resolves outside <root>/ai-context/; nothing written")
+    scan = scan_dir_for(a.root, key["storyId"], a.slug)
+    if scan is None:
+        return usage("output folder resolves outside <root>/ai-context/ or outside the "
+                     "checkout's ai-context/; nothing written")
     os.makedirs(scan, exist_ok=True)
     meta = {"squad": key["squad"], "hops": key["hops"],
             "model": "none (derived from reviewed answer key)", "assistantVersion": "n/a",
             "decisions": key.get("decisions", []), "unknowns": list(key.get("assumptions", []))}
     cpath = os.path.join(scan, "classified.json")
     mpath = os.path.join(scan, "meta.json")
-    write_json(cpath, rows)
-    write_json(mpath, meta)
+    try:
+        write_json(cpath, rows)
+        write_json(mpath, meta)
+    except OSError as exc:
+        return usage("cannot write scan input without following a symlink: %s" % exc)
 
     p = subprocess.run([sys.executable, WRITER, "--id", key["storyId"], "--slug", a.slug,
                         "--classified", cpath, "--meta", mpath, "--root", a.root],

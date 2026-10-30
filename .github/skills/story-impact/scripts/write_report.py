@@ -11,7 +11,8 @@ meta.json: {squad, hops, model, assistantVersion, decisions: [{text, ownerRole}]
 Writes ai-context/<id>-<slug>/impact.json (a draft record) and impact.md. The record is validated
 as a draft, with evidence checked against --root, before anything is written; on errors nothing is
 written and the exit code is 1. Exit 2 is bad usage, including an output folder that resolves
-outside <root>/ai-context/.
+(realpath) outside <root>/ai-context/ or outside this checkout's ai-context/ (located from
+__file__). In normal use --root is . and the two are the same folder.
 
 Code comes from this checkout (located from __file__); data comes from --root.
 """
@@ -78,14 +79,27 @@ def to_component(r):
     return c
 
 
+def _ctx_of(top):
+    """realpath of <top>/ai-context, or None when ai-context itself is a symlink."""
+    ctx = os.path.join(os.path.realpath(top), "ai-context")
+    if os.path.realpath(os.path.join(top, "ai-context")) != ctx:
+        return None
+    return ctx
+
+
 def out_dir_for(root, story, slug):
-    """Return the output folder, or None when it resolves outside <root>/ai-context/."""
-    base = os.path.realpath(root)
-    ctx = os.path.join(base, "ai-context")
-    if os.path.realpath(os.path.join(root, "ai-context")) != ctx:
+    """Return <root>/ai-context/<story>-<slug>, or None when it is refused.
+
+    Refused when <root>/ai-context or this checkout's ai-context is a symlink, or when the
+    folder resolves (realpath) outside <root>/ai-context/ or outside this checkout's
+    ai-context/ (REPO, from __file__). With --root . both anchors are the same folder.
+    """
+    root_ctx, repo_ctx = _ctx_of(root), _ctx_of(REPO)
+    if root_ctx is None or repo_ctx is None:
         return None
     out = os.path.join(root, "ai-context", "%s-%s" % (story, slug))
-    if not os.path.realpath(out).startswith(ctx + os.sep):
+    real = os.path.realpath(out)
+    if not (real.startswith(root_ctx + os.sep) and real.startswith(repo_ctx + os.sep)):
         return None
     return out
 
@@ -177,8 +191,8 @@ def main(argv=None):
         return usage("--slug '%s' does not match %s" % (a.slug, SLUG_RE.pattern))
     out_dir = out_dir_for(a.root, a.id, a.slug)
     if out_dir is None:
-        return usage("output folder for %s-%s resolves outside <root>/ai-context/; nothing written"
-                     % (a.id, a.slug))
+        return usage("output folder for %s-%s resolves outside <root>/ai-context/ or outside the "
+                     "checkout's ai-context/; nothing written" % (a.id, a.slug))
     try:
         with open(a.classified, encoding="utf-8") as fh:
             rows = json.load(fh)
