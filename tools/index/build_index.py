@@ -17,9 +17,10 @@ import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from datetime import datetime, timezone
 
-INDEX_VERSION = "0.4.0"
+INDEX_VERSION = "0.5.0"
 NS = {"m": "http://soap.sforce.com/2006/04/metadata"}
 
 
@@ -148,6 +149,28 @@ def build(root, namespaces):
                           "namespace": namespace_of(field, namespaces)}
             if el is None:
                 nodes[api]["parseError"] = True
+            else:
+                if el.find("m:formula", NS) is not None:
+                    nodes[api]["formula"] = True
+                vs = el.find("m:valueSet", NS)
+                if vs is not None:
+                    gname = text(vs, "valueSetName")
+                    if gname:
+                        nodes[api]["globalValueSet"] = gname
+                    vals = []
+                    fsrc = read_src(path)
+                    # Search from the value set only, so a value named like the field finds its own line.
+                    pos = max(fsrc.find("<valueSetDefinition>"), 0)
+                    for v in vs.findall("m:valueSetDefinition/m:value", NS):
+                        vname = text(v, "fullName")
+                        if vname is None:
+                            continue
+                        ln, pos = find_line(fsrc, f"<fullName>{escape(vname)}</fullName>", pos)
+                        vals.append({"value": vname,
+                                     "active": text(v, "isActive") != "false",
+                                     "line": ln})
+                    if vals:
+                        nodes[api]["picklistValues"] = vals
             nodes.setdefault(obj, {"type": "CustomObject", "path": None,
                                    "namespace": namespace_of(obj, namespaces)})
             edges.append({"from": api, "to": obj, "kind": "fieldOf"})

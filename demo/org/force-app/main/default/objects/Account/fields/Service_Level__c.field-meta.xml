@@ -23,6 +23,12 @@
                 <default>false</default>
                 <label>Premium</label>
             </value>
+            <value>
+                <fullName>Legacy Bronze</fullName>
+                <default>false</default>
+                <isActive>false</isActive>
+                <label>Legacy Bronze (retired)</label>
+            </value>
         </valueSetDefinition>
     </valueSet>
 </CustomField>

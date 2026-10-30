@@ -533,7 +533,68 @@ def case_permission_set_repeated_class_distinct_evidence():
 
 
 def case_index_version():
-    assert build_index.INDEX_VERSION == "0.4.0"
+    assert build_index.INDEX_VERSION == "0.5.0"
+
+
+def _picklist_xml(value_set):
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<CustomField xmlns="{MD}">\n'
+            f'    <type>Picklist</type>\n'
+            f'{value_set}'
+            f'</CustomField>\n')
+
+
+def case_picklist_values_parsed():
+    xml = _picklist_xml(
+        '    <valueSet>\n'
+        '        <valueSetDefinition>\n'
+        '            <value>\n'
+        '                <fullName>Alpha</fullName>\n'
+        '                <default>true</default>\n'
+        '            </value>\n'
+        '            <value>\n'
+        '                <fullName>Beta</fullName>\n'
+        '                <isActive>false</isActive>\n'
+        '            </value>\n'
+        '        </valueSetDefinition>\n'
+        '    </valueSet>\n')
+    idx = build_tree({f"{BASE}/Thing__c/fields/Pick__c.field-meta.xml": xml})
+    node = idx["nodes"]["Thing__c.Pick__c"]
+    assert node["picklistValues"] == [{"value": "Alpha", "active": True, "line": 7},
+                                      {"value": "Beta", "active": False, "line": 11}], node
+    assert "globalValueSet" not in node
+
+
+def case_picklist_value_line_escaped_and_scoped():
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           f'<CustomField xmlns="{MD}">\n'
+           '    <fullName>P__c</fullName>\n'
+           '    <type>Picklist</type>\n'
+           '    <valueSet>\n'
+           '        <valueSetDefinition>\n'
+           '            <value><fullName>A &amp; B</fullName></value>\n'
+           '            <value><fullName>P__c</fullName><isActive>false</isActive></value>\n'
+           '            <value><fullName>C</fullName></value>\n'
+           '        </valueSetDefinition>\n'
+           '    </valueSet>\n'
+           '</CustomField>\n')
+    node = build_tree({f"{BASE}/T__c/fields/P__c.field-meta.xml": xml})["nodes"]["T__c.P__c"]
+    got = [(v["value"], v["line"], v["active"]) for v in node["picklistValues"]]
+    assert got == [("A & B", 7, True), ("P__c", 8, False), ("C", 9, True)], got
+
+
+def case_formula_flag_recorded():
+    xml = (f'<CustomField xmlns="{MD}">\n    <formula>1 + 1</formula>\n    <type>Number</type>\n</CustomField>\n')
+    node = build_tree({f"{BASE}/T__c/fields/F__c.field-meta.xml": xml})["nodes"]["T__c.F__c"]
+    assert node.get("formula") is True
+
+
+def case_global_value_set_recorded():
+    xml = _picklist_xml('    <valueSet>\n        <valueSetName>Shared_Set</valueSetName>\n    </valueSet>\n')
+    idx = build_tree({f"{BASE}/Thing__c/fields/Pick__c.field-meta.xml": xml})
+    node = idx["nodes"]["Thing__c.Pick__c"]
+    assert node["globalValueSet"] == "Shared_Set"
+    assert "picklistValues" not in node
 
 
 _TEMP_DIRS = []
