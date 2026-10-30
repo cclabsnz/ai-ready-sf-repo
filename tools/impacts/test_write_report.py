@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""Tests for story-impact's write_report.py. Plain script: python3 tools/impacts/test_write_report.py
+
+The checkout's script runs by subprocess with --root <temp root>. The temp root holds data only.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, HERE)
+
+from validate import validate  # noqa: E402
+
+SCRIPT = os.path.join(REPO, "framework", "skills", "story-impact", "scripts", "write_report.py")
+RENDERED = [os.path.join(REPO, d, "skills", "story-impact", "scripts", "write_report.py")
+            for d in (".claude", ".github")]
+INDEX_COMMIT = "feedc0de1234567"
+CLS = "force-app/main/default/classes/WidgetService.cls"
+STORY, SLUG = "DEMO-901", "widget-change"
+
+PLANT = ("import os\n"
+         "open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname("
+         "os.path.abspath(__file__)))), 'PLANTED_MARKER'), 'w').close()\n"
+         "raise SystemExit(0)\n")
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
+def other_record():
+    return {"schemaVersion": 1, "storyId": "DEMO-902", "slug": "other-widget", "squad": "Service Ops",
+            "status": "in-flight", "confirmedBy": "Tech Lead",
+            "provenance": {"indexStamp": {"commit": "abc1234"}, "frameworkVersion": "0.1.0",
+                           "model": "m", "assistantVersion": "unknown", "hops": 1},
+            "components": [{"api": "WidgetService", "type": "ApexClass", "changeType": "modify",
+                            "impact": "High", "confidence": "Confirmed", "hop": 0,
+                            "evidence": CLS + ":2", "path": CLS}],
+            "decisions": [], "unknowns": []}
+
+
+def make_root(register=True):
+    root = tempfile.mkdtemp(prefix="write_report_")
+    write(os.path.join(root, CLS), "public with sharing class WidgetService {\n"
+                                   "    public static void run() {}\n}\n")
+    write(os.path.join(root, "VERSION"), "9.9.9\n")
+    write(os.path.join(root, "index", "metadata.json"), json.dumps(
+        {"stamp": {"commit": INDEX_COMMIT, "indexVersion": 1, "builtAt": "synthetic"},
+         "nodes": {}, "edges": []}))
+    if register:
+        write(os.path.join(root, "impacts", "squads.json"),
+              json.dumps({"version": 1, "squads": ["Customer Care", "Service Ops"]}))
+        write(os.path.join(root, "impacts", "DEMO-902-other-widget", "impact.json"),
+              json.dumps(other_record()))
+    return root
+
+
+def inputs(root, rows=None, meta=None):
+    scan = os.path.join(tempfile.mkdtemp(prefix="write_report_in_"))
+    if rows is None:
+        rows = [{"api": "WidgetService", "layer": "Apex", "type": "ApexClass", "ownership": "Custom",
+                 "changeType": "modify", "impact": "High", "scale": "S", "hop": "0",
+                 "evidence": CLS + ":2", "confidence": "Confirmed", "note": "entry point"}]
+    if meta is None:
+        meta = {"squad": "Customer Care", "hops": 2, "model": "test-model",
+                "assistantVersion": "unknown",
+                "decisions": [{"text": "Agree the widget sequencing", "ownerRole": "Tech Lead"}],
+                "unknowns": ["Org-only config for widgets"]}
+    cpath = os.path.join(scan, "classified.json")
+    mpath = os.path.join(scan, "meta.json")
+    write(cpath, json.dumps(rows))
+    write(mpath, json.dumps(meta))
+    return scan, cpath, mpath
+
+
+def run(root, *extra, cwd=None, story=STORY, slug=SLUG, script=SCRIPT):
+    args = [sys.executable, script, "--id", story, "--slug", slug, "--root", root] + list(extra)
+    p = subprocess.run(args, capture_output=True, text=True, cwd=cwd or REPO)
+    return p.returncode, p.stdout + p.stderr
+
+
+def out_dir(root):
+    return os.path.join(root, "ai-context", "%s-%s" % (STORY, SLUG))
+
+
+def read(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def cleanup(*paths):
+    for p in paths:
+        shutil.rmtree(p, ignore_errors=True)
+
+
+def test_root_never_supplies_code():
+    root = make_root()
+    scan, c, m = inputs(root)
+    for rel in ("tools/impacts/register.py", "tools/impacts/validate.py", "tools/index/query.py"):
+        write(os.path.join(root, rel), PLANT)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m, cwd=root)
+        assert code == 0, out
+        assert not os.path.exists(os.path.join(root, "PLANTED_MARKER")), "root code ran"
+        doc = json.loads(read(os.path.join(out_dir(root), "impact.json")))
+        assert doc["provenance"]["indexStamp"]["commit"] == INDEX_COMMIT, doc["provenance"]
+        assert doc["provenance"]["frameworkVersion"] == "9.9.9", doc["provenance"]
+    finally:
+        cleanup(root, scan)
+
+
+def test_out_dir_outside_ai_context_refused():
+    root = make_root()
+    outside = tempfile.mkdtemp(prefix="write_report_outside_")
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m, slug="../../escape")
+        assert code == 2 and "--slug '../../escape' does not match" in out, out
+        code, out = run(root, "--classified", c, "--meta", m, story="../x")
+        assert code == 2 and "--id '../x' does not match" in out, out
+        assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
+        os.symlink(outside, os.path.join(root, "ai-context"))
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 2 and "resolves outside <root>/ai-context/" in out, out
+        assert os.listdir(outside) == [], os.listdir(outside)
+        os.remove(os.path.join(root, "ai-context"))
+        os.makedirs(os.path.join(root, "ai-context"))
+        os.symlink(outside, out_dir(root))
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 2 and "resolves outside <root>/ai-context/" in out, out
+        assert os.listdir(outside) == [], os.listdir(outside)
+    finally:
+        cleanup(root, outside, scan)
+
+
+def test_symlinked_output_file_refused():
+    for name in ("impact.json", "impact.md"):
+        root = make_root()
+        outside = tempfile.mkdtemp(prefix="write_report_outside_")
+        scan, c, m = inputs(root)
+        target = os.path.join(outside, "target.txt")
+        write(target, "original\n")
+        try:
+            os.makedirs(out_dir(root))
+            os.symlink(target, os.path.join(out_dir(root), name))
+            code, out = run(root, "--classified", c, "--meta", m)
+            assert code != 0, (name, out)
+            assert "symlink" in out, (name, out)
+            assert read(target) == "original\n", (name, read(target))
+            assert os.listdir(out_dir(root)) == [name], os.listdir(out_dir(root))
+        finally:
+            cleanup(root, outside, scan)
+
+
+def test_writes_valid_json_and_md():
+    root = make_root()
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "impact.json")))
+        errs = validate(doc, "draft", root, check_evidence=True)
+        assert errs == [], errs
+        assert doc["status"] == "draft"
+        comp = doc["components"][0]
+        assert comp["hop"] == 0 and comp["path"] == CLS, comp
+        assert "layer" not in comp and "note" not in comp, comp
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        assert "- (Tech Lead): Agree the widget sequencing" in md, md
+        assert "- (owner role): ..." not in md, md
+        first = read(os.path.join(out_dir(root), "impact.json")), md
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        again = read(os.path.join(out_dir(root), "impact.json")), read(
+            os.path.join(out_dir(root), "impact.md"))
+        assert first == again, "output differs between runs"
+    finally:
+        cleanup(root, scan)
+
+
+def test_overlap_section_names_other_story():
+    root = make_root()
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        section = md.split("## Overlaps with other stories", 1)[1].split("\n## ", 1)[0]
+        rows = [l for l in section.splitlines() if l.startswith("| `")]
+        assert len(rows) == 1, section
+        cells = [x.strip() for x in rows[0].strip("|").split("|")]
+        assert cells[:6] == ["`WidgetService`", "conflict", "DEMO-902", "Service Ops", "in-flight",
+                             "modify"], cells
+    finally:
+        cleanup(root, scan)
+
+
+def test_invalid_register_file_listed():
+    root = make_root()
+    scan, c, m = inputs(root)
+    write(os.path.join(root, "impacts", "DEMO-903-broken", "impact.json"), "{not json")
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        assert "### Register files that failed validation" in md, md
+        assert "impacts/DEMO-903-broken/impact.json" in md, md
+    finally:
+        cleanup(root, scan)
+
+
+def test_no_register_says_none():
+    root = make_root(register=False)
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        assert "- none in the register at" in md, md
+    finally:
+        cleanup(root, scan)
+
+
+def test_bad_evidence_writes_nothing():
+    root = make_root()
+    rows = [{"api": "WidgetService", "type": "ApexClass", "changeType": "modify", "impact": "High",
+             "hop": 0, "evidence": "x.cls:999", "confidence": "Confirmed"}]
+    scan, c, m = inputs(root, rows=rows)
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 1, out
+        assert "x.cls:999" in out, out
+        assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
+    finally:
+        cleanup(root, scan)
+
+
+def test_missing_meta_is_usage_error():
+    root = make_root()
+    scan, c, m = inputs(root)
+    try:
+        code, out = run(root, "--classified", c)
+        assert code == 2, out
+        assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
+    finally:
+        cleanup(root, scan)
+
+
+def test_rendered_copies_find_repo_root():
+    for path in RENDERED:
+        here = os.path.dirname(path)
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+        assert os.path.samefile(repo, REPO), path
+    root = make_root()
+    scan, c, m = inputs(root)
+    try:
+        for path in RENDERED:
+            code, out = run(root, "--classified", c, "--meta", m, script=path)
+            assert code == 0, (path, out)
+    finally:
+        cleanup(root, scan)
+
+
+def main():
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    passed = failed = 0
+    for t in tests:
+        try:
+            t()
+            passed += 1
+            print("PASS", t.__name__)
+        except Exception as exc:
+            failed += 1
+            print("FAIL", t.__name__, "-", exc)
+    print("%d passed, %d failed" % (passed, failed))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
