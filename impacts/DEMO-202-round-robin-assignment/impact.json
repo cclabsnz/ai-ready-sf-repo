@@ -1,0 +1,92 @@
+{
+  "components": [
+    {
+      "api": "CaseAssignmentService",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1",
+      "hop": 0,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls",
+      "type": "ApexClass"
+    },
+    {
+      "api": "CaseAssignmentService_Test",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls:27",
+      "hop": 1,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls",
+      "type": "ApexClass"
+    },
+    {
+      "api": "CaseTriggerHandler",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16",
+      "hop": 1,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls",
+      "type": "ApexClass"
+    },
+    {
+      "api": "CaseTriggerHandler_Test",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:61",
+      "hop": 1,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls",
+      "type": "ApexClass"
+    },
+    {
+      "api": "CaseTrigger",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2",
+      "hop": 2,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger",
+      "type": "ApexTrigger"
+    },
+    {
+      "api": "Escalation_Agents",
+      "changeType": "review",
+      "confidence": "Inferred",
+      "evidence": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1",
+      "hop": null,
+      "impact": "Low",
+      "path": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml",
+      "type": "Queue"
+    }
+  ],
+  "confirmedBy": "cloudcounselnz",
+  "decisions": [
+    {
+      "ownerRole": "Service Ops lead",
+      "text": "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."
+    }
+  ],
+  "provenance": {
+    "assistantVersion": "n/a",
+    "frameworkVersion": "0.1.0",
+    "hops": 2,
+    "indexStamp": {
+      "builtAt": "2026-10-30T00:39:07+00:00",
+      "commit": "7432f06090ecc18cb9c4c4cbfe4ddd6430142cfd",
+      "indexVersion": "0.4.0",
+      "namespaces": []
+    },
+    "model": "none (derived from reviewed answer key)"
+  },
+  "schemaVersion": 1,
+  "slug": "round-robin-assignment",
+  "squad": "Service Ops",
+  "status": "in-flight",
+  "storyId": "DEMO-202",
+  "unknowns": [
+    "New cases are assigned on insert; today assign() only runs on before update (CaseTriggerHandler.cls:16).",
+    "Case assignment rules that run on insert in the target org may override the owner this story sets (Unverifiable here: org configuration, not metadata in this repo)."
+  ]
+}
