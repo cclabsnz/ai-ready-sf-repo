@@ -522,6 +522,16 @@ ALLOWLIST_CASES = [
     Case("maintain: at not admitted", bash("at now"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
     Case("maintain: pip not admitted", bash("pip install x"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
     Case("maintain: path-qualified cp is not the cp pattern", bash("/bin/cp docs/a docs/b"), 2, env_mode="maintain", stderr_has=NOT_ON_LIST),
+    # WS2 impact records: register queries are read-only; validate is a framework script; promote and
+    # writes under impacts/ are maintain-only (a human promotes a record).
+    Case("register query allowed in advise", bash("python3 tools/impacts/register.py view"), 0, env_mode="advise"),
+    Case("validate allowed in normal", bash("python3 tools/impacts/validate.py --all"), 0),
+    Case("validate blocked in advise", bash("python3 tools/impacts/validate.py --all"), 2, env_mode="advise", stderr_has="ADVISE mode"),
+    Case("promote blocked in normal", bash("python3 tools/impacts/promote.py ai-context/X --confirmed-by lead"), 2, stderr_has=NOT_ON_LIST),
+    Case("promote blocked in build", bash("python3 tools/impacts/promote.py ai-context/X --confirmed-by lead"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    Case("impacts write blocked in normal", write("impacts/DEMO-1-a/impact.json"), 2),
+    Case("impacts write blocked in build", write("impacts/DEMO-1-a/impact.json"), 2, env_mode="build"),
+    Case("impacts write allowed in maintain", write("impacts/DEMO-1-a/impact.json"), 0, env_mode="maintain"),
     # Salesforce CLI levels.
     Case("normal: sf --version allowed", bash("sf --version"), 0),
     Case("build: sf version allowed", bash("sf version"), 0, env_mode="build"),

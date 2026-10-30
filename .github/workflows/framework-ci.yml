@@ -1,7 +1,7 @@
 name: ai-framework
 on:
   pull_request:
-    paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**"]
+    paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**", "demo/**", "impacts/**"]
 jobs:
   guard-and-lint:
     strategy:
@@ -24,8 +24,112 @@ jobs:
         run: python tools/index/build_index.py --root fixtures --out ../index-ci
       - name: Index evidence opens from the repo root
         run: python tools/index/test_index.py
+      - name: Index parser tests
+        run: python tools/index/test_parsers.py
+      - name: Demo filler generator tests
+        run: python tools/demo/test_generate_filler.py
+      - name: Demo answer-key checker tests
+        run: python tools/demo/test_check_answers.py
+      - name: Committed demo filler is current
+        run: python tools/demo/generate_filler.py --seed 2026 --out demo/org --check
       - name: Agent trajectory eval (sample)
         run: python tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
+      - name: Impact record validator tests
+        run: python tools/impacts/test_validate.py
+      - name: Impact register tests
+        run: python tools/impacts/test_register.py
+      - name: Impact report writer tests
+        run: python tools/impacts/test_write_report.py
+      - name: Impact promotion tests
+        run: python tools/impacts/test_promote.py
+      - name: Impact register view tests
+        run: python tools/impacts/test_render_register.py
+      - name: PR check tests
+        run: python tools/impacts/test_pr_check.py
+      - name: Demo answer-to-draft tests
+        run: python tools/demo/test_answer_to_draft.py
+      - name: Skill eval runner tests
+        run: python tools/evals/test_run_skill.py
+      - name: Committed impact records are valid
+        run: python tools/impacts/validate.py --all
+  impact-checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # No later step needs git credentials: git diff reads refs fetched here, and gh uses GH_TOKEN.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+      # The base branch, checked out after the head so the head checkout's clean step cannot remove it.
+      # The check code (pr_check, register, validate, build_index), settings and the register all come
+      # from here; only data (demo/org, impact records, the diff) comes from the PR. So a PR cannot
+      # relax its own check, except the PR that first adds pr_check (see "Impact checks").
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build index on the demo org
+        run: |
+          builder=tools/index/build_index.py
+          if [ -f base/tools/index/build_index.py ]; then builder=base/tools/index/build_index.py; fi
+          python "$builder" --root demo/org --out "$GITHUB_WORKSPACE/index"
+      - name: Files changed against the base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git diff --name-only "origin/$BASE_REF...HEAD" > changed.txt
+      - name: Open pull requests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        # A failed listing leaves no open-prs.json, which pr_check reads as "no section".
+        run: |
+          if gh pr list --state open --json number,headRefName,files --limit 100 > open-prs.tmp; then
+            mv open-prs.tmp open-prs.json
+          else
+            echo "::warning::gh pr list failed; the open-PR section is omitted"
+          fi
+      - name: Impact checks
+        id: check
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        # The base branch's pr_check runs whenever it exists. Only the PR that first adds pr_check runs its
+        # own copy, and the result says so.
+        run: |
+          code=0
+          checker=base/tools/impacts/pr_check.py
+          note=""
+          if [ ! -f "$checker" ]; then
+            checker=tools/impacts/pr_check.py
+            note="Note: this check ran from this PR's own copy of pr_check.py, because the base branch has no pr_check yet."
+          fi
+          python "$checker" --index "$GITHUB_WORKSPACE/index" --changed changed.txt --branch "$HEAD_REF" --open-prs open-prs.json --root . --base-root base > pr-check.out || code=$?
+          : > pr-check.md
+          if [ -n "$note" ]; then printf '%s\n\n' "$note" >> pr-check.md; fi
+          if [ -s pr-check.out ]; then
+            cat pr-check.out >> pr-check.md
+          else
+            echo "Impact check could not run (exit $code); see the job log." >> pr-check.md
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: Step summary
+        run: cat pr-check.md >> "$GITHUB_STEP_SUMMARY"
+      # Fork PRs get a read-only token, so this step may fail; the summary above is already written.
+      - name: PR comment
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --edit-last --body-file pr-check.md || gh pr comment "$PR_NUMBER" --body-file pr-check.md
+      - name: Exit with the check's code
+        env:
+          CODE: ${{ steps.check.outputs.code }}
+        run: exit "${CODE:-2}"
   secrets:
     runs-on: ubuntu-latest
     steps:

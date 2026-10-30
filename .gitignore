@@ -1,10 +1,6 @@
 # Org exports and user-supplied inputs: never committed
 data/
-ai-context/**/inputs/
-ai-context/**/*.pptx
-ai-context/**/*.xlsx
-ai-context/**/*.docx
-ai-context/**/scan/*.json
+/ai-context/
 
 # Generated index: rebuilt in CI, never trusted from git.
 # Anchored with "/": a bare "index/" also ignores tools/index/, the index builder itself.

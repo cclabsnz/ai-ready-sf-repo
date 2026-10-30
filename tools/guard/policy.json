@@ -207,13 +207,15 @@
       "git\\s+branch\\s+--show-current",
       "find(\\s+(?!-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)(\\s|$))\\S+)*",
       "python3?\\s+tools/index/query\\.py(\\s.*)?",
-      "py\\s+-3\\s+tools/index/query\\.py(\\s.*)?"
+      "py\\s+-3\\s+tools/index/query\\.py(\\s.*)?",
+      "(python3?|py -3)\\s+tools/impacts/register\\.py(\\s.*)?"
     ],
     "framework_scripts": [
       "(python3?|py -3) tools/index/(build_index|query|test_index)\\.py( .*)?",
       "(python3?|py -3) tools/evals/run_(skill|agent)\\.py( .*)?",
       "(python3?|py -3) tools/build/lint\\.py( .*)?",
       "(python3?|py -3) tools/guard/(test_guard|scan_data)\\.py( .*)?",
+      "(python3?|py -3) tools/impacts/(validate|render_register|pr_check)\\.py( .*)?",
       "(python3?|py -3) framework/skills/[a-z0-9-]+/scripts/[a-z0-9_]+\\.py( .*)?"
     ],
     "dev_tooling": [
