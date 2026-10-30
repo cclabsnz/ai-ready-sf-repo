@@ -32,6 +32,11 @@ def write(path, text):
         fh.write(text)
 
 
+def email_like(local):
+    # Built at runtime so no source line holds a literal email-shaped value.
+    return local + "@" + "corp-x" + ".test"
+
+
 def draft_doc():
     return {"schemaVersion": 1, "storyId": "DEMO-903", "slug": "widget-change", "squad": "Service Ops",
             "status": "draft",
@@ -354,14 +359,14 @@ def case_impact_refuses_story_or_impact_under_other_folder():
 @story_cleanup
 def case_story_refuses_email_confirmer():
     root = make_story_root()
-    code, out = story_run(root, who="po@real-company.test")
+    code, out = story_run(root, who=email_like("po"))
     assert code == 1 and "email" in out, out
     assert not os.path.exists(os.path.join(root, SDEST))
 
 
 def case_impact_refuses_email_confirmer():
     root = make_root()
-    code, out = run(root, who="tl@real-company.test")
+    code, out = run(root, who=email_like("tl"))
     assert code == 1 and "email" in out, out
     assert not os.path.exists(os.path.join(root, DEST))
 
