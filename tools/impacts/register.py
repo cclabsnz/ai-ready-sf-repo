@@ -62,8 +62,10 @@ def load_register(root):
         try:
             with open(full, encoding="utf-8") as fh:
                 doc = json.load(fh)
-        except (OSError, ValueError) as exc:
-            invalid.append({"path": rel, "errors": ["cannot read JSON: %s" % exc]})
+        except (OSError, ValueError, RecursionError, MemoryError) as exc:
+            # RecursionError/MemoryError: deeply nested JSON; listed, never fatal.
+            invalid.append({"path": rel, "errors": ["cannot read JSON: %s: %s"
+                                                    % (type(exc).__name__, exc)]})
             continue
         errs = validate(doc, "promoted", root)
         if errs:

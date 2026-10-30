@@ -153,6 +153,25 @@ def test_review_own_is_watch_only():
         shutil.rmtree(root)
 
 
+def test_deep_json_listed_invalid():
+    a = doc("DEMO-1", [comp("X", "modify")])
+    root = make_root(a)
+    try:
+        d = os.path.join(root, "impacts", "DEMO-2-deep")
+        os.makedirs(d)
+        with open(os.path.join(d, "impact.json"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("[" * 200000 + "]" * 200000)
+        reg = register.load_register(root)
+        assert [i["path"] for i in reg["invalid"]] == ["impacts/DEMO-2-deep/impact.json"], reg
+        assert "RecursionError" in reg["invalid"][0]["errors"][0]
+        assert [x["storyId"] for x in reg["impacts"]] == ["DEMO-1"]
+        code, out, err = run("view", "--root", root)
+        assert code == 0, err[-300:]
+        assert "impacts/DEMO-2-deep/impact.json" in json.loads(out)["invalid"][0]["path"]
+    finally:
+        shutil.rmtree(root)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = failed = 0
