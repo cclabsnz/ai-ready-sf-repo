@@ -28,6 +28,36 @@ and permission-set object and class access. `consumers` goes to 3 hops.
   of them names the field, so a field search finds none of them; only the reference chain does.
   Eval case 004 asks for exactly those.
 - **DEMO-202** (round-robin assignment of new cases): shares `CaseTriggerHandler` with DEMO-201.
+  It is on the register; see below.
+
+## The DEMO-202 impact record
+
+`impacts/DEMO-202-round-robin-assignment/` holds DEMO-202's promoted impact record (`impact.json`)
+and its report (`impact.md`). It gives the overlap checks a real story to find. It came through
+the real pipeline:
+
+1. `tools/demo/answer_to_draft.py --key demo/stories/DEMO-202.answer.json --slug round-robin-assignment --index index`
+   turned the reviewed answer key into `classified.json` and `meta.json` and ran story-impact's
+   writer, `write_report.py`, which wrote the draft to `ai-context/DEMO-202-round-robin-assignment/`.
+2. The owner reviewed the draft and ran `tools/impacts/promote.py` on it, confirming it with
+   their own `--confirmed-by`. The assistant did not run the promotion or supply the confirmation.
+
+The record is **key-derived, not a model run**: its `provenance.model` reads
+`none (derived from reviewed answer key)` and `provenance.assistantVersion` reads `n/a`. Its
+components, change types and hops come from the key.
+
+- **Evidence:** index components take their evidence from the index. The judgement component
+  `Escalation_Agents` takes the key's own cite. `:1` is added only when that cite has no line
+  number.
+- **Impact and confidence:** the script maps them (`tools/demo/answer_to_draft.py:37`,
+  `:84-87`). `modify` gives Medium and `review` gives Low. A judgement component is Inferred and
+  an index component Confirmed.
+
+Its `impact.md` says `none in the register` under "Overlaps with other stories". That is correct
+for when it was written: the overlap section is a snapshot taken at write time, and the register
+was empty then. A DEMO-201 draft written now lists DEMO-202 (README quick start step 7). The
+overlaps there are watches, not conflicts, because DEMO-201's key marks the shared components
+`review`.
 
 ## Answer keys
 

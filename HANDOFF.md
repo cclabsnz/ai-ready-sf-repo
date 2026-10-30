@@ -31,11 +31,26 @@ python3 tools/index/test_index.py          # every path:line opens from the repo
 python3 tools/index/test_parsers.py        # parsers build their own temp trees
 python3 tools/demo/test_generate_filler.py # filler is seeded and deterministic
 python3 tools/demo/test_check_answers.py   # answer-key checker
+python3 tools/demo/test_answer_to_draft.py # key-derived draft through the real writer
+python3 tools/impacts/test_validate.py     # impact.json schema
+python3 tools/impacts/test_register.py     # register: overlaps, scope, view
+python3 tools/impacts/test_write_report.py  # story-impact writer: impact.json and overlaps
+python3 tools/impacts/test_promote.py      # promotion into impacts/
+python3 tools/impacts/test_render_register.py # static register page
+python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
+python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index   # 5 consumers
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
 On Windows use `py -3`. If the guard test fails here, fix that before touching anything else.
+The impact test scripts each end with `<n> passed, 0 failed`; some add a skipped count for
+symlink cases. In `normal` and `build` modes the assistant cannot run the `tools/demo/` and
+`tools/impacts/` test scripts, or `tools/evals/test_run_skill.py`; run them yourself or in
+`maintain`.
+`validate.py --all` joins `normal`'s allowlist only once the owner applies the WS2 guard patch
+(`ai-context/ws2/patches/APPLY.md`).
 
 ## Working rules for this repo
 
@@ -63,6 +78,11 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
   `ai-context/ws1/patches/gitattributes-ws1.patch`, must be applied together. The CI patch adds the
   byte-comparing filler `--check` on Windows too; without the LF pin in `.gitattributes` a Windows
   checkout converts `demo/org/` to CRLF and that step fails.
+- The WS2 owner patches (`ai-context/ws2/patches/`: `.gitignore`, the guard policy and its tests,
+  and the CI workflow) go on after the WS1 patches, in the order `ai-context/ws2/patches/APPLY.md`
+  gives. Until they land, CI runs none of the impact checks and the assistant cannot run
+  `register.py` or `validate.py` in `normal`. story-impact's overlap section works today, because
+  its writer reads the register in-process.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks

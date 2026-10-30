@@ -28,16 +28,22 @@ Six principles, in order of precedence:
   answers `exists`, `type` and `consumers` queries to 3 hops.
 - **Demo org** (`demo/`): a synthetic Sales/Service org with three stories and a reviewed answer
   key for each.
-- **Skills**: `story-impact` (the evidenced impact of one story) and `pr-reference-check`
-  (invented or mistyped API names in a diff).
+- **Skills**: `story-impact` (the evidenced impact of one story, written as `impact.md` plus a
+  draft record, `impact.json`) and `pr-reference-check` (invented or mistyped API names in a diff).
+- **Impact record and register** (`tools/impacts/`, `impacts/`): a validated `impact.json`
+  schema, a human promotion step into `impacts/`, and the register of in-flight stories. Two
+  overlap checks read it. At story time, story-impact lists the other stories that touch the same
+  components; that section never fails anything. At PR time, `pr_check.py` reports code overlap
+  and scope drift as comments, unless `.ai-framework.json` sets a finding class to `fail`. The PR
+  check runs in CI only once the owner applies the WS2 patches (see
+  [Running the checks](#running-the-checks)).
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
 - **Evals**: `run_agent.py` (trajectory assertions over a tool-call log) and `run_skill.py`
   (deterministic assertions on a skill's output).
 
 **Planned, not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)): an impact record and register with cross-story overlap
-checks (WS2), story refinement (WS11), solution design and starting points (WS10), scoped code
+and [docs/DESIGN.md](docs/DESIGN.md)): story refinement (WS11), solution design and starting points (WS10), scoped code
 writing in `build` mode (WS8; until then `build` cannot write source), consistency evals that
 score repeated runs against the answer keys (WS3), versioned packaging and pinning (WS7), and the
 Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
@@ -47,7 +53,7 @@ Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
 - **Python 3**, standard library only. CI uses Python 3.12
   (`.github/workflows/framework-ci.yml:13`).
 - **git**.
-- **Claude Code**, needed only for the AI step (quick start step 7). Every other step is plain
+- **Claude Code**, needed only for the AI step (quick start step 8). Every other step is plain
   Python.
 - **A shell**: macOS or Linux, or Windows with Git Bash. Windows is **Inferred, not yet tested**:
   the hook is assumed to run through Git Bash, and no Windows CI run has confirmed it. On Windows,
@@ -157,7 +163,57 @@ Expected:
 This proves that the index finds exactly what each human-reviewed key lists. How the keys are
 built is described in [demo/README.md](demo/README.md#answer-keys).
 
-**7. Run story-impact on DEMO-201 in Claude Code.**
+**7. See a story-time overlap with a story already on the register.**
+
+`impacts/` is the register: impact records that a human reviewed, confirmed and promoted. It
+holds DEMO-202 (round-robin assignment of new cases, squad Service Ops), which the owner
+confirmed. This step drafts DEMO-201's impact from its reviewed answer key, using the same report
+writer story-impact uses. The writer reads the register as it writes.
+
+```sh
+python3 tools/demo/answer_to_draft.py --key demo/stories/DEMO-201.answer.json --slug premium-escalation-key --index index
+```
+
+Expected (`<commit>` is the commit you have checked out):
+
+```
+{
+  "impactJson": "./ai-context/DEMO-201-premium-escalation-key/impact.json",
+  "impactMd": "./ai-context/DEMO-201-premium-escalation-key/impact.md",
+  "overlaps": 3,
+  "registerCommit": "<commit>"
+}
+```
+
+Open `ai-context/DEMO-201-premium-escalation-key/impact.md` and find the
+`## Overlaps with other stories` section. Or print just its rows:
+
+```sh
+grep '| watch |' ai-context/DEMO-201-premium-escalation-key/impact.md
+```
+
+Expected:
+
+```
+| `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
+| `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
+| `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
+```
+
+- **Each row:** a component both stories list, and the other story's squad, status and change
+  type. That tells DEMO-201's squad (Customer Care) whom to talk to.
+- **The last column:** the commit that last changed DEMO-202's record, not your `HEAD`. It stays
+  the same until that record changes, or until history is rewritten.
+- **Why watches, not conflicts:** DEMO-202 modifies these components, while DEMO-201's key marks
+  them `review`. A conflict needs both stories to `new`, `modify` or `delete` the component.
+
+The draft is derived from the reviewed key, not from a model run. Its `provenance.model` in
+`impact.json` reads `none (derived from reviewed answer key)`. The slug `premium-escalation-key`
+keeps it apart from the folder that step 8 writes. Re-running the command overwrites the same
+files. Inside Claude Code, like `check_answers.py`, this script needs
+`maintain` mode; in your own terminal it just runs.
+
+**8. Run story-impact on DEMO-201 in Claude Code.**
 
 Start Claude Code in the repo root. You are in `normal` mode, the committed default: the
 assistant can read everything, run the framework scripts, and write only to `ai-context/` and
@@ -174,9 +230,12 @@ the point is to see whether the skill finds the chain from the story alone. `hop
 because the default of 2 stops before the hop-3 components in step 5.
 
 The skill checks the index is current, derives seed terms, queries the index and classifies each
-hit. It writes its output to `ai-context/<work-item-id>-<slug>/`: `impact.md`, plus
-`scan/terms.txt` beside it. The assistant picks the slug, so the folder is something like
-`ai-context/DEMO-201-premium-escalation/`.
+hit. It writes its output to `ai-context/<work-item-id>-<slug>/`: `impact.md` and the draft
+record `impact.json`, plus `scan/` (`terms.txt`, `classified.json`, `meta.json`). The assistant
+picks the slug, so the folder is something like `ai-context/DEMO-201-premium-escalation/`.
+`impact.md` has the same `## Overlaps with other stories` section as step 7, built from the
+register. Its rows can differ from step 7's. A row's kind follows the change type the assistant
+assigns, so a component it marks `modify` shows as a conflict with DEMO-202, not a watch.
 
 **If story-impact reports the index as stale, re-run step 4 yourself; don't let it rebuild from
 the repo root.** Its fallback rebuilds with default arguments, which index the repo root, and
@@ -187,8 +246,13 @@ To compare with the answer key:
 
 - Open `demo/stories/DEMO-201.answer.json` next to `impact.md` and check each component, its
   change type and hop by hand.
-- Run the automated part of eval case 004, which checks that the report names the three hop-3
-  components, labels every table row, stays within 3 hops and avoids banned phrases:
+- Run the automated part of eval case 004. It scores the files this step's story-impact run
+  wrote: `ai-context/DEMO-201-<slug>/impact.md` and the `impact.json` beside it, where `<slug>`
+  is the one the assistant picked. In a fresh clone, run story-impact first; the command has
+  nothing to read until then. Any draft at that path works too. It checks that the report names
+  the three hop-3 components, labels every table row, stays within 3 hops and avoids banned phrases. It also
+  checks that `impact.json` is a valid draft record and that the report flags the overlap on
+  `CaseTriggerHandler` and `CaseTrigger`:
 
   ```sh
   python3 tools/evals/run_skill.py --skill story-impact --case 004-escalation-hops-3 --output ai-context/DEMO-201-<slug>/impact.md
@@ -200,6 +264,46 @@ Not automated yet: scoring a report against the answer key, and running the same
 times to show the answers match (WS3). Today `run_skill.py` also checks that cited paths exist
 only when they start with `force-app/`, `pkg-*/` or `fixtures/`, so it does not check the
 `demo/org/...` evidence in this report. Spot-check a few `path:line` cites yourself.
+
+## Promoting an impact
+
+A draft in `ai-context/` is workspace output. Neither the register nor the PR check reads it. To
+put a story on the register, a human reviews the draft and promotes it:
+
+```sh
+python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --confirmed-by "<your name or role>"
+```
+
+- **What it checks first:** it validates the draft, including that every evidence file and line
+  exists, and it runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`.
+- **What it writes:** `impacts/<storyId>-<slug>/`, holding `impact.json` (with `status`
+  `in-flight` and your `confirmedBy`) and a copy of `impact.md`.
+- **What it refuses:** a folder that already exists (unless you pass `--replace`), and symlinks.
+
+Then `git add` the folder and open a PR; a reviewer checks the impact before merge. When the story
+ships, edit its `status` to `shipped` in a later PR, and the register stops listing it.
+
+**Promotion is a human step.** In `normal` mode the guard blocks the assistant both from running
+`promote.py` and from writing `impacts/`. `maintain` allows both, so there it is a working rule
+rather than a guard rule: run it yourself, with your own `--confirmed-by`. In Claude Code, prefix
+the line with `!` so it runs as you, not as an assistant tool call. The assistant never supplies a
+confirmation.
+
+To look at the register:
+
+- `python3 tools/impacts/register.py view` prints every component on record as JSON.
+- `python3 tools/impacts/register.py scope <storyId>` prints one story's squad, status and
+  components.
+- `python3 tools/impacts/render_register.py` writes a static page,
+  `ai-context/register/register.html`.
+
+Until the owner applies the WS2 guard patch, run these from your own terminal, because the
+assistant cannot run them in `normal` mode. To tell which mode you are in, read
+`AI_FRAMEWORK_MODE` in the committed `.claude/settings.json`, then check for a git-ignored
+`.claude/settings.local.json` that overrides it (see [Using the modes](#using-the-modes)). With
+no local file you are in the committed mode, `normal` by default. The schema, the PR check and its `.ai-framework.json`
+switch are described under
+[Impact record and register](docs/DESIGN.md#impact-record-and-register) in `docs/DESIGN.md`.
 
 ## Using the modes
 
@@ -247,6 +351,14 @@ Common reasons:
 | `command matches blocked pattern '(?<![A-Za-z0-9_])guard\\.py'` or `the guard's own script and --rebaseline are for a human at a terminal` | Any Bash line naming the guard script is blocked, even `cat` or `grep` | Open the file in your editor or with the Read tool |
 | `framework is in ADVISE mode` | The kill switch is on | Nothing to fix locally; the assistant can only recommend |
 
+## Troubleshooting the impact tools
+
+| Symptom | Why | What to do |
+| --- | --- | --- |
+| `python3 tools/impacts/register.py scope <storyId>` exits 4 and prints `"found": false` | The story has no record on the register. Either it is still a draft in `ai-context/`, or its record is `shipped` (the register skips those), or its record failed validation (listed under `invalid` in the same output) | Promote the draft (see [Promoting an impact](#promoting-an-impact)). For an `invalid` entry, run `python3 tools/impacts/validate.py --all` and fix the record in a PR. Exit 4 is "nothing on record", not an error |
+| The guard blocks `tools/impacts/register.py`, `validate.py`, `render_register.py` or `pr_check.py` in `normal` with `command not on the <mode> allowlist` | The WS2 guard patch is not applied yet, so these scripts are not on `normal`'s allowlist | Run them from your own terminal, or apply `ai-context/ws2/patches/` as `APPLY.md` there describes. Story-impact's overlap section works either way |
+| The guard blocks `tools/impacts/promote.py` | Promotion is a human step and is never on `normal`'s allowlist | Run it yourself (see [Promoting an impact](#promoting-an-impact)) |
+
 ## Running the checks
 
 The smoke test from [HANDOFF.md](HANDOFF.md#smoke-test-run-before-anything-else):
@@ -260,19 +372,52 @@ python3 tools/index/test_index.py          # every path:line opens from the repo
 python3 tools/index/test_parsers.py        # parsers build their own temp trees
 python3 tools/demo/test_generate_filler.py # filler is seeded and deterministic
 python3 tools/demo/test_check_answers.py   # answer-key checker
+python3 tools/demo/test_answer_to_draft.py # key-derived draft through the real writer
+python3 tools/impacts/test_validate.py     # impact.json schema
+python3 tools/impacts/test_register.py     # register: overlaps, scope, view
+python3 tools/impacts/test_write_report.py  # story-impact writer: impact.json and overlaps
+python3 tools/impacts/test_promote.py      # promotion into impacts/
+python3 tools/impacts/test_render_register.py # static register page
+python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
+python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
+The impact test scripts each end with a `<n> passed, 0 failed` line; some add a skipped count,
+which covers symlink cases on machines without symlinks.
+
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
 
-CI (`.github/workflows/framework-ci.yml`) runs on pull requests that touch `framework/`,
+**CI today.** `.github/workflows/framework-ci.yml` runs on pull requests that touch `framework/`,
 `tools/`, `.claude/`, `.github/`, `force-app/` or `fixtures/`. It runs on Ubuntu and Windows with
 Python 3.12 and covers the guard test, `scan_data.py --all`, lint, the render check, the fixtures
-index build, `test_index.py` and the sample agent eval, plus a gitleaks job. The demo checks
-(`test_parsers.py`, the filler and answer-key tests, the filler `--check`) are not in CI yet, and
-a change only under `demo/` does not trigger the workflow. Run them locally with the smoke test.
+index build, `test_index.py` and the sample agent eval, plus a gitleaks job. None of the impact
+checks run in CI yet: not the impact test scripts, not `validate.py --all` and not the PR check.
+A change only under `demo/` or `impacts/` does not trigger the workflow. The demo checks
+(`test_parsers.py`, the filler and answer-key tests, the filler `--check`) are not in CI either.
+Run all of them locally with the smoke test.
+
+**CI after the owner patches land.** The workflow changes come as patches that a human applies,
+in the order set out in `ai-context/ws2/patches/APPLY.md`: the WS1 patches first, then WS2.
+
+- **Triggers:** the workflow also runs on changes under `demo/` and `impacts/`.
+- **`guard-and-lint`:** runs every impact test script above, then `validate.py --all`.
+- **New `impact-checks` job,** on pull requests:
+  - It builds the index from the PR's `demo/org`.
+  - It runs `pr_check.py` from the base branch with `--base-root`, so the check code, the
+    `.ai-framework.json` settings and the register all come from base. A PR cannot change
+    those, with two exceptions:
+    - The PR that first adds `pr_check.py` runs its own copy, and its result says so.
+    - A `pull_request` workflow runs the workflow file from the PR head. A PR that edits
+      `.github/workflows/` can therefore change the job itself. Only review and CODEOWNERS catch
+      that, not this check.
+  - It writes the result to the job summary and to one PR comment.
+
+Findings are comments unless `.ai-framework.json` sets them to `fail`. Until a remote exists, the
+comment step is Unverifiable.
 
 ## Layout
 
@@ -289,17 +434,22 @@ tools/
                       allowlists, Salesforce CLI levels), scan_data.py, test_guard.py
   build/              render.py (framework/ -> .claude/ + .github/), lint.py
   evals/              run_skill.py (output assertions), run_agent.py (trajectory assertions)
-  demo/               generate_filler.py (seeded filler), check_answers.py (answer keys vs index), tests
+  demo/               generate_filler.py (seeded filler), check_answers.py (answer keys vs index),
+                      answer_to_draft.py (draft impact from a reviewed key), tests
+  impacts/            validate.py (record schema), register.py (overlaps, scope, view),
+                      promote.py (human step), render_register.py, pr_check.py, tests
 demo/
   org/force-app/      synthetic Sales/Service org: hand-written story core + generated filler
   stories/            DEMO-*.md story text and DEMO-*.answer.json reviewed answer keys
+impacts/              the register: squads.json and promoted <storyId>-<slug>/ records (in git)
 docs/
   DESIGN.md           design, layers, modes, what the guard guarantees
   superpowers/        specs/ (the published-framework spec) and plans/ (per-workstream plans)
 .claude/              GENERATED, plus the hand-written settings.json (hook, deny rules, kill switch)
 .github/              GENERATED instructions/knowledge/skills/agents, plus workflows/ and hooks/
 fixtures/             small synthetic metadata and diffs for tool tests and CI; never real
-ai-context/           every assistant output lands here (inputs/ and binaries git-ignored)
+ai-context/           every assistant output lands here (today inputs/, scan/*.json and Office
+                      files are git-ignored; all of it once the WS2 .gitignore patch lands)
 index/                generated; git-ignored, never committed
 VERSION               framework version (no install or pinning mechanism yet; WS7)
 ```
@@ -308,13 +458,13 @@ VERSION               framework version (no install or pinning mechanism yet; WS
 
 - [demo/README.md](demo/README.md): the demo org, what the index models, the stories and how
   the answer keys work.
-- [docs/DESIGN.md](docs/DESIGN.md): the five layers, the modes and what the guard does and does
-  not guarantee.
+- [docs/DESIGN.md](docs/DESIGN.md): the five layers, the modes, the impact record and register,
+  and what the guard does and does not guarantee.
 - [HANDOFF.md](HANDOFF.md): working rules for contributors, the smoke test and the backlog.
 - [The spec](docs/superpowers/specs/2026-10-29-published-framework-design.md): intent, owner
   decisions and the workstream order.
 
-Onboarding a squad member today: run quick start steps 2 to 6, run the sample agent eval
+Onboarding a squad member today: run quick start steps 2 to 7, run the sample agent eval
 (`python3 tools/evals/run_agent.py ...` above), read `framework/rules/00-precedence.md`, and know
 who the guild is (`CODEOWNERS`). There is no versioned install yet: `VERSION` records the
 framework version, but packaging and pinning are planned (WS7), so adopters copy the files.

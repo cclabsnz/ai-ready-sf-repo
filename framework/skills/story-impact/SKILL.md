@@ -28,7 +28,11 @@ Two to four sentences: item type, persona and segment, trigger or symptom, what 
 For each impacted component: layer, metadata type, ownership (Custom / Managed / Standard), change type, impact (High / Medium / Low / None), scale band (S / M / L / XL, a measure of surface area not effort), hop, evidence `path:line`, confidence (Confirmed / Inferred / Unverifiable).
 
 ## Step 5: write
-1. Write `classified.json` (the Step 4 rows) and `meta.json` side by side in `ai-context/<id>-<slug>/scan/`. `<id>` is the story id (`DEMO-201` form) and `<slug>` is lower-case words joined by `-`. meta.json is `{"squad", "hops", "model", "assistantVersion", "decisions": [{"text", "ownerRole"}], "unknowns": [...]}`. `model` is your own model id. `assistantVersion` is the assistant's version, or `"unknown"` when you can't read it. Change types are `new`, `modify`, `delete` or `review`.
+1. Write `classified.json` (the Step 4 rows) and `meta.json` side by side in `ai-context/<id>-<slug>/scan/`. `<id>` is the story id (`DEMO-201` form) and `<slug>` is lower-case words joined by `-`. meta.json is `{"squad", "hops", "model", "assistantVersion", "decisions": [{"text", "ownerRole"}], "unknowns": [...]}`. `model` is your own model id. `assistantVersion` is the assistant's version, or `"unknown"` when you can't read it. Change types are `new`, `modify`, `delete` or `review`. Validation (`tools/impacts/validate.py`) also enforces these rules:
+   - `squad` is listed in `impacts/squads.json`.
+   - `hops` is an integer from 1 to 3.
+   - Each `api` appears once in `classified.json`.
+   - `evidence` is null only when the change type is `new` or the confidence is Unverifiable.
 2. Run `python3 framework/skills/story-impact/scripts/write_report.py --id <id> --slug <slug> --classified ai-context/<id>-<slug>/scan/classified.json --meta ai-context/<id>-<slug>/scan/meta.json`. It validates the record first and writes nothing on errors (exit 1). Fix the inputs and run it again. On success it writes `impact.json` (a draft record) and `impact.md`.
 3. `impact.md` has an `## Overlaps with other stories` section that the script builds from the register in `impacts/`. Report it as written and never rewrite it.
 4. Run `references/manual-checks.md` for what the index cannot see (order of execution, dynamic SOQL, `without sharing` paths) and append findings.
