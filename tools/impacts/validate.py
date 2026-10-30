@@ -35,8 +35,11 @@ PROV_STRINGS = ("frameworkVersion", "model", "assistantVersion")
 COMP_KEYS = ("api", "type", "changeType", "impact", "confidence", "hop", "evidence", "path")
 
 
-def _is_int(v):
+def is_int(v):
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+_is_int = is_int
 
 
 def _nonempty(v):
@@ -66,18 +69,25 @@ def split_evidence(ev):
     return path, int(line)
 
 
-def _check_evidence_file(root, path, line):
-    base = os.path.realpath(root)
-    full = os.path.realpath(os.path.join(base, path))
-    if full != base and not full.startswith(base + os.sep):
-        return "resolves outside the root"
-    if not os.path.isfile(full):
-        return "file does not exist"
-    with open(full, "rb") as fh:
-        count = len(fh.read().splitlines())
+def check_evidence_file(root, path, line):
+    """Return a problem string for an evidence path:line, or None when it checks out."""
+    try:
+        base = os.path.realpath(root)
+        full = os.path.realpath(os.path.join(base, path))
+        if full != base and not full.startswith(base + os.sep):
+            return "resolves outside the root"
+        if not os.path.isfile(full):
+            return "file does not exist"
+        with open(full, "rb") as fh:
+            count = len(fh.read().splitlines())
+    except (OSError, ValueError):
+        return "evidence path unreadable: %r" % path
     if line > count:
         return "line %d is past the end of the file (%d lines)" % (line, count)
     return None
+
+
+_check_evidence_file = check_evidence_file
 
 
 def _validate_component(i, c, root, check_evidence, errors):
@@ -273,7 +283,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Validate impact.json records.")
     ap.add_argument("files", nargs="*")
     ap.add_argument("--all", action="store_true", help="validate every impacts/*/impact.json as promoted")
-    ap.add_argument("--stage", choices=("draft", "promoted"), default="draft")
+    ap.add_argument("--stage", choices=("draft", "promoted"), default=None)
     ap.add_argument("--check-evidence", action="store_true")
     ap.add_argument("--root", default=ROOT)
     try:
@@ -283,10 +293,13 @@ def main(argv=None):
     if args.all == bool(args.files):
         print("usage: give either <file>... or --all", file=sys.stderr)
         return 2
+    if args.all and (args.stage is not None or args.check_evidence):
+        print("usage: --all takes neither --stage nor --check-evidence", file=sys.stderr)
+        return 2
     if args.all:
         results = _run_all(args.root)
     else:
-        results = _run_files(args.files, args.stage, args.root, args.check_evidence)
+        results = _run_files(args.files, args.stage or "draft", args.root, args.check_evidence)
     ok = all(not r["errors"] for r in results)
     print(json.dumps({"ok": ok, "results": results}, indent=2))
     return 0 if ok else 1

@@ -172,6 +172,21 @@ def test_duplicate_story_and_dir_mismatch():
     assert "duplicate" in out and "folder" in out, out
 
 
+def test_nul_in_evidence_does_not_crash():
+    d = good()
+    d["components"][0]["evidence"] = "a\u0000b:3"
+    errs = V.validate(d, "draft", ROOT, check_evidence=True)
+    assert has(errs, "evidence path unreadable"), errs
+
+
+def test_all_rejects_stage_and_check_evidence():
+    root = mkroot("allflags")
+    for flags in (["--stage", "draft"], ["--check-evidence"]):
+        p = subprocess.run([sys.executable, CLI, "--all", "--root", root] + flags,
+                           capture_output=True, text=True)
+        assert p.returncode == 2, (flags, p.returncode, p.stdout)
+
+
 def test_all_empty_exits_zero():
     root = mkroot("empty")
     p = subprocess.run([sys.executable, CLI, "--all", "--root", root],
