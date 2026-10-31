@@ -112,8 +112,9 @@ def read_src(path):
 def walk(root):
     for base in sorted(os.listdir(root)):
         if base == "force-app" or base.startswith("pkg-"):
-            for dirpath, _, files in os.walk(os.path.join(root, base)):
-                for f in files:
+            for dirpath, dirnames, files in os.walk(os.path.join(root, base)):
+                dirnames.sort()  # deterministic order across filesystems
+                for f in sorted(files):
                     yield os.path.join(dirpath, f)
 
 

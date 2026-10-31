@@ -81,17 +81,39 @@ The first published version. Each entry names what a workstream delivered; the c
 
 - `tools/evals/consistency.py` compares the must-agree fields across N runs of a skill and
   reports the agreement.
-- `tools/evals/run_all.py` builds the live `claude -p` runs, which the owner performs.
+- `tools/evals/run_all.py` builds the live `claude -p` runs, which the owner performs. No live
+  series has run yet, so no consistency figure for a skill is published.
+- `demo/expected/consistency-fixture/` holds hand-built runs that show the grid's format; they
+  are not model output.
 
 ### Measurement kit (WS4)
 
 - `demo/measure/` scores an impact against an answer key and times a run from a session log.
 - It includes an empty manual-baseline template. No time-saved figure is published.
 
+### Walkthrough and adoption guide (WS5)
+
+- `demo/WALKTHROUGH.md` goes through the framework on the demo org. Each step is labelled
+  deterministic, needs Claude Code, or needs owner confirmations.
+- `demo/expected/` holds the expected output of the deterministic steps, and
+  `tools/demo/walkthrough_check.py` re-runs those steps and diffs them (`--show` prints one
+  step's output for a reviewed refresh).
+- `docs/ADOPTING.md` takes the framework into an adopter's own repository.
+- `tools/index/build_index.py` walks folders and files in sorted order, so the order of nodes
+  and edges in the index no longer depends on the filesystem.
+
+### Copilot stance (WS6)
+
+- No Copilot hook is registered. Copilot users get the rendered instructions and files under
+  `.github/`, but no guard; the server-side controls and the instructions govern Copilot work.
+- `docs/DESIGN.md` ("Copilot today") and `docs/ADOPTING.md` say so. The earlier claim that the
+  guard was mirrored as a Copilot hook is corrected.
+
 ### Versioned install and public-repo readiness (WS7, WS9)
 
 - This changelog, `CONTRIBUTING.md` and `SECURITY.md` are added.
 - The Claude Code plugin manifest, LICENSE, CODEOWNERS and the issue and PR templates are
-  drafted for the owner to place.
+  drafted for the owner to place. A plugin layout proposal is drafted too; the owner picks the
+  layout. Until then a full copy-in is the install route.
 - An owner role replaces the placeholder owner in the knowledge files.
 - `docs/DESIGN.md` loses its byline.

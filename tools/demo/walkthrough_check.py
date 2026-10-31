@@ -17,8 +17,8 @@ Each step's expected output is demo/expected/<NN>-<step>.txt: three header lines
 exit code) and then stdout, normalised:
 - CRLF becomes LF, and trailing spaces are dropped;
 - stdout that is one JSON document is re-printed with indent 2, so a diff shows the changed line;
-- the consumers list is sorted by (hop, api), because edge order follows the file walk, which
-  differs between file systems;
+- the consumers list is sorted by (hop, api), so the check does not rest on edge order (which
+  follows build_index.py's file walk; that walk is sorted, but an older index build was not);
 - the repo path becomes <repo> and the temp folder <tmp>;
 - ISO timestamps become <time>;
 - hex words of 7 to 40 characters holding at least one digit and one letter a-f become <commit>
@@ -104,7 +104,7 @@ def steps(tmp):
 
 
 def sort_consumers(doc):
-    """Sort a consumers result by (hop, api); the order the index lists edges in is the walk order."""
+    """Sort a consumers result by (hop, api), so the check does not rest on the index's edge order."""
     if isinstance(doc, dict) and isinstance(doc.get("consumers"), list):
         doc["consumers"] = sorted(doc["consumers"], key=lambda c: (
             c.get("hop") if isinstance(c.get("hop"), int) else 0, str(c.get("api"))))

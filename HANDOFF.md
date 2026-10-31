@@ -20,6 +20,30 @@ without a written reason in the PR.
 5. Every claim: `path:line` evidence + Confirmed / Inferred / Unverifiable.
 6. The assistant may recommend and proceed provisionally; it never approves, deploys, pushes or makes a binding decision. Every recommendation is confirmed by a named owner before it becomes a committed impact or a code scope.
 
+## Where things stand
+
+**Built, with tests:** the guard and its modes (WS0); the demo org, index and answer keys (WS1);
+the impact record, register and PR check (WS2); story refinement (WS11), starting points and
+solution design (WS10) and scoped code writing (WS8), whose guard and CI patches are not applied
+yet (so, for example, `build` cannot write source today); the consistency comparer and the live-run
+collector (WS3); the measurement kit (WS4); the walkthrough with its deterministic check and the
+adoption guide (WS5); `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md`. `CHANGELOG.md` lists
+what each workstream delivered.
+
+**Stated, not built:** the Copilot guard (WS6). Copilot users get the rendered instructions and
+no guard; see "Copilot today" in `docs/DESIGN.md`.
+
+**Waits on the owner.** Human-only steps are tracked in the maintainers' owner queue,
+`ai-context/OWNER-QUEUE.md` (git-ignored workspace). In outline:
+
+- apply the owner patches in order: WS11, WS10, WS8, then the publish patches
+  (`ai-context/publish/patches/`), re-baselining the guard after each commit;
+- confirm the DEMO-202 story, design and impact, build and commit its package, and start a
+  build session, so the code walkthrough can run (and the same for the greenfield DEMO-301);
+- pick the plugin layout, place the drafted files and tag the first release;
+- run the live `run_all.py` series and any skill runs under Claude Code; no model has run
+  story-refine, solution-design or implement-story here yet.
+
 ## Smoke test (run before anything else)
 
 ```sh
@@ -39,6 +63,11 @@ python3 tools/impacts/test_promote.py      # promotion into impacts/
 python3 tools/impacts/test_render_register.py # static register page
 python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
 python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/evals/test_consistency.py    # consistency comparer
+python3 tools/evals/test_run_all.py        # live-run collector (an injected runner; claude never starts)
+python3 demo/measure/test_score.py         # score.py: an impact against its key
+python3 demo/measure/test_timing.py        # timing.py: a session transcript
+python3 tools/demo/test_walkthrough_check.py # walkthrough check: normalising and diffing
 python3 tools/index/test_edge_seeds.py     # edge seeds from the index
 python3 tools/stories/test_validate_story.py # story.json schema
 python3 tools/stories/test_check_ac.py     # vague-criteria check
@@ -56,18 +85,22 @@ python3 tools/code/check_rules.py --from-config # exit 0: every demo finding is 
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
 python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
-python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index   # 5 consumers
+python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
+python3 tools/demo/walkthrough_check.py    # walkthrough's deterministic steps match demo/expected/
 ```
 
 On Windows use `py -3`. If the guard test fails here, fix that before touching anything else.
-The impact, story, config, onboarding, design and code test scripts each end with
-`<n> passed, 0 failed`; some add a skipped count for symlink cases. `test_check_trace.py` and
+The impact, story, config, onboarding, design, code, evals and measurement test scripts each end
+with `<n> passed, 0 failed`; some add a skipped count for symlink cases. `walkthrough_check.py`
+ends with `<n> passed, 0 failed` too, and builds its own index in a temp folder, so the fixtures
+build above does not affect it. `test_check_trace.py` and
 `test_start.py` also skip their real-core test until the WS8 guard patch puts
 `tools/guard/trace_core.py` and `scope_core.py` in place. In `normal` and `build` modes
 the assistant cannot run the `tools/demo/`, `tools/impacts/`, `tools/stories/`, `tools/config/`,
-`tools/onboard/`, `tools/designs/` and `tools/code/` test scripts, `tools/index/test_edge_seeds.py`, or
-`tools/evals/test_run_skill.py`; run them yourself or in `maintain`. `check_rules.py --from-config`
+`tools/onboard/`, `tools/designs/` and `tools/code/` test scripts, `tools/index/test_edge_seeds.py`,
+the `tools/evals/` test scripts, the `demo/measure/` tests, or `walkthrough_check.py`; run them
+yourself or in `maintain`. `check_rules.py --from-config`
 also needs `maintain` or your terminal until the WS8 guard patch adds it to `normal` and `build`. `validate.py --all` runs in
 `normal`. `validate_story.py --all` joins `normal`'s allowlist only once the owner applies the
 WS11 guard patch (`ai-context/ws11/patches/APPLY.md`), and `validate_design.py --all` only once
@@ -90,7 +123,8 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
   `normal`; a committed `advise` (the kill switch) always wins. `maintain` can write the framework
   paths and run the maintainer command allowlist in `tools/guard/policy.json`.
 - Changes to `tools/guard/`, `.claude/settings.json`, `.github/workflows/`, `.github/hooks/` and
-  CODEOWNERS files are human-applied patches with a second reviewer: the guard blocks the
+  CODEOWNERS files are human-applied patches with a second reviewer (not enforced on this
+  repository until it has a second maintainer; see "Commit conventions"): the guard blocks the
   assistant's write tools and its Bash write patterns from touching those paths in every mode. A
   change under `.github/workflows/` or `.github/hooks/`, or to a CODEOWNERS file, also trips the
   tripwire until a human commits it; the rendered `.github/instructions/` and similar trees that
@@ -173,7 +207,9 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
       named credentials, record types and FlexiPages; add `@AuraEnabled` method → LWC edges.
 - [ ] `tools/index/query.py`: add `inventory` subcommand that prints `inventory.json` sections.
 - [ ] Copilot hook registration under `.github/hooks/` pointing at the same guard; document the
-      exact file Copilot expects once confirmed against current docs.
+      exact file Copilot expects once confirmed against current docs. Today (WS6) Copilot users
+      get the rendered instructions but no guard; `docs/DESIGN.md`, "Copilot today", and
+      `docs/ADOPTING.md` section 8 say so. `.github/hooks/` is an owner path.
 
 ### WS0 guard hardening
 - [x] Four modes (advise, normal, build, maintain) with committed-`advise`-wins precedence.
@@ -222,26 +258,37 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
 - [x] Rule-violation baseline in `onboard.py` for an existing codebase (WS8, from `check_rules.py`).
 
 ### Evals harness
-- [ ] `tools/evals/run_all.py`: for each skill and case, invoke `claude -p` N times (default 5)
-      with the repo as cwd, write outputs to a temp dir, call `run_skill.py`. Exit non-zero on
-      any failure. This is the home-grown alternative to Promptfoo; keep assertions in
-      `run_skill.py`, never in the runner.
+- [x] `tools/evals/run_all.py` (WS3): runs one case N times with `claude -p` on a pinned model
+      and collects each run into `ai-context/evals/<skill>-<case>/run-<i>/` with a `run.json`.
+      `tools/evals/consistency.py` compares the runs on the must-agree fields. Assertions stay
+      in `run_skill.py`, never in the runner.
+- [ ] Live consistency series (owner): run `run_all.py` on the eval cases and compare with
+      `consistency.py`; the assistant cannot run `claude -p` under the guard. No series has run,
+      so no consistency figure for a skill is published. Operator notes: `tools/evals/README.md`.
 - [ ] Optional: `promptfooconfig.yaml` that wraps the same cases and calls `run_skill.py` as a
       python assertion, for teams that already use Promptfoo.
 
-### Packaging
-- [ ] `.claude-plugin/plugin.json` (or current manifest format; verify against docs) so squads
-      install a pinned version instead of copying files.
-- [ ] `CHANGELOG.md` started at 0.1.0.
+### Packaging and publishing
+- [x] Plugin manifest, hook registration and layout proposal drafted (WS7) in the maintainers'
+      workspace, `ai-context/publish/drafts/` (`PLUGIN-LAYOUT.md`).
+- [ ] Owner: pick the plugin layout, place the drafted files, run `claude plugin validate`, and
+      tag the first release. Until then a full copy-in is the only install route.
+- [x] `CHANGELOG.md` started at 0.1.0 (unreleased); `CONTRIBUTING.md` and `SECURITY.md` added.
+- [x] `docs/ADOPTING.md` (the adoption guide) and `demo/WALKTHROUGH.md` with its deterministic
+      check, `tools/demo/walkthrough_check.py` (WS5).
+- [x] Measurement kit, `demo/measure/` (WS4). No time-saved figure until a measured baseline is
+      committed with its source.
 
 ## Questions to resolve with the guild, not alone
 
 - Exact Copilot hook file format and location for the organisation's Copilot version.
 - Whether the org's SAST tool is updated for `WITH USER_MODE` (Checkmarx historically was not).
 - The real managed-package namespace list for `namespaces.json`.
-- Who owns `framework/knowledge/permissions-model.md` (replace the placeholder email).
 
 ## Commit conventions
 
-Small PRs, one layer at a time. Every PR touching `tools/guard/` or `.claude/settings.json`
-gets a second reviewer. Render output is committed alongside its source change.
+Small PRs, one layer at a time. A PR touching `tools/guard/` or `.claude/settings.json` needs a
+second reviewer. Branch protection can enforce that only with at least two maintainers; until
+this repository has a second maintainer the rule is not enforced here, and such a change merges
+on one maintainer's review (`CONTRIBUTING.md`, "Review rules"). Render output is committed
+alongside its source change.

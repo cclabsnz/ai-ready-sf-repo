@@ -23,7 +23,7 @@ Each layer only reads downward. Skills never grep the checkout directly; they re
 
 ## Layer 1: the metadata index
 
-The index is the foundation and the first thing built. One stdlib-only Python script (`tools/index/build_index.py`) walks `force-app/`, `pkg-*/` and `manifest/`, and emits `index/metadata.json` plus `index/inventory.json`, stamped with the commit SHA, the script version and the UTC time. Nothing in the index comes from an org; it is a projection of the checkout.
+The index is the foundation and the first thing built. One stdlib-only Python script (`tools/index/build_index.py`) walks `force-app/` and `pkg-*/` (not `manifest/`: zero hits for `manifest` in `tools/index/build_index.py`), and emits `index/metadata.json` plus `index/inventory.json`, stamped with the commit SHA, the script version and the UTC time. Nothing in the index comes from an org; it is a projection of the checkout. The walk visits folders and files in sorted order (`tools/index/build_index.py:112-118`), so the order of nodes and edges does not depend on the filesystem. The `builtAt` time in the stamp still differs between builds.
 
 | Output | Contents | Consumed by |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ The control plane is built and tested before the first skill, because every late
 
 | Part | Mechanism | What it stops |
 | --- | --- | --- |
-| Offline guard | PreToolUse hook on every tool (matcher `.*`) in `.claude/settings.json`, registered as `sh "$CLAUDE_PROJECT_DIR/tools/guard/guard.sh"`, which runs `tools/guard/guard.py` with `-I`. The wrapper exits 2 if no interpreter is found or `guard.py` is unreadable, and maps any other exit code to 2, so a missing Python blocks rather than passes. `guard.cmd` is a Windows fallback, not the registered command. Rules live in `tools/guard/policy.json`; the active mode picks the allowed write paths, the Bash allowlist and the Salesforce CLI level. Mirrored as a Copilot hook in `.github/hooks/`. | `sfdx`, org logins and every other org-changing `sf` command, pushes, `curl`, `wget`, writes outside the mode's paths, Bash outside the mode's allowlist, unquoted globs that could expand to an option, WebFetch to domains not on the allowlist, MCP tools that write (and every MCP tool in `advise`), and any write or non-read-only Bash while the tripwire is tripped |
+| Offline guard | PreToolUse hook on every tool (matcher `.*`) in `.claude/settings.json`, registered as `sh "$CLAUDE_PROJECT_DIR/tools/guard/guard.sh"`, which runs `tools/guard/guard.py` with `-I`. The wrapper exits 2 if no interpreter is found or `guard.py` is unreadable, and maps any other exit code to 2, so a missing Python blocks rather than passes. `guard.cmd` is a Windows fallback, not the registered command. Rules live in `tools/guard/policy.json`; the active mode picks the allowed write paths, the Bash allowlist and the Salesforce CLI level. Claude Code only: no Copilot hook is registered. `.github/hooks/` holds only a README describing how one could be, so Copilot users get the rendered instructions but no guard today (WS6; see "Copilot today"). | `sfdx`, org logins and every other org-changing `sf` command, pushes, `curl`, `wget`, writes outside the mode's paths, Bash outside the mode's allowlist, unquoted globs that could expand to an option, WebFetch to domains not on the allowlist, MCP tools that write (and every MCP tool in `advise`), and any write or non-read-only Bash while the tripwire is tripped |
 | Deny rules | Static `permissions.deny` patterns in the same settings file for the always-blocked Salesforce CLI command prefixes, `sfdx`, `git push`, `curl`, `wget` and `WebFetch` | Belt and braces: a deny rule applies even when the hook cannot start. They do not cover Write/Edit paths, colon-style ids, the `force` topic or `--flags-dir`; those depend on the hook |
 | Data boundary | `.gitignore` for `data/`, `/index/` and the whole `/ai-context/` workspace (the WS2 owner patch, applied in `3fb9e73`). Plus `tools/guard/scan_data.py` as a pre-commit hook and a pipeline gate | Org exports, user inputs and workspace output entering git; Salesforce IDs, account-number formats, emails and `LLC_BI__` record names in any committed file |
 | Secrets | gitleaks (or the platform's native scanner) pre-commit and in CI | Keys, tokens and credentials in commits |
@@ -659,9 +659,43 @@ Agent evals assert on trajectory, from the tool-call log the harness emits:
 
 Runner: `tools/evals/run_agent.py` invokes the agent headless with a fixture repo checked out, captures the log, and applies the assertions. If the framework is packaged as a plugin, `claude plugin eval` can replace the runner; the assertions stay the same.
 
+## Evals, measurement and the walkthrough
+
+These pieces show what the framework does and how far its output can be trusted. Each one is a script that reads files. The live model runs it can score belong to the owner.
+
+### Consistency comparer (WS3)
+
+`tools/evals/consistency.py` compares N run folders of one eval case on the fields that must agree. It reads `impact.json`, `story.json`, `design.json` or `change.json` in each folder, and the file it finds sets the kind. It compares canonical values, so order never counts as drift. A run with no usable value for a field is invalid, and an invalid value never counts as agreement. It prints JSON, and with `--text` a grid plus a last line `k/N identical`. It always exits 0 after a comparison: it reports and never gates. The field list per kind is in its docstring (`tools/evals/consistency.py:2-51`).
+
+`tools/evals/run_all.py` produces those run folders. It runs one case N times with `claude -p` on a pinned model, into `ai-context/evals/<skill>-<case>/run-<i>/`, and writes a `run.json` beside each run with the model, the Claude Code version, the framework `VERSION` and the index stamp. It passes no permission-bypass flag. **The owner runs it.** It needs the owner's Claude Code account, and `claude` is on no assistant allowlist, so no live series has run in this repo and no consistency figure for a skill is published. The operator notes (a clean worktree per run, diff-names files for implement-story runs) are in `tools/evals/README.md`.
+
+The runs committed in `demo/expected/consistency-fixture/` are hand-built to show the grid's format, with one run drifting on purpose. They are not output from any model run.
+
+### Measurement kit (WS4)
+
+`demo/measure/` measures impact analysis the same way for an assistant run and for a person. `score.py` compares an `impact.json`'s components with a reviewed answer key and prints found, missed, extra, recall and precision. `timing.py` reads a Claude Code session transcript and prints its start, end, duration and tool-call count. `baseline-template.md` is an empty template for a manual baseline. The kit publishes no time-saved figure: one appears only after a measured baseline is committed with its source, computed from the committed rows. The only published score is DEMO-202's committed record against its key, and that record was derived from the key, so it shows the script works and measures nothing about the assistant (`demo/measure/README.md`). The scripts live under `demo/`, so in Claude Code they run only in `maintain`.
+
+### The walkthrough and its deterministic check (WS5)
+
+`demo/WALKTHROUGH.md` goes through the framework on the demo org, from the guard test to the scores against the answer key. It labels each step **deterministic (no Claude Code)**, **needs Claude Code** or **needs owner confirmations**, so a reader can see which outputs are fixed and which vary from run to run.
+
+`tools/demo/walkthrough_check.py` re-runs the deterministic steps and diffs each one against `demo/expected/<NN>-<step>.txt`. It normalises line endings, the repo path, temp folders, timestamps and commit hashes, and it sorts the consumers list by hop and api. It builds its index in a temp folder and writes nothing else. Exit 1 on any difference. `--show <step>` prints one step's normalised output, which a maintainer reviews and saves over the expected file after a deliberate change. It leaves out the guard test, which takes minutes and depends on the machine's shells. The Windows commands on the walkthrough page have not been run (Inferred).
+
+### Adoption guide
+
+`docs/ADOPTING.md` takes the framework into an adopter's own repository. It covers the install routes (the plugin at a tag plus a copy-in, or a full copy-in, which is what works today), the policy and modes, CODEOWNERS and branch protection on the adopter's remote, per-laptop onboarding, the guild, org-facing CI, measuring a baseline, what Copilot users get, and the owner-patch pattern. It labels each claim Confirmed, Inferred or Unverifiable. Plugin behaviour beyond the maintainers' format notes is Unverifiable until `claude plugin validate` and a real install settle it.
+
+### Copilot today (WS6)
+
+Copilot users get the rendered instructions in `.github/instructions/` and the rendered knowledge, skills and agents under `.github/`, as files. They get no guard: no Copilot hook is registered, and `.github/hooks/` holds only a README. Nothing on a laptop stops a Copilot session from running a command the guard would block in Claude Code. Copilot work is governed by the instructions and by the server-side layer (see "What the guard guarantees"). Registering a Copilot hook stays in the backlog until its file format is confirmed for the organisation's Copilot version.
+
 ## Packaging and operating model
 
-The framework is a versioned plugin, not a set of files squads copy. A squad pins a version in its repo; the guild cuts releases with a changelog; a rollback is a version bump down. That one decision removes forks, lets evals gate releases, and gives the kill switch a single place to live.
+The target is a versioned plugin, not a set of files squads copy. A squad pins a version in its repo; the guild cuts releases with a changelog; a rollback is a version bump down. That one decision removes forks, lets evals gate releases, and gives the kill switch a single place to live.
+
+**Status (WS7): drafted, not placed.** No plugin manifest or marketplace catalog is in this repository yet (zero hits for `git ls-files '*plugin*'`, and no `.claude-plugin/` at the root). The maintainers have drafted the manifest, a hook registration and a layout proposal in their git-ignored workspace (`ai-context/publish/drafts/`, with `PLUGIN-LAYOUT.md`), and **the owner picks the layout** and places the files. The proposal is a `plugin/` tree rendered by `render.py`, with the catalog at the repo root; the alternative is the repo root as the plugin. Either way the plugin can carry skills, agents and the guard hook, but not the rules, `tools/` or the skill scripts the guard admits by repo-relative path, so an adopter still copies those in (`docs/ADOPTING.md`, "What goes where"). Until the owner places the files and tags a release, a full copy-in is the only install route, and "install and pin" in the onboarding row below waits on that. `CHANGELOG.md` records what each workstream delivered under `0.1.0`, which is unreleased.
+
+**Contributing and security.** `CONTRIBUTING.md` says how to propose a skill or agent, the evals each needs, the checks to run before a commit, the owner-patch rule for the controls, the review rules and commit messages. `SECURITY.md` says how to report a guard bypass privately, what is in and out of scope, and what the guard does and does not guarantee, as a summary that links to "What the guard guarantees" above.
 
 | Element | Design |
 | --- | --- |
@@ -698,6 +732,10 @@ This repository is the working implementation of this design, in stdlib Python w
 | `tools/build/lint.py` | Knowledge: owner, date, method, no stored counts, staleness; skills: description ≤ 200 chars with when/not-for, input checklist, ≥ 3 eval cases; agents: tools listed, no persona prose | The multi-squad hygiene rules as code |
 | `tools/evals/run_skill.py` | Output assertions: references present, labels on every claim, banned phrases absent, verdict in set, every cited `path:line` exists; pass only if every run passes | Skill regression and variance, harness-independent |
 | `tools/evals/run_agent.py` | Trajectory assertions over a JSONL tool-call log: must-call, must-not-call, must-block | Agent regression; works with any harness that logs tool calls |
+| `tools/evals/consistency.py` and `run_all.py` | The comparer of N run folders on the must-agree fields, and the owner-run `claude -p` series that produces them; a test script for each | Consistency across runs; see "Evals, measurement and the walkthrough" |
+| `demo/measure/` | `score.py` (an impact against its answer key), `timing.py` (a session transcript), the empty baseline template, and a test script for each script | A method for measuring, with no time-saved figure until a baseline is committed |
+| `demo/WALKTHROUGH.md`, `demo/expected/` and `tools/demo/walkthrough_check.py` | The walkthrough, the expected output of its deterministic steps, and the check that re-runs and diffs them (with its test script) | A reader can try the framework, and drift in a documented output fails the check |
+| `docs/ADOPTING.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md` | The adoption guide, contribution rules, the private reporting route for a guard bypass, and the release notes | Public-repo readiness |
 | `framework/skills/story-impact/` | SKILL.md, input checklist, seed-term method, manual checks, `write_report.py`, its eval cases | The first skill, built as the template for the rest |
 | `framework/skills/pr-reference-check/` | SKILL.md, input checklist, `extract_refs.py` (diff against the PR's target branch), three eval cases with diff fixtures | The second skill; CI does the deterministic review checks |
 | `framework/skills/story-refine/` | SKILL.md, input checklist, criteria style, edge-seed method, `write_story.py`, its eval cases | Step 0: refine a story before sizing it; see "Story refinement" |
@@ -717,4 +755,4 @@ This repository is the working implementation of this design, in stdlib Python w
 | `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys, and the empty greenfield skeleton (`demo/greenfield`); see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
 | `fixtures/` | Synthetic Account fields, Apex (one at API 45 and `without sharing`), a flow, a permission set, an LWC, three diff patches | Evals and CI never see real metadata |
 
-What the skeleton does not yet include, by design: a release-impact skill, docx and pptx builders, the Copilot hook registration (a README placeholder marks the gap), and a plugin manifest. Each is a consumer of what is here and lands after Gate 2.
+What the skeleton does not yet include, by design: a release-impact skill, docx and pptx builders, and the Copilot hook registration (a README placeholder marks the gap; see "Copilot today"). The plugin manifest is drafted in the maintainers' git-ignored workspace for the owner to place once they pick the layout (see "Packaging and operating model"); it is not in the repository yet. Each is a consumer of what is here and lands after Gate 2.

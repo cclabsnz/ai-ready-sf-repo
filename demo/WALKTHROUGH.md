@@ -67,8 +67,8 @@ and the step's stderr, then exits 1.
 - **What it normalises:** line endings, the repo path (`<repo>`) and its temp folder (`<tmp>`),
   ISO timestamps (`<time>`), and hex words of 7 to 40 characters with a digit (`<commit>`). It
   re-prints one-document JSON with indent 2, so a diff points at the changed line.
-- **The consumers list is sorted** by hop, then api, before comparing. The index lists edges in
-  file-walk order, which differs between file systems.
+- **The consumers list is sorted** by hop, then api, before comparing, so the check does not rest
+  on the order the index lists edges in.
 - **It builds the index into a temp folder,** so your `index/` is left alone.
 - **It leaves out the guard test** (step 1): that test takes minutes and depends on the machine's
   shells.
@@ -155,8 +155,8 @@ Windows (PowerShell):
 py -3 tools/index/query.py consumers Account.Service_Level__c --hops 3 | ConvertFrom-Json | Select-Object -ExpandProperty consumers | Where-Object hop -eq 3
 ```
 
-Expected, from a real run on macOS (the line order follows the file walk and can differ on your
-machine):
+Expected, from a real run on macOS. The line order follows the index build's file walk, which is
+sorted, so it is the same on other systems (Inferred: only macOS has run it):
 
 ```
 "api": "Case_Agent_Console", "type": "FlexiPage", "via": "flexipageComponent", "target": "caseEscalationPanel", "hop": 3

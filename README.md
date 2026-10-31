@@ -8,6 +8,14 @@ deterministic, commit-stamped index of the checkout. A guard on every tool call 
 assistant inside fixed limits. You clone it, run it on a synthetic org on your own laptop, and
 take what you need into your own repo.
 
+- **Try it:** [demo/WALKTHROUGH.md](demo/WALKTHROUGH.md) goes step by step through the framework on
+  the demo org. Each step says whether it is plain Python, needs Claude Code, or waits on an owner
+  confirmation. `python3 tools/demo/walkthrough_check.py` re-runs the deterministic steps and
+  diffs them against `demo/expected/`.
+- **Adopt it:** [docs/ADOPTING.md](docs/ADOPTING.md) takes the framework into your own Salesforce
+  repo: install routes, policy and modes, server-side controls, onboarding and what Copilot users
+  get today.
+
 Six principles, in order of precedence:
 
 1. The checkout is the only source of truth. Knowledge files are leads to re-verify.
@@ -80,18 +88,39 @@ Six principles, in order of precedence:
   patch (`ai-context/ws8/patches/APPLY.md`), so today `build` still cannot write source.
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
-- **Evals**: `run_agent.py` (trajectory assertions over a tool-call log) and `run_skill.py`
-  (deterministic assertions on a skill's output).
+- **Evals**: `run_agent.py` (trajectory assertions over a tool-call log), `run_skill.py`
+  (deterministic assertions on a skill's output), and `consistency.py` (WS3), which compares
+  several runs of one case on the fields that must agree and prints a `k/N identical` line.
+  `run_all.py` produces those runs with `claude -p`; only the owner runs it, so no consistency
+  figure for a skill exists yet. The committed runs in `demo/expected/consistency-fixture/` are
+  hand-built to show the format, not model output.
+- **Measurement kit** (`demo/measure/`, WS4): `score.py` scores an impact against its answer key
+  and `timing.py` times a run from a session transcript. No time-saved figure is published (see
+  [demo/measure/README.md](demo/measure/README.md)).
+- **Walkthrough and adoption guide** (WS5): [demo/WALKTHROUGH.md](demo/WALKTHROUGH.md) with its
+  deterministic check, `tools/demo/walkthrough_check.py`, and [docs/ADOPTING.md](docs/ADOPTING.md).
+  [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and
+  [CHANGELOG.md](CHANGELOG.md) cover contributions, private reports and releases.
 
-**Planned, not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)): consistency evals that score repeated runs against the
-answer keys (WS3), versioned packaging and pinning (WS7), and the Copilot hook (WS6;
-`.github/hooks/README.md` is a placeholder).
+**Not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
+and [docs/DESIGN.md](docs/DESIGN.md)):
 
-**Waits on the owner** (`ai-context/OWNER-QUEUE.md`): applying the WS11, WS10 and WS8 owner
-patches, in that order; and the confirmations the code walkthroughs need (items 10 and 11:
-confirm the DEMO-202 story, design and impact, run `package.py` and commit the package, then run
-`start.py` in a terminal; the greenfield walkthrough needs the same for DEMO-301).
+- **The Copilot guard (WS6).** Copilot users get the rendered instructions but no guard:
+  `.github/hooks/` holds only a README, and no Copilot hook is registered (see
+  [Copilot today](docs/DESIGN.md#copilot-today-ws6)).
+- **A placed plugin (WS7).** The plugin manifest and a layout proposal are drafted for the owner,
+  who picks the layout; nothing is placed yet, and no release is tagged. Today you install by
+  copying files (see [docs/ADOPTING.md](docs/ADOPTING.md)).
+
+**Waits on the owner** (the maintainers' queue, `ai-context/OWNER-QUEUE.md`, in their git-ignored
+workspace):
+
+- applying the WS11, WS10 and WS8 owner patches, in that order, then the publish patches;
+- the confirmations the code walkthroughs need (items 10 and 11: confirm the DEMO-202 story,
+  design and impact, run `package.py` and commit the package, then run `start.py` in a terminal;
+  the greenfield walkthrough needs the same for DEMO-301);
+- picking the plugin layout, placing the drafted files and tagging the first release;
+- the live `run_all.py` series and any golden outputs from them.
 
 ## The day-one workflow
 
@@ -365,8 +394,10 @@ To compare with the answer key:
 
   Expected: `case 004-escalation-hops-3: PASS over 1 run(s)`.
 
-Not automated yet: scoring a report against the answer key, and running the same story several
-times to show the answers match (WS3). `run_skill.py` also checks each backticked `path:line`
+To score the run against the answer key, use `demo/measure/score.py` on its `impact.json`
+(walkthrough step 10). To see whether repeated runs agree, the owner runs the same case several
+times with `tools/evals/run_all.py` and compares them with `tools/evals/consistency.py`
+(walkthrough step 9); no such series has run yet. `run_skill.py` also checks each backticked `path:line`
 cite that starts with `force-app/`, `pkg-*/`, `fixtures/` or `demo/`: the file must exist and
 have at least that many lines. That covers the `demo/org/...` evidence in this report. It does
 not check that the cited line says what the report claims, so spot-check a few cites yourself.
@@ -830,6 +861,11 @@ python3 tools/impacts/test_promote.py      # promotion into impacts/
 python3 tools/impacts/test_render_register.py # static register page
 python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
 python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/evals/test_consistency.py    # consistency comparer
+python3 tools/evals/test_run_all.py        # live-run collector (an injected runner; claude never starts)
+python3 demo/measure/test_score.py         # score.py: an impact against its key
+python3 demo/measure/test_timing.py        # timing.py: a session transcript
+python3 tools/demo/test_walkthrough_check.py # walkthrough check: normalising and diffing
 python3 tools/index/test_edge_seeds.py     # edge seeds from the index
 python3 tools/stories/test_validate_story.py # story.json schema
 python3 tools/stories/test_check_ac.py     # vague-criteria check
@@ -849,12 +885,23 @@ python3 tools/stories/validate_story.py --all # every confirmed story validates;
 python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
+python3 tools/demo/walkthrough_check.py    # walkthrough's deterministic steps match demo/expected/
 ```
 
-The impact, story, config, onboarding, design and code test scripts each end with a
-`<n> passed, 0 failed` line; some add a skipped count, which covers symlink cases on machines
-without symlinks. `test_check_trace.py` and `test_start.py` also skip their real-core test until
-the WS8 guard patch puts the cores in `tools/guard/`.
+The impact, story, config, onboarding, design, code, evals and measurement test scripts each end
+with a `<n> passed, 0 failed` line; some add a skipped count, which covers symlink cases on
+machines without symlinks. `test_check_trace.py` and `test_start.py` also skip their real-core
+test until the WS8 guard patch puts the cores in `tools/guard/`. `walkthrough_check.py` builds
+its own index in a temp folder, so it does not depend on which index `index/` holds. In Claude
+Code, `test_consistency.py`, `test_run_all.py`, the `demo/measure/` tests and the `tools/demo/`
+scripts run only in `maintain`; in your terminal they just run.
+
+**The data scan.** `python3 tools/guard/scan_data.py --all` walks the whole working tree,
+skipping only `.git`, `node_modules` and `index` (`tools/guard/scan_data.py:28`, `:37-41`). So on
+a maintainer's machine it also reads git-ignored folders such as `ai-context/` and `data/`, which
+a CI checkout never has, and a hit there fails a local run that CI would pass. The publish owner
+patch adds `--tracked`, which scans only the files git tracks; until it lands, `--all` is the
+whole-tree option.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
@@ -872,7 +919,9 @@ land or a `delete` ships.
   fixtures index build, `test_index.py`, `test_parsers.py`, the filler and answer-key tests, the
   filler `--check`, the sample agent eval, every impact test script above, `test_run_skill.py`
   and `validate.py --all`. None of the story checks run yet: not `test_edge_seeds.py`, not the
-  `tools/stories/` tests and not `validate_story.py --all`.
+  `tools/stories/` tests and not `validate_story.py --all`. Nor do the evals, measurement and
+  walkthrough checks: zero hits for `consistency`, `run_all`, `measure` or `walkthrough` in
+  `.github/workflows/framework-ci.yml`. Adding them is an owner patch to the workflow.
 - **gitleaks:** a secret scan.
 - **`impact-checks` job,** on pull requests:
   - It builds the index from the PR's `demo/org`.
@@ -1006,9 +1055,12 @@ tools/
   guard/              guard.py + guard.sh/.cmd (fail-closed PreToolUse hook), policy.json (modes,
                       allowlists, Salesforce CLI levels), scan_data.py, test_guard.py
   build/              render.py (framework/ -> .claude/ + .github/), lint.py
-  evals/              run_skill.py (output assertions), run_agent.py (trajectory assertions)
+  evals/              run_skill.py (output assertions), run_agent.py (trajectory assertions),
+                      consistency.py (agreement across runs), run_all.py (owner-run claude -p
+                      series), tests
   demo/               generate_filler.py (seeded filler), check_answers.py (answer keys vs index),
-                      answer_to_draft.py (draft impact from a reviewed key), tests
+                      answer_to_draft.py (draft impact from a reviewed key),
+                      walkthrough_check.py (walkthrough steps vs demo/expected/), tests
   impacts/            validate.py (record schema), register.py (overlaps, scope, view),
                       promote.py (human step, impacts and stories), render_register.py,
                       pr_check.py, package.py (build package), start.py (human starts a build
@@ -1025,22 +1077,31 @@ demo/
   greenfield/         the empty greenfield skeleton onboard.py creates (sfdx-project.json, .gitkeep)
   stories/            DEMO-*.md story text, DEMO-*.answer.json reviewed answer keys, and
                       DEMO-101.vague-example.story.json (a draft story.json with vague criteria)
+  measure/            score.py, timing.py, the baseline template and tests (measurement kit)
+  expected/           expected output of the walkthrough's deterministic steps, and the
+                      hand-built consistency fixture
+  WALKTHROUGH.md      the walkthrough
 impacts/              the register: squads.json and promoted <storyId>-<slug>/ records (in git)
 docs/
   DESIGN.md           design, layers, modes, what the guard guarantees
+  ADOPTING.md         taking the framework into your own repo
   superpowers/        specs/ (the published-framework spec) and plans/ (per-workstream plans)
 .claude/              GENERATED, plus the hand-written settings.json (hook, deny rules, kill switch)
 .github/              GENERATED instructions/knowledge/skills/agents, plus workflows/ and hooks/
 fixtures/             small synthetic metadata and diffs for tool tests and CI; never real
 ai-context/           every assistant output lands here; git-ignored as a whole
 index/                generated; git-ignored, never committed
-VERSION               framework version (no install or pinning mechanism yet; WS7)
+VERSION               framework version (the plugin that would pin it is drafted, not placed; WS7)
+CHANGELOG.md, CONTRIBUTING.md, SECURITY.md   releases, contribution rules, private reports
 .ai-framework.json    starting point, source root and PR-check severity
                       ({"startingPoint": "existing", "sourceRoot": "demo/org"} here)
 ```
 
 ## Where to go next
 
+- [demo/WALKTHROUGH.md](demo/WALKTHROUGH.md): the framework step by step on the demo, with the
+  deterministic steps checked by `tools/demo/walkthrough_check.py`.
+- [docs/ADOPTING.md](docs/ADOPTING.md): taking the framework into your own Salesforce repo.
 - [demo/README.md](demo/README.md): the demo org, what the index models, the stories and how
   the answer keys work.
 - [docs/DESIGN.md](docs/DESIGN.md): the layers, the modes, the day-one workflow (config,
@@ -1053,7 +1114,9 @@ VERSION               framework version (no install or pinning mechanism yet; WS
 Onboarding a squad member today: run quick start steps 2 to 7, run the sample agent eval
 (`python3 tools/evals/run_agent.py ...` above), read `framework/rules/00-precedence.md`, and know
 who the guild is (`CODEOWNERS`). There is no versioned install yet: `VERSION` records the
-framework version, but packaging and pinning are planned (WS7), so adopters copy the files.
+framework version, and the plugin manifest and layout are drafted for the owner, who picks the
+layout and places the files (WS7). Until then adopters copy the files, as
+[docs/ADOPTING.md](docs/ADOPTING.md) describes ("Route B: full copy-in").
 
 ## Contributing and safety
 
