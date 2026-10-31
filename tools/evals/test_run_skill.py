@@ -492,6 +492,138 @@ def test_missing_index_fails_cleanly():
         shutil.rmtree(tmp)
 
 
+def design(recommend="OPT-2", trigger_change="modify"):
+    """A draft design.json over the synthetic index: OPT-1 do nothing, OPT-2 reuses CaseTrigger."""
+    trig = {"api": "CaseTrigger", "type": "ApexTrigger", "changeType": trigger_change,
+            "evidence": DEMO_TRIGGER + ":1", "confidence": "Confirmed"}
+    if trigger_change == "new":
+        trig["evidence"] = None
+    return {"schemaVersion": 1, "storyId": "DEMO-1", "slug": "x", "status": "draft",
+            "options": [
+                {"id": "OPT-1", "title": "Do nothing", "summary": "s", "doNothing": True,
+                 "components": [], "tradeOffs": [{"criterion": "reuse", "note": "n"}],
+                 "impactSummary": "none"},
+                {"id": "OPT-2", "title": "Extend", "summary": "s", "doNothing": False,
+                 "components": [trig,
+                                {"api": "Case.New_Field__c", "type": "CustomField", "changeType": "new",
+                                 "evidence": None, "confidence": "Inferred"}],
+                 "tradeOffs": [{"criterion": "maintainability", "note": "n"}],
+                 "impactSummary": "one trigger"}],
+            "recommendation": {"optionId": recommend, "reasons": ["r"]},
+            "provenance": {"indexStamp": {"commit": "x"}, "frameworkVersion": "0.1.0",
+                           "model": "m", "assistantVersion": "unknown"}}
+
+
+def design_dir(doc):
+    tmp = tempfile.mkdtemp(prefix="run_skill_design_")
+    out = os.path.join(tmp, "design.md")
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write("x\n")
+    if doc is not None:
+        with open(os.path.join(tmp, "design.json"), "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+    return tmp, out
+
+
+def test_design_json_valid_assertion():
+    asserts = {"design_json_valid": True}
+    tmp, out = design_dir(design())
+    try:
+        assert chk("x", asserts, out) == [], chk("x", asserts, out)
+    finally:
+        shutil.rmtree(tmp)
+    ghost = design()
+    ghost["options"][1]["components"][0]["api"] = "GhostTrigger"
+    tmp, out = design_dir(ghost)
+    try:
+        fails = chk("x", asserts, out)
+        assert fails and "GhostTrigger" in fails[0] and "index" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+    bad_ev = design()
+    bad_ev["options"][1]["components"][0]["evidence"] = DEMO_TRIGGER + ":99999"
+    tmp, out = design_dir(bad_ev)
+    try:
+        fails = chk("x", asserts, out)
+        assert fails and "past the end" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+    tmp, out = design_dir(None)
+    try:
+        fails = chk("x", asserts, out)
+        assert fails and "unreadable" in fails[0], fails
+        fails = run_skill.check("x", asserts, out, os.path.join(tmp, "no-index"))
+        assert any("design.json" in f for f in fails), fails
+    finally:
+        shutil.rmtree(tmp)
+    tmp, out = design_dir(design())
+    try:
+        fails = run_skill.check("x", asserts, out, os.path.join(tmp, "no-index"))
+        assert len(fails) == 1 and fails[0].startswith("cannot load index"), fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_recommends_assertion():
+    tmp, out = design_dir(design())
+    try:
+        assert chk("x", {"recommends": "change"}, out) == []
+        fails = chk("x", {"recommends": "do-nothing"}, out)
+        assert fails == ["recommends: expected do-nothing, design recommends OPT-2 (a change option)"], fails
+    finally:
+        shutil.rmtree(tmp)
+    tmp, out = design_dir(design(recommend="OPT-1"))
+    try:
+        assert chk("x", {"recommends": "do-nothing"}, out) == []
+        fails = chk("x", {"recommends": "change"}, out)
+        assert fails == ["recommends: expected change, design recommends OPT-1 (the do-nothing option)"], fails
+    finally:
+        shutil.rmtree(tmp)
+    tmp, out = design_dir(design(recommend="OPT-9"))
+    try:
+        fails = chk("x", {"recommends": "change"}, out)
+        assert fails and "OPT-9" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_must_reuse_assertion():
+    tmp, out = design_dir(design())
+    try:
+        assert chk("x", {"must_reuse": ["CaseTrigger"]}, out) == []
+        fails = chk("x", {"must_reuse": ["CaseTrigger", "CaseTriggerHandler"]}, out)
+        assert fails == ["must_reuse: recommended option OPT-2 does not reuse CaseTriggerHandler"], fails
+        fails = chk("x", {"must_reuse": ["Case.New_Field__c"]}, out)
+        assert fails == ["must_reuse: recommended option OPT-2 does not reuse Case.New_Field__c"], fails
+    finally:
+        shutil.rmtree(tmp)
+    tmp, out = design_dir(design(recommend="OPT-1"))
+    try:
+        fails = chk("x", {"must_reuse": ["CaseTrigger"]}, out)
+        assert fails == ["must_reuse: recommended option OPT-1 does not reuse CaseTrigger"], fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def _reuse_fails_for(change):
+    tmp, out = design_dir(design(trigger_change=change))
+    try:
+        return chk("x", {"must_reuse": ["CaseTrigger"]}, out)
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_delete_is_not_reuse():
+    fails = _reuse_fails_for("delete")
+    assert fails == ["must_reuse: recommended option OPT-2 does not reuse CaseTrigger"], fails
+
+
+def test_review_is_not_reuse():
+    fails = _reuse_fails_for("review")
+    assert fails == ["must_reuse: recommended option OPT-2 does not reuse CaseTrigger"], fails
+    assert _reuse_fails_for("modify") == []
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0

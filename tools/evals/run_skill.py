@@ -11,7 +11,7 @@ N times (default 5) by producing N outputs and passing them all; the case passes
 Assertions supported in case JSON: must_reference, must_not_flag, must_flag, must_contain_label,
 must_label_every_claim, banned_phrases, verdict_in, max_hops, impact_json_valid, must_flag_overlap,
 story_json_valid, must_keep_edge, must_become_criterion, must_list_overlap, edges_from_seeds_only,
-seeds_accounted. Every cited `path:line` must exist.
+seeds_accounted, design_json_valid, recommends, must_reuse. Every cited `path:line` must exist.
 
 impact_json_valid: the impact.json beside each --output validates as a draft, evidence checked.
 must_flag_overlap: each api is the exact backticked Component cell of a row in the table under
@@ -36,6 +36,14 @@ scan/edge-seeds.json beside --output (the query.py edge-seeds output the skill s
 seed's evidence and confidence copied unchanged.
 seeds_accounted: every seed in scan/edge-seeds.json is an edgeCases or droppedSeeds triple.
 For each of them, a missing story.json, edge-seeds.json or index fails.
+
+solution-design assertions (design_json_valid, recommends, must_reuse) read the design.json beside
+each --output.
+design_json_valid: design.json passes tools/designs/validate_design.py as a draft, evidence checked,
+with the index from --index (every non-new component is an index node). The case's indexRoot names
+the root the operator builds that index from. A missing index fails.
+recommends: "do-nothing" or "change": whether the recommended option is the doNothing one.
+must_reuse: the recommended option lists each api with changeType "modify" (delete, review and new are not reuse).
 """
 import argparse
 import importlib.util
@@ -51,6 +59,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools", "impacts"))
 from validate import validate  # noqa: E402
 from validate_story import validate_story  # noqa: E402
 from check_ac import check_ac, load_vague  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "tools", "designs"))
+from validate_design import load_index, validate_design  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("query", os.path.join(ROOT, "tools", "index", "query.py"))
 query = importlib.util.module_from_spec(_spec)
@@ -267,6 +277,55 @@ def check_seeds_accounted(output_path, index_dir=None):
             for s in rows if triple(s) not in seen]
 
 
+def check_design_json(output_path, index_dir=None):
+    """design.json beside --output validates as a draft against the index, evidence checked."""
+    doc, err = load_sibling(output_path, "design.json", "design_json_valid")
+    if err:
+        return [err]
+    idx, err = load_index(index_dir or DEFAULT_INDEX)
+    if err:
+        return [err]
+    return [f"design.json invalid: {e}"
+            for e in validate_design(doc, "draft", ROOT, idx=idx, check_evidence=True)]
+
+
+def recommended_option(output_path, name):
+    """(recommended option dict, None) or (None, failure text)."""
+    doc, err = load_sibling(output_path, "design.json", name)
+    if err:
+        return None, err
+    rec = doc.get("recommendation") if isinstance(doc, dict) else None
+    opt_id = rec.get("optionId") if isinstance(rec, dict) else None
+    opts = doc.get("options") if isinstance(doc, dict) else None
+    for o in opts if isinstance(opts, list) else []:
+        if isinstance(o, dict) and o.get("id") == opt_id:
+            return o, None
+    return None, f"{name}: recommendation.optionId {opt_id!r} names no option in design.json"
+
+
+def check_recommends(output_path, want):
+    if want not in ("do-nothing", "change"):
+        return [f"recommends: {want!r} is not do-nothing or change"]
+    opt, err = recommended_option(output_path, "recommends")
+    if err:
+        return [err]
+    is_dn = opt.get("doNothing") is True
+    if is_dn == (want == "do-nothing"):
+        return []
+    kind = "the do-nothing option" if is_dn else "a change option"
+    return [f"recommends: expected {want}, design recommends {opt.get('id')} ({kind})"]
+
+
+def check_must_reuse(output_path, apis):
+    opt, err = recommended_option(output_path, "must_reuse")
+    if err:
+        return [err]
+    comps = opt.get("components") if isinstance(opt.get("components"), list) else []
+    reused = {c.get("api") for c in comps if isinstance(c, dict) and c.get("changeType") == "modify"}
+    return [f"must_reuse: recommended option {opt.get('id')} does not reuse {api}"
+            for api in apis if api not in reused]
+
+
 def check(output_text, asserts, output_path=None, index_dir=None):
     """index_dir: the index edge seeds are recomputed from (default <checkout>/index)."""
     fails = []
@@ -337,6 +396,12 @@ def check(output_text, asserts, output_path=None, index_dir=None):
         add_seed_fails(check_edges_from_seeds(output_path, index_dir))
     if asserts.get("seeds_accounted"):
         add_seed_fails(check_seeds_accounted(output_path, index_dir))
+    if asserts.get("design_json_valid"):
+        fails += check_design_json(output_path, index_dir)
+    if asserts.get("recommends"):
+        fails += check_recommends(output_path, asserts["recommends"])
+    if asserts.get("must_reuse"):
+        fails += check_must_reuse(output_path, asserts["must_reuse"])
     return fails
 
 
@@ -346,7 +411,7 @@ def main():
     ap.add_argument("--case", required=True)
     ap.add_argument("--output", action="append", required=True)
     ap.add_argument("--index", default=DEFAULT_INDEX,
-                    help="index dir edge seeds are recomputed from (default <checkout>/index)")
+                    help="index dir for edge-seed recompute and design checks (default <checkout>/index)")
     a = ap.parse_args()
     case_path = os.path.join(ROOT, "framework", "skills", a.skill, "evals", "cases", a.case + ".json")
     with open(case_path) as fh:

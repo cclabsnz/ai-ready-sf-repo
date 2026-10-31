@@ -1,0 +1,4 @@
+{"id": "DEMO-301", "slug": "warranty-claim-intake", "indexRoot": "demo/greenfield",
+ "operatorNote": "indexRoot is demo/greenfield, not the default index. Build it with: python3 tools/index/build_index.py --root demo/greenfield --out <abs path>, then pass that dir to run_skill.py as --index. Against an empty build every component of every option is new, so design_json_valid fails on any component marked modify, delete or review.",
+ "input": "DEMO-301 Warranty claim intake. As a service agent I need a new Warranty Claim object (Warranty_Claim__c) linked to Case, so claims are tracked apart from the case itself. Squad: Customer Care",
+ "assert": {"design_json_valid": true}}

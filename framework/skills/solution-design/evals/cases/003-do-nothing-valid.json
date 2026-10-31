@@ -1,0 +1,4 @@
+{"id": "DEMO-203", "slug": "team-lead-escalation-level", "indexRoot": "demo/org",
+ "operatorNote": "The build already meets this story: field-access seed 'Team_Lead edit' on Case.Escalation_Level__c, evidence demo/org/force-app/main/default/permissionsets/Team_Lead.permissionset-meta.xml:19 (python3 tools/index/query.py edge-seeds Case.Escalation_Level__c). The right recommendation is the do-nothing option.",
+ "input": "DEMO-203 Team lead escalation level. Team leads need to be able to change a case's escalation level. Squad: Customer Care",
+ "assert": {"design_json_valid": true, "recommends": "do-nothing"}}
