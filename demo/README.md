@@ -38,8 +38,12 @@ demo index afterwards with `python3 tools/index/build_index.py --from-config`.
 solution-design's eval case 002 (`framework/skills/solution-design/evals/cases/002-greenfield-warranty.json`,
 story DEMO-301, a warranty claim object) runs against this skeleton. Its `indexRoot` is
 `demo/greenfield`, so the operator builds that index with `--root demo/greenfield` and an absolute
-`--out` of their choosing and passes it to `run_skill.py` as `--index`. Against the empty index,
-every component of every option must be `new`. DEMO-301 has no story file or answer key under
+`--out` of their choosing and passes it to `run_skill.py` as `--index`. `write_design.py` and
+`promote.py` take the same `--index`, and `write_design.py` takes `--source-root demo/greenfield`
+so the design records the root it was written for. The repo's `--from-config` index covers only
+`demo/org`. Against the empty index, every component of every option must be `new`. That
+includes the standard object `Case`, which has no node in an empty index: link to it through a
+`new` field such as `Warranty_Claim__c.Case__c`. DEMO-301 has no story file or answer key under
 `demo/stories/`; the case's input holds the story text.
 
 ## What the index models

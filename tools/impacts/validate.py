@@ -3,14 +3,16 @@
 
 Usage:
   validate.py <file>... [--stage draft|promoted] [--check-evidence] [--root .]
-  validate.py --all [--index <dir>] [--root .]
+  validate.py --all [--root .]
 
 --all validates every <root>/impacts/*/impact.json as promoted, checks that each
 folder is named <storyId>-<slug>, and that storyIds are unique. A design.json beside an
-impact is validated as confirmed by tools/designs/validate_design.py against --index
-(default <checkout>/index), and its chosenOption must equal the impact's. When that option is
-the design's doNothing option, the impact has no new, modify or delete component. The index is
-loaded only when a design exists; an unreadable index is exit 2.
+impact is validated as confirmed by tools/designs/validate_design.py, without an index and
+without evidence checks (schema and internal consistency, as for the impact), and its
+chosenOption must equal the impact's. When that option is the design's doNothing option, the
+impact has no new, modify or delete component. The index checks on a design's components run at
+draft and promotion time only, so a confirmed record stays valid once the code it declared "new"
+lands or a "delete" ships. --all reads no index.
 
 Optional fields from solution-design (WS10): designOption (OPT-<n>, the option the record
 assesses), provenance.recommendedBy ("assistant" when the assessed option was the assistant's
@@ -42,7 +44,6 @@ TOP_REQUIRED = ("schemaVersion", "storyId", "slug", "squad", "status", "provenan
 TOP_ALLOWED = TOP_REQUIRED + ("confirmedBy", "designOption", "chosenOption")
 OPTION_RE = re.compile(r"^OPT-[1-9][0-9]*$")
 RECOMMENDED_BY = ("assistant",)
-DEFAULT_INDEX = os.path.join(ROOT, "index")
 PROV_STRINGS = ("frameworkVersion", "model", "assistantVersion")
 COMP_KEYS = ("api", "type", "changeType", "impact", "confidence", "hop", "evidence", "path")
 
@@ -313,22 +314,16 @@ def _design_module():
     return validate_design
 
 
-def _run_designs(root, impact_paths, index_dir):
-    """Validate each design.json beside an impact.json as confirmed, against the index.
-
-    Returns (results, problem). problem is the index load error text, or None. The index is
-    loaded only when at least one design exists."""
+def _run_designs(root, impact_paths):
+    """Validate each design.json beside an impact.json as confirmed: no index, no evidence check."""
     pairs = []
     for p in impact_paths:
         d = os.path.join(os.path.dirname(p), "design.json")
         if os.path.lexists(d):
             pairs.append((p, d))
     if not pairs:
-        return [], None
+        return []
     vd = _design_module()
-    idx, problem = vd.load_index(index_dir)
-    if problem:
-        return [], problem
     results = []
     for impact_path, p in pairs:
         folder = os.path.basename(os.path.dirname(p))
@@ -336,7 +331,7 @@ def _run_designs(root, impact_paths, index_dir):
             results.append({"file": p, "errors": ["design.json is a symlink"]})
             continue
         doc, err = _load_json(p)
-        errs = [err] if err else vd.validate_design(doc, "confirmed", root, idx)
+        errs = [err] if err else vd.validate_design(doc, "confirmed", root)
         if not err and isinstance(doc, dict):
             sid, slug = doc.get("storyId"), doc.get("slug")
             if isinstance(sid, str) and isinstance(slug, str) and folder != "%s-%s" % (sid, slug):
@@ -350,16 +345,14 @@ def _run_designs(root, impact_paths, index_dir):
                 if changed:
                     errs.append("%s (changes: %s)" % (DO_NOTHING_MSG, ", ".join(map(str, changed))))
         results.append({"file": p, "errors": errs})
-    return results, None
+    return results
 
 
-def _run_all(root, index_dir=DEFAULT_INDEX):
+def _run_all(root):
     results = []
     by_story = {}
     paths = sorted(glob.glob(os.path.join(root, "impacts", "*", "impact.json")))
-    design_results, problem = _run_designs(root, paths, index_dir)
-    if problem:
-        return None, problem
+    design_results = _run_designs(root, paths)
     for p in paths:
         folder = os.path.basename(os.path.dirname(p))
         doc, err = _load_json(p)
@@ -380,7 +373,7 @@ def _run_all(root, index_dir=DEFAULT_INDEX):
             for p in paths:
                 if os.path.basename(os.path.dirname(p)) in folders:
                     by_file[p]["errors"].append(msg)
-    return results + design_results, None
+    return results + design_results
 
 
 def main(argv=None):
@@ -389,8 +382,6 @@ def main(argv=None):
     ap.add_argument("--all", action="store_true", help="validate every impacts/*/impact.json as promoted")
     ap.add_argument("--stage", choices=("draft", "promoted"), default=None)
     ap.add_argument("--check-evidence", action="store_true")
-    ap.add_argument("--index", default=None,
-                    help="index dir for designs beside impacts (--all only; default <checkout>/index)")
     ap.add_argument("--root", default=ROOT)
     try:
         args = ap.parse_args(argv)
@@ -402,14 +393,8 @@ def main(argv=None):
     if args.all and (args.stage is not None or args.check_evidence):
         print("usage: --all takes neither --stage nor --check-evidence", file=sys.stderr)
         return 2
-    if args.index is not None and not args.all:
-        print("usage: --index applies only to --all", file=sys.stderr)
-        return 2
     if args.all:
-        results, problem = _run_all(args.root, args.index or DEFAULT_INDEX)
-        if problem:
-            print(problem, file=sys.stderr)
-            return 2
+        results = _run_all(args.root)
     else:
         results = _run_files(args.files, args.stage or "draft", args.root, args.check_evidence)
     ok = all(not r["errors"] for r in results)

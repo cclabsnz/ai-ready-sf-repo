@@ -633,6 +633,10 @@ python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --confirmed-by "<na
 - **What it checks first:** `design.json` validates as a draft against the index (`--index`,
   default `index/`) with evidence checked, and names the same story id and slug as the impact.
   Keep the index the design was written against: the greenfield onboarding run above replaces it.
+  On success promotion prints the design's `sourceRoot` and the `--index` it used. It does not
+  check that the index was built from that root. For a greenfield design, pass the index built
+  with `--root demo/greenfield`. The `--from-config` index covers only the configured root
+  (`demo/org`). Promotion is the last index check the design gets.
 - **A mismatch is refused (exit 1):** when the impact assesses another option, promotion prints
   `impact assesses OPT-a; re-run story-impact for OPT-b before promoting`. Re-run story-impact
   for your option; never hand-edit the record.
@@ -806,9 +810,11 @@ without symlinks.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
-`validate_design.py --all` loads the index only when a design is committed under `impacts/`, so
-with no committed design it passes whatever `index/` holds. Once a design is committed, it
-needs the index of the source root (step 4), not the fixtures index.
+`validate.py --all` and `validate_design.py --all` read no index. They check committed designs
+as confirmed records: schema, internal consistency and the design-to-impact checks. The index
+checks on a design's components run only when `write_design.py` writes it and when
+`promote.py` confirms it. A confirmed design therefore stays valid once its `new` components
+land or a `delete` ships.
 
 **CI today.** The WS1 and WS2 owner patches are applied (`3fb9e73`).
 `.github/workflows/framework-ci.yml` runs on pull requests that touch `framework/`, `tools/`,

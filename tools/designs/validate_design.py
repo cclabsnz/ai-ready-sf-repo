@@ -3,14 +3,16 @@
 
 Usage:
   validate_design.py <file>... [--stage draft|confirmed] [--index <dir>] [--check-evidence] [--root .]
-  validate_design.py --all [--index <dir>] [--root .]
+  validate_design.py --all [--root .]
 
 Checks the schema, exactly one doNothing option (with no components), every other option listing
 at least one component, between 2 and 4 options with ids OPT-1..OPT-n (unique, no gaps), a
 recommendation naming an existing option with at least one non-empty reason, and null evidence on
 every changeType "new" component. A non-new component with null evidence is allowed only at
 confidence Unverifiable. A confirmed record carries confirmedBy and a chosenOption naming an option;
-a draft carries neither.
+a draft carries neither. provenance.sourceRoot is the source root the design was written for, as a
+repo-relative path ("." or a/b, forward slashes, no ".." segment, not absolute); the check is
+lexical only, so a folder moved later does not invalidate a record.
 
 With an index (--index, or idx= in validate_design()), every component whose changeType is not
 "new" is a node in the index, its type equals the node's type, and its evidence path (before the
@@ -18,10 +20,13 @@ last colon) is the node's path, or under it for bundle nodes whose path is a fol
 (Unverifiable) and nodes with no path (standard objects) skip the path check, never the type
 check. A "new" component is not already a node, compared case-insensitively ("already exists;
 use modify or review"). In <file> mode the index check runs only when --index is given.
---all validates every <root>/impacts/*/design.json as confirmed against --index (default
-<checkout>/index), checks each folder is named <storyId>-<slug> and that storyIds are unique.
-It looks for designs first and loads the index only when at least one exists, so a checkout with
-no designs exits 0 without an index.
+
+The index checks belong to draft and promotion time (write_design.py, promote.py), when the
+components are compared with the build the design was written against. --all validates every
+<root>/impacts/*/design.json as confirmed without an index and without evidence checks: the
+schema and internal consistency, each folder named <storyId>-<slug>, and unique storyIds. A
+confirmed record therefore stays valid after the code it declared "new" lands or a "delete" ships.
+--all takes no --index (exit 2 when given) and never reads one.
 
 Prints JSON on stdout. Exit codes: 0 valid, 1 validation failure, 2 bad usage (including an
 unreadable index). Stdlib only. Code comes from the checkout (located from __file__); data comes
@@ -46,7 +51,6 @@ _spec = importlib.util.spec_from_file_location("query", os.path.join(ROOT, "tool
 query = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(query)
 
-DEFAULT_INDEX = os.path.join(ROOT, "index")
 STATUSES = ("draft", "confirmed")
 CRITERIA = ("security", "governor-limits", "data-volume", "licence-fit", "maintainability", "reuse")
 MIN_OPTIONS, MAX_OPTIONS = 2, 4
@@ -58,8 +62,26 @@ OPTION_KEYS = ("id", "title", "summary", "doNothing", "components", "tradeOffs",
 COMP_KEYS = ("api", "type", "changeType", "evidence", "confidence")
 TRADE_KEYS = ("criterion", "note")
 REC_KEYS = ("optionId", "reasons")
-PROV_KEYS = ("indexStamp", "frameworkVersion", "model", "assistantVersion")
+PROV_KEYS = ("indexStamp", "frameworkVersion", "model", "assistantVersion", "sourceRoot")
 PROV_STRINGS = ("frameworkVersion", "model", "assistantVersion")
+
+
+def source_root_problem(value):
+    """None when value is a repo-relative path in normal form ("." or a/b), else the problem text.
+
+    Lexical only: no filesystem access, so the check is the same at write time and years later."""
+    if not _nonempty(value):
+        return "is not a non-empty string"
+    if value != value.strip():
+        return "has leading or trailing whitespace"
+    if "\\" in value or value.startswith("/") or (len(value) > 1 and value[1] == ":"):
+        return "is not a repo-relative path with forward slashes"
+    if value == ".":
+        return None
+    parts = value.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return "is not in normal form (no empty, '.' or '..' segment, no trailing slash)"
+    return None
 
 
 def _check_against_node(tag, c, node, errors):
@@ -193,6 +215,12 @@ def _check_provenance(prov, errors):
     for k in PROV_STRINGS:
         if not _nonempty(prov.get(k)):
             errors.append("provenance.%s is not a non-empty string" % k)
+    if "sourceRoot" not in prov:
+        errors.append("provenance.sourceRoot is missing")
+    else:
+        problem = source_root_problem(prov["sourceRoot"])
+        if problem:
+            errors.append("provenance.sourceRoot %s %s" % (json.dumps(prov["sourceRoot"])[:80], problem))
 
 
 def validate_design(doc, stage, root, idx=None, check_evidence=False):
@@ -304,13 +332,14 @@ def _run_files(files, stage, root, idx, check_evidence):
     return results
 
 
-def _run_all(root, idx):
+def _run_all(root):
+    """Confirmed records: schema and consistency only, no index and no evidence check."""
     results, by_story = [], {}
     paths = sorted(glob.glob(os.path.join(root, "impacts", "*", "design.json")))
     for p in paths:
         folder = os.path.basename(os.path.dirname(p))
         doc, err = _load_json(p)
-        errs = [err] if err else validate_design(doc, "confirmed", root, idx)
+        errs = [err] if err else validate_design(doc, "confirmed", root)
         if not err and isinstance(doc, dict):
             sid, slug = doc.get("storyId"), doc.get("slug")
             if isinstance(sid, str) and isinstance(slug, str) and folder != "%s-%s" % (sid, slug):
@@ -334,7 +363,7 @@ def main(argv=None):
     ap.add_argument("--all", action="store_true", help="validate every impacts/*/design.json as confirmed")
     ap.add_argument("--stage", choices=STATUSES, default=None)
     ap.add_argument("--index", default=None,
-                    help="index dir for the component check (default for --all: <checkout>/index)")
+                    help="index dir for the component check (<file> mode only; --all reads no index)")
     ap.add_argument("--check-evidence", action="store_true")
     ap.add_argument("--root", default=ROOT)
     try:
@@ -344,20 +373,18 @@ def main(argv=None):
     if args.all == bool(args.files):
         print("usage: give either <file>... or --all", file=sys.stderr)
         return 2
-    if args.all and (args.stage is not None or args.check_evidence):
-        print("usage: --all takes neither --stage nor --check-evidence", file=sys.stderr)
+    if args.all and (args.stage is not None or args.check_evidence or args.index is not None):
+        print("usage: --all takes none of --stage, --check-evidence or --index; confirmed designs "
+              "are checked without an index", file=sys.stderr)
         return 2
-    index_dir = args.index or (DEFAULT_INDEX if args.all else None)
-    if args.all and not glob.glob(os.path.join(args.root, "impacts", "*", "design.json")):
-        index_dir = None  # no designs on record: nothing to check, so the index is not needed
     idx = None
-    if index_dir is not None:
-        idx, err = load_index(index_dir)
+    if args.index is not None:
+        idx, err = load_index(args.index)
         if err:
             print(err, file=sys.stderr)
             return 2
     if args.all:
-        results = _run_all(args.root, idx)
+        results = _run_all(args.root)
     else:
         results = _run_files(args.files, args.stage or "draft", args.root, idx, args.check_evidence)
     ok = all(not r["errors"] for r in results)

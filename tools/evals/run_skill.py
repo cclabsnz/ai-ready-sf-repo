@@ -38,7 +38,10 @@ seeds_accounted: every seed in scan/edge-seeds.json is an edgeCases or droppedSe
 For each of them, a missing story.json, edge-seeds.json or index fails.
 
 solution-design assertions (design_json_valid, recommends, must_reuse) read the design.json beside
-each --output.
+each --output. When --output is a design.md, must_label_every_claim also reads that design.json:
+every component of every option has a row under `## Components` (in its `### OPT-n:` subsection)
+whose last cell is the component's confidence label. A missing row or a different label fails, so
+the generic row check cannot pass on a table with no rows.
 design_json_valid: design.json passes tools/designs/validate_design.py as a draft, evidence checked,
 with the index from --index (every non-new component is an index node). The case's indexRoot names
 the root the operator builds that index from. A missing index fails.
@@ -289,6 +292,63 @@ def check_design_json(output_path, index_dir=None):
             for e in validate_design(doc, "draft", ROOT, idx=idx, check_evidence=True)]
 
 
+COMPONENTS_HEADING = "## Components"
+OPTION_HEADING_RE = re.compile(r"^### (OPT-[0-9]+):")
+UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
+def _unescape_cell(text):
+    return text.replace("\\|", "|").replace("\\\\", "\\")
+
+
+def design_component_rows(output_text):
+    """{(optionId, api): [last cell, ...]} for the backticked rows under `## Components`."""
+    rows, inside, opt = {}, False, None
+    for line in output_text.splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == COMPONENTS_HEADING
+            opt = None
+            continue
+        if not inside:
+            continue
+        m = OPTION_HEADING_RE.match(line)
+        if m:
+            opt = m.group(1)
+            continue
+        if opt and line.startswith("| `"):
+            cells = UNESCAPED_PIPE_RE.split(line)[1:-1]
+            m = BACKTICKED_RE.match(cells[0].strip()) if cells else None
+            if m:
+                rows.setdefault((opt, _unescape_cell(m.group(1))), []).append(cells[-1].strip())
+    return rows
+
+
+def check_design_labels(output_path, output_text):
+    """design.md beside its design.json: every component of every option has a row under
+    `## Components` whose last cell is that component's confidence label. Run under
+    must_label_every_claim when --output is a design.md, so the label check cannot pass on a
+    table that lost its rows."""
+    doc, err = load_sibling(output_path, "design.json", "must_label_every_claim")
+    if err:
+        return [err]
+    rows = design_component_rows(output_text)
+    fails = []
+    opts = doc.get("options") if isinstance(doc, dict) else None
+    for o in opts if isinstance(opts, list) else []:
+        comps = o.get("components") if isinstance(o, dict) else None
+        for c in comps if isinstance(comps, list) else []:
+            if not isinstance(c, dict):
+                continue
+            key = (o.get("id"), c.get("api"))
+            got = rows.get(key)
+            if not got:
+                fails.append(f"design.md: no Components row for {key[1]} under {key[0]}")
+            elif got[0] != c.get("confidence"):
+                fails.append(f"design.md: Components row for {key[1]} under {key[0]} is labelled "
+                             f"{got[0]!r}; design.json says {c.get('confidence')!r}")
+    return fails
+
+
 def recommended_option(output_path, name):
     """(recommended option dict, None) or (None, failure text)."""
     doc, err = load_sibling(output_path, "design.json", name)
@@ -362,6 +422,8 @@ def check(output_text, asserts, output_path=None, index_dir=None):
         unlabelled = [l for l in rows if not any(x in l for x in LABELS)]
         if unlabelled:
             fails.append(f"{len(unlabelled)} table row(s) without a confidence label")
+        if output_path and os.path.basename(output_path) == "design.md":
+            fails += check_design_labels(output_path, output_text)
     for path, line in EVIDENCE_RE.findall(output_text):
         full = os.path.join(ROOT, path)
         if not os.path.exists(full):

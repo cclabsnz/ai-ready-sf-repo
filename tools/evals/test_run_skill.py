@@ -511,7 +511,7 @@ def design(recommend="OPT-2", trigger_change="modify"):
                  "impactSummary": "one trigger"}],
             "recommendation": {"optionId": recommend, "reasons": ["r"]},
             "provenance": {"indexStamp": {"commit": "x"}, "frameworkVersion": "0.1.0",
-                           "model": "m", "assistantVersion": "unknown"}}
+                           "model": "m", "assistantVersion": "unknown", "sourceRoot": "demo/org"}}
 
 
 def design_dir(doc):
@@ -622,6 +622,45 @@ def test_review_is_not_reuse():
     fails = _reuse_fails_for("review")
     assert fails == ["must_reuse: recommended option OPT-2 does not reuse CaseTrigger"], fails
     assert _reuse_fails_for("modify") == []
+
+
+def _label_fails(md_text, doc=None):
+    tmp, out = design_dir(doc or design())
+    try:
+        return run_skill.check(md_text, {"must_label_every_claim": True}, out)
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_design_md_every_component_labelled():
+    sys.path.insert(0, os.path.join(run_skill.ROOT, "tools", "designs"))
+    from design_md import render_md
+    md = render_md(design())
+    assert _label_fails(md) == [], _label_fails(md)
+    # A label removed from a row: the generic check and the design check both report it.
+    trig_row = [l for l in md.splitlines() if l.startswith("| `CaseTrigger`")][0]
+    fails = _label_fails(md.replace(trig_row, trig_row.replace("| Confirmed |", "| |")))
+    assert fails == ["1 table row(s) without a confidence label",
+                     "design.md: Components row for CaseTrigger under OPT-2 is labelled ''; "
+                     "design.json says 'Confirmed'"], fails
+    # A row dropped from the table: the generic check alone would pass on what is left.
+    fails = _label_fails(md.replace(trig_row + "\n", ""))
+    assert fails == ["design.md: no Components row for CaseTrigger under OPT-2"], fails
+    # Every row dropped: never a vacuous pass.
+    no_rows = "\n".join(l for l in md.splitlines() if not l.startswith("| `"))
+    fails = _label_fails(no_rows)
+    assert len(fails) == 2 and all("no Components row" in f for f in fails), fails
+    # A wrong label (still one of the three) is caught against design.json.
+    fails = _label_fails(md.replace(trig_row, trig_row.replace("| Confirmed |", "| Inferred |")))
+    assert fails == ["design.md: Components row for CaseTrigger under OPT-2 is labelled 'Inferred'; "
+                     "design.json says 'Confirmed'"], fails
+    # An output that is not design.md (story-impact's impact.md beside a design.json) is unchanged.
+    tmp, out = design_dir(design())
+    try:
+        impact_md = os.path.join(tmp, "impact.md")
+        assert run_skill.check("no rows\n", {"must_label_every_claim": True}, impact_md) == []
+    finally:
+        shutil.rmtree(tmp)
 
 
 def main():

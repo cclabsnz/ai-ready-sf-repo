@@ -18,6 +18,10 @@ hand-edited. When the chosen option is the design's doNothing option, an impact 
 modify or delete component is refused (exit 1): "the chosen option is do nothing; the impact must
 not change components". review components are allowed. Otherwise it also writes design.json (status confirmed, confirmedBy, chosenOption)
 and design.md, re-rendered by tools/designs/design_md.py, and adds chosenOption to impact.json.
+On success it prints the design's provenance.sourceRoot and the --index it validated against.
+It does not check which source root that index was built from. Promotion is the last time the
+design's components are compared with an index: validate.py --all and validate_design.py --all
+check confirmed designs without one.
 The design files get the same rules as the impact: no symlinked source, data scan of the draft
 and of the final bytes, writes that never follow a symlink, and the same-storyId check (which
 looks at impact.json, story.json and design.json in other folders). Without design.json,
@@ -395,6 +399,11 @@ def main(argv=None):
     if has_design:
         print("Chosen option: %s (recommended: %s), confirmed by %s."
               % (chosen, design["recommendation"]["optionId"], who))
+        stamp = idx.get("stamp") if isinstance(idx.get("stamp"), dict) else {}
+        print("Design sourceRoot: '%s'. Validated against index: %s (commit %s). promote.py does not "
+              "check which source root that index was built from."
+              % (design["provenance"].get("sourceRoot"), a.index or DEFAULT_INDEX,
+                 str(stamp.get("commit", "unknown"))[:12]))
     print(dest)
     print("Next: git add %s and open a PR; a reviewer checks the impact before merge." % dest)
     return 0

@@ -58,7 +58,7 @@ def good():
         ],
         "recommendation": {"optionId": "OPT-2", "reasons": ["Reuses the existing service."]},
         "provenance": {"indexStamp": {"commit": "feedc0de"}, "frameworkVersion": "0.1.0",
-                       "model": "m", "assistantVersion": "unknown"},
+                       "model": "m", "assistantVersion": "unknown", "sourceRoot": "."},
     }
 
 
@@ -227,16 +227,48 @@ def test_type_mismatch_fails():
     assert has(errs, "differs from the index node type"), "null evidence still checks the type"
 
 
-def test_all_without_designs_needs_no_index():
+def test_all_reads_no_index():
     root = make_root()
     try:
-        code, out = run_cli(["--all", "--root", root, "--index", os.path.join(root, "missing")])
+        code, out = run_cli(["--all", "--root", root])
         assert code == 0 and json.loads(out) == {"ok": True, "results": []}, out
-        write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"), json.dumps(confirmed()))
-        code, out = run_cli(["--all", "--root", root, "--index", os.path.join(root, "missing")])
-        assert code == 2 and "cannot load index" in out, out
+        # A confirmed design whose modify component is no node anywhere, with no index on disk and
+        # evidence past the end of its file: --all checks schema and consistency only.
+        d = confirmed()
+        d["options"][1]["components"][0]["api"] = "GhostService"
+        d["options"][1]["components"][0]["evidence"] = CLS + ":99"
+        write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"), json.dumps(d))
+        code, out = run_cli(["--all", "--root", root])
+        assert code == 0 and json.loads(out)["ok"] is True, out
+        # --index with --all is bad usage: it would read as "checked against the index".
+        code, out = run_cli(["--all", "--root", root, "--index", os.path.join(root, "index")])
+        assert code == 2 and "--index" in out, out
+        # Schema and consistency still fail under --all.
+        d["chosenOption"] = "OPT-9"
+        write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"), json.dumps(d))
+        code, out = run_cli(["--all", "--root", root])
+        assert code == 1 and "chosenOption 'OPT-9' is not an option id" in out, out
     finally:
         shutil.rmtree(root)
+
+
+def test_source_root_lexical():
+    for good_value in (".", "demo/org", "demo/greenfield", "src"):
+        d = good()
+        d["provenance"]["sourceRoot"] = good_value
+        assert validate_design(d, "draft", ".") == [], good_value
+    for bad_value in ("", "  ", "/abs/path", "../outside", "demo/../org", "demo/org/", "./demo",
+                      "demo\\org", "C:/x", " demo", 7, None):
+        d = good()
+        d["provenance"]["sourceRoot"] = bad_value
+        assert has(validate_design(d, "draft", "."), "provenance.sourceRoot"), bad_value
+    d = good()
+    del d["provenance"]["sourceRoot"]
+    assert has(validate_design(d, "draft", "."), "provenance.sourceRoot is missing")
+    # Lexical only: a folder that does not exist under root is still a valid record.
+    d = confirmed()
+    d["provenance"]["sourceRoot"] = "moved/away"
+    assert validate_design(d, "confirmed", tempfile.gettempdir()) == []
 
 
 def test_new_component_with_evidence_fails():
@@ -342,10 +374,10 @@ def test_cli_files_and_all():
         assert code == 2, out
         # --all over impacts/*/design.json, confirmed
         write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"), json.dumps(confirmed()))
-        code, out = run_cli(["--all", "--root", root, "--index", os.path.join(root, "index")])
+        code, out = run_cli(["--all", "--root", root])
         assert code == 0, out
         write(os.path.join(root, "impacts", "DEMO-921-wrong-folder", "design.json"), json.dumps(confirmed()))
-        code, out = run_cli(["--all", "--root", root, "--index", os.path.join(root, "index")])
+        code, out = run_cli(["--all", "--root", root])
         assert code == 1 and "does not match storyId-slug" in out and "duplicate storyId" in out, out
         code, out = run_cli(["--all", "--stage", "draft", "--root", root])
         assert code == 2, out
@@ -356,11 +388,10 @@ def test_cli_files_and_all():
 def test_all_deep_nesting_reported_not_crash():
     root = make_root()
     try:
-        write(os.path.join(root, "index", "metadata.json"), json.dumps(IDX))
         write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"),
               "[" * 100000 + "]" * 100000)
-        p = subprocess.run([sys.executable, SCRIPT, "--all", "--root", root,
-                            "--index", os.path.join(root, "index")], capture_output=True, text=True)
+        p = subprocess.run([sys.executable, SCRIPT, "--all", "--root", root],
+                           capture_output=True, text=True)
         assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)
         out = json.loads(p.stdout)
         assert out["ok"] is False and "cannot read JSON" in out["results"][0]["errors"][0], out

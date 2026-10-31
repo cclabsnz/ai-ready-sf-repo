@@ -1,2 +1,2 @@
 {"id": "DEMO-202", "slug": "round-robin-assignment", "indexRoot": "demo/org", "input": "DEMO-202 Round-robin case assignment. Add round-robin assignment for new cases. Squad: Service Ops",
- "assert": {"design_json_valid": true, "must_reuse": ["CaseAssignmentService"]}}
+ "assert": {"design_json_valid": true, "must_label_every_claim": true, "must_reuse": ["CaseAssignmentService"]}}

@@ -599,7 +599,7 @@ def design_doc():
              "impactSummary": "One object is added."}],
         "recommendation": {"optionId": "OPT-2", "reasons": ["Reuses the existing service."]},
         "provenance": {"indexStamp": {"commit": "feedc0de"}, "frameworkVersion": "0.1.0",
-                       "model": "m", "assistantVersion": "unknown"}}
+                       "model": "m", "assistantVersion": "unknown", "sourceRoot": "."}}
 
 
 def design_impact(option="OPT-2", recommended=True):
@@ -674,6 +674,8 @@ def case_promote_with_design_records_choice():
     assert "provisional" not in text, text
     assert read_bytes(os.path.join(dest, "impact.md")) == MD.encode("utf-8")
     assert "Chosen option: OPT-2 (recommended: OPT-2), confirmed by Service Ops lead." in out, out
+    assert ("Design sourceRoot: '.'. Validated against index: %s (commit feedc0de). promote.py does "
+            "not check which source root that index was built from." % os.path.join(root, "index")) in out, out
     # An owner who picks another option promotes once the impact assesses that option.
     root = make_design_root(impact=design_impact("OPT-3", recommended=False))
     code, out = design_run(root, "--option", "OPT-3")
@@ -870,6 +872,73 @@ def case_impact_over_existing_impact_needs_replace():
     code, out = run(root, "--replace")
     assert code == 0, out
     assert read_bytes(os.path.join(dest, "story.json")) == b'{"keep": 1}\n'
+
+
+VALIDATE = os.path.join(HERE, "validate.py")
+VALIDATE_DESIGN = os.path.join(REPO, "tools", "designs", "validate_design.py")
+BUILD_INDEX = os.path.join(REPO, "tools", "index", "build_index.py")
+OBJ = "force-app/main/default/objects/WidgetSize__c/WidgetSize__c.object-meta.xml"
+
+
+def _py(*args):
+    p = subprocess.run([sys.executable] + list(args), capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
+def _rebuild_index(root):
+    """Build a real index from the temp root's source into <root>/index (absolute --out)."""
+    code, out = _py(BUILD_INDEX, "--root", root, "--out", os.path.join(root, "index"))
+    assert code == 0, out
+    return load(os.path.join(root, "index", "metadata.json"))
+
+
+def _all_checks_pass(root):
+    for script in (VALIDATE, VALIDATE_DESIGN):
+        code, out = _py(script, "--all", "--root", root)
+        assert code == 0 and json.loads(out)["ok"] is True, (script, out)
+
+
+@story_cleanup
+def case_confirmed_design_valid_after_code_lands():
+    """The owner confirms OPT-3 (WidgetSize__c, changeType new). The object then lands in the
+    source and the index is rebuilt: the confirmed records stay valid under both --all checks."""
+    root = make_design_root(impact=design_impact("OPT-3", recommended=False))
+    code, out = design_run(root, "--option", "OPT-3")
+    assert code == 0, out
+    _all_checks_pass(root)
+    write(os.path.join(root, OBJ), '<?xml version="1.0" encoding="UTF-8"?>\n'
+          '<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">\n'
+          '    <label>Widget Size</label>\n</CustomObject>\n')
+    idx = _rebuild_index(root)
+    assert "WidgetSize__c" in idx["nodes"], sorted(idx["nodes"])
+    _all_checks_pass(root)
+    # The rebuilt index does hold the clash: the same record checked against it at draft time
+    # (file mode with --index) is refused, so the --all pass above is not vacuous.
+    code, out = _py(VALIDATE_DESIGN, os.path.join(root, DDEST, "design.json"), "--stage", "confirmed",
+                    "--root", root, "--index", os.path.join(root, "index"))
+    assert code == 1 and "'WidgetSize__c' (changeType new) already exists as index node" in out, out
+
+
+@story_cleanup
+def case_confirmed_design_valid_after_delete_ships():
+    """The owner confirms an option that deletes WidgetService. The class is then removed and the
+    index rebuilt: both --all checks still pass."""
+    design = design_doc()
+    design["options"][1]["components"][0]["changeType"] = "delete"
+    design["options"][1]["title"] = "Retire WidgetService"
+    imp = design_impact("OPT-2")
+    imp["components"][0]["changeType"] = "delete"
+    root = make_design_root(impact=imp, design=design)
+    code, out = design_run(root)
+    assert code == 0, out
+    _all_checks_pass(root)
+    os.remove(os.path.join(root, CLS))
+    idx = _rebuild_index(root)
+    assert "WidgetService" not in idx["nodes"], sorted(idx["nodes"])
+    _all_checks_pass(root)
+    code, out = _py(VALIDATE_DESIGN, os.path.join(root, DDEST, "design.json"), "--stage", "confirmed",
+                    "--root", root, "--index", os.path.join(root, "index"))
+    assert code == 1 and "'WidgetService' (changeType delete) is not a node in the index" in out, out
 
 
 def main():

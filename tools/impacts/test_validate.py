@@ -268,17 +268,15 @@ def _design(chosen="OPT-2"):
              "impactSummary": "One class."}],
         "recommendation": {"optionId": "OPT-2", "reasons": ["Reuse."]},
         "provenance": {"indexStamp": {"commit": "feedc0de"}, "frameworkVersion": "0.1.0",
-                       "model": "m", "assistantVersion": "unknown"}}
+                       "model": "m", "assistantVersion": "unknown", "sourceRoot": "."}}
 
 
 def _design_root(design=None, impact=None):
+    """A temp root with no index at all: --all never reads one."""
     os.makedirs(CTX, exist_ok=True)
     root = tempfile.mkdtemp(prefix="validate_design_all_", dir=CTX)
     atexit.register(shutil.rmtree, root, True)
     write(os.path.join(root, CLS), "public with sharing class WidgetService {}\n")
-    write(os.path.join(root, "index", "metadata.json"), json.dumps(
-        {"stamp": {"commit": "feedc0de"}, "edges": [],
-         "nodes": {"WidgetService": {"type": "ApexClass", "path": CLS}}}))
     folder = os.path.join(root, "impacts", "DEMO-201-premium-escalation")
     write(os.path.join(folder, "impact.json"), json.dumps(impact or promoted_with_design()))
     if design is not False:
@@ -294,37 +292,37 @@ def _all(root, *extra):
 
 def test_all_validates_design_beside_impact():
     root = _design_root()
-    idx = os.path.join(root, "index")
-    code, out = _all(root, "--index", idx)
+    code, out = _all(root)
     assert code == 0, out
     assert "design.json" in out, out
-    # A modify component missing from the index fails the confirmed design check.
+    # No index check on a confirmed design: a modify component that is no node anywhere (there is
+    # no index in the root) and evidence past the end of its file both pass --all.
     d = _design()
     d["options"][1]["components"][0]["api"] = "GhostService"
-    code, out = _all(_design_root(design=d), "--index", idx)
-    assert code == 1 and "GhostService" in out, out
+    d["options"][1]["components"][0]["evidence"] = CLS + ":99"
+    code, out = _all(_design_root(design=d))
+    assert code == 0, out
     # A draft design on record fails: designs beside impacts are confirmed.
     d = _design()
     d["status"] = "draft"
-    code, out = _all(_design_root(design=d), "--index", idx)
+    code, out = _all(_design_root(design=d))
     assert code == 1 and "status 'draft'" in out, out
+    # Schema still fails: a malformed evidence string and a missing sourceRoot.
+    d = _design()
+    d["options"][1]["components"][0]["evidence"] = "no-colon"
+    del d["provenance"]["sourceRoot"]
+    code, out = _all(_design_root(design=d))
+    assert code == 1 and "is not 'path:line'" in out and "provenance.sourceRoot is missing" in out, out
     # The design's chosenOption agrees with the impact's.
-    code, out = _all(_design_root(design=_design("OPT-1")), "--index", idx)
+    code, out = _all(_design_root(design=_design("OPT-1")))
     assert code == 1 and "differs from the impact's chosenOption" in out, out
     # An impact with chosenOption and no design beside it.
-    code, out = _all(_design_root(design=False), "--index", idx)
+    code, out = _all(_design_root(design=False))
     assert code == 1 and "no design.json is beside the impact" in out, out
-    # An unreadable index is exit 2; with no design on record the index is not needed.
-    code, out = _all(root, "--index", os.path.join(root, "missing"))
-    assert code == 2 and "cannot load index" in out, out
-    imp = promoted_with_design()
-    for k in ("designOption", "chosenOption"):
-        del imp[k]
-    del imp["provenance"]["recommendedBy"]
-    code, out = _all(_design_root(design=False, impact=imp), "--index", os.path.join(root, "missing"))
-    assert code == 0, out
-    # --index only with --all.
-    p = subprocess.run([sys.executable, CLI, os.path.join(root, "x.json"), "--index", idx],
+    # --index is not an option of validate.py any more, with or without --all.
+    code, out = _all(root, "--index", os.path.join(root, "index"))
+    assert code == 2, out
+    p = subprocess.run([sys.executable, CLI, os.path.join(root, "x.json"), "--index", "index"],
                        capture_output=True, text=True)
     assert p.returncode == 2, p.stderr
 
@@ -341,21 +339,19 @@ def test_all_deep_nesting_reported_not_crash():
     root = _design_root()
     write(os.path.join(root, "impacts", "DEMO-201-premium-escalation", "design.json"),
           "[" * 100000 + "]" * 100000)
-    code, out = _all(root, "--index", os.path.join(root, "index"))
+    code, out = _all(root)
     assert code == 1 and "cannot read JSON" in out and "Traceback" not in out, out
 
 
 def test_all_do_nothing_choice_with_changes():
-    idx_root = _design_root()
-    idx = os.path.join(idx_root, "index")
     imp = promoted_with_design()
     imp["designOption"] = imp["chosenOption"] = "OPT-1"
     del imp["provenance"]["recommendedBy"]
-    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp), "--index", idx)
+    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp))
     assert code == 1, out
     assert "the chosen option is do nothing; the impact must not change components" in out, out
     imp["components"][0]["changeType"] = "review"
-    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp), "--index", idx)
+    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp))
     assert code == 0, out
 
 

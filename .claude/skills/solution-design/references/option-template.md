@@ -30,6 +30,10 @@ Rules the writer enforces (`tools/designs/validate_design.py`):
 - A `new` component has `evidence: null` and is not already a node in the index (use `modify` or `review` for one that is).
 - Every option has at least one trade-off; `criterion` comes from `trade-off-criteria.md`.
 
+These index rules are checked when the writer runs and again at promotion. Once a design is confirmed, `validate_design.py --all` checks only its schema and consistency, so the record stays valid after its `new` components land.
+
+**Greenfield: no standard objects.** A greenfield source root (`demo/greenfield`) has an empty index, so it has no node for a standard object such as `Case` either. Do not list `Case` as `modify` or `review` there; the writer refuses it as "not a node in the index". Put the link on a `new` component (for example, a `new` lookup field `Warranty_Claim__c.Case__c`, type `CustomField`, confidence `Inferred`) and state the dependency on the standard object in a trade-off note.
+
 The do-nothing option:
 
 ```json

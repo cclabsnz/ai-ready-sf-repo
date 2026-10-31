@@ -114,7 +114,9 @@ def test_writes_valid():
         assert validate_design(doc, "draft", root, idx=idx, check_evidence=True) == [], doc
         assert doc["status"] == "draft" and doc["schemaVersion"] == 1, doc
         assert doc["provenance"] == {"indexStamp": IDX["stamp"], "frameworkVersion": "0.1.0",
-                                     "model": "m-1", "assistantVersion": "cc-2"}, doc["provenance"]
+                                     "model": "m-1", "assistantVersion": "cc-2",
+                                     "sourceRoot": "."}, doc["provenance"]
+        assert printed["sourceRoot"] == ".", printed
         assert "confirmedBy" not in doc and "chosenOption" not in doc, doc
         md = read(os.path.join(out_dir(root), "design.md"))
         for heading in ("## Options", "## Trade-offs", "## Recommendation", "## Components"):
@@ -217,7 +219,7 @@ def test_root_never_supplies_code():
     tmp, d = draft_file(good_draft())
     for rel in ("tools/impacts/validate.py", "tools/impacts/safe_write.py",
                 "tools/designs/validate_design.py", "tools/designs/design_md.py",
-                "tools/stories/validate_story.py",
+                "tools/stories/validate_story.py", "tools/config/framework_config.py",
                 "tools/index/query.py"):
         write(os.path.join(root, rel), PLANT)
     try:
@@ -329,9 +331,54 @@ def _full(status="draft", **extra):
     doc = good_draft()
     doc.update({"schemaVersion": 1, "status": status,
                 "provenance": {"indexStamp": IDX["stamp"], "frameworkVersion": "0.1.0", "model": "m",
-                               "assistantVersion": "unknown"}})
+                               "assistantVersion": "unknown", "sourceRoot": "."}})
     doc.update(extra)
     return doc
+
+
+def test_source_root_from_config():
+    """No --source-root: the configured sourceRoot, read through this checkout's framework_config."""
+    root = make_root()
+    tmp, d = draft_file(good_draft())
+    try:
+        os.makedirs(os.path.join(root, "demo", "greenfield"))
+        write(os.path.join(root, ".ai-framework.json"),
+              json.dumps({"startingPoint": "greenfield", "sourceRoot": "./demo/greenfield/"}))
+        code, out = run(root, d)
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "design.json")))
+        assert doc["provenance"]["sourceRoot"] == "demo/greenfield", doc["provenance"]
+        assert json.loads(out)["sourceRoot"] == "demo/greenfield", out
+        # An invalid config is exit 2 and writes nothing.
+        cleanup(os.path.join(root, "ai-context"))
+        write(os.path.join(root, ".ai-framework.json"), json.dumps({"sourceRoot": "../elsewhere"}))
+        code, out = run(root, d)
+        assert code == 2 and "sourceRoot" in out and "nothing written" in out, out
+        assert not os.path.exists(os.path.join(root, "ai-context")), "files were created"
+    finally:
+        cleanup(root, tmp)
+
+
+def test_source_root_flag():
+    root = make_root()
+    tmp, d = draft_file(good_draft())
+    outside = tempfile.mkdtemp(prefix="write_design_outside_")
+    try:
+        os.makedirs(os.path.join(root, "demo", "org"))
+        code, out = run(root, d, extra=["--source-root", "demo/org"])
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "design.json")))
+        assert doc["provenance"]["sourceRoot"] == "demo/org", doc["provenance"]
+        cleanup(os.path.join(root, "ai-context"))
+        symlink(outside, os.path.join(root, "linked"))
+        for bad, text in (("../x", "resolves outside --root"), (outside, "not a path relative"),
+                          ("missing/dir", "not a directory"), ("linked", "resolves outside --root"),
+                          ("", "not a path relative")):
+            code, out = run(root, d, extra=["--source-root", bad])
+            assert code == 2 and text in out and "nothing written" in out, (bad, out)
+            assert not os.path.exists(os.path.join(root, "ai-context")), bad
+    finally:
+        cleanup(root, tmp, outside)
 
 
 def test_draft_md_states_provisional_recommendation():
