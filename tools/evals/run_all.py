@@ -60,7 +60,7 @@ from safe_write import checkout_out_dir, write_nofollow  # noqa: E402
 
 MODEL = "claude-sonnet-5-5"
 DEFAULT_N = 5
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\Z")
 
 
 def default_runner(cmd, cwd):
@@ -155,6 +155,8 @@ def main(argv=None, runner=None, root=None):
         return usage("--n is %d; it is at least 1" % a.n)
     if not a.model.strip():
         return usage("--model is empty")
+    if a.model.startswith("-"):
+        return usage("--model '%s' starts with '-'; a model id never does" % a.model)
     case_path = os.path.join(CHECKOUT, "framework", "skills", skill, "evals", "cases", case + ".json")
     try:
         with open(case_path, encoding="utf-8") as fh:

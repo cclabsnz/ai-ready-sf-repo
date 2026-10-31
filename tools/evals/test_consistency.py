@@ -256,10 +256,79 @@ def case_bad_usage_and_mixed_kinds_exit_2():
         assert call([both])[0] == 2
         assert call([])[0] == 2
         assert call([os.path.join(t.base, "missing")])[0] == 2
-        bad = t.run(5, "impact.json", impact())
-        t.text("run-5/impact.json", "{not json")
-        code, _, err = call([bad])
-        assert code == 2 and "Traceback" not in err, err
+        assert call([c, "--diff-names", os.path.join(t.base, "no-such-file")])[0] == 2
+    finally:
+        t.close()
+
+
+def case_unreadable_record_is_an_invalid_run():
+    t = Tree()
+    try:
+        good = [t.run(i, "impact.json", impact()) for i in range(1, 4)]
+        bodies = ("{not json", "", "[" * 100000, "[1, 2]")
+        for j, body in enumerate(bodies, 10):
+            bad = t.run(j, "impact.json", impact())
+            t.text("run-%d/impact.json" % j, body)
+            code, out, err = call(good + [bad, "--text"])
+            r = as_json(out)
+            assert code == 0 and "Traceback" not in err, (body[:10], code, err)
+            assert r["identical"] == 3 and r["invalidRuns"] == [4], (body[:10], r)
+            assert all(not f["agree"] and f["invalidRuns"] == [4] and f["values"][3] is None
+                       for f in r["fields"].values()), r
+            row = [l for l in out.splitlines() if l.startswith("components ")][0]
+            assert row.split()[1:] == ["=", "=", "=", "inv", "no"], row
+            assert out.rstrip("\n").splitlines()[-1] == "3/4 identical", out
+    finally:
+        t.close()
+
+
+def case_null_never_counts_as_agreement():
+    t = Tree()
+    try:
+        dirs = []
+        for i in range(1, 6):
+            d = t.run(i, "impact.json", {})
+            t.text("run-%d/impact.json" % i, "[]")
+            dirs.append(d)
+        code, out, _ = call(dirs + ["--text"])
+        r = as_json(out)
+        assert code == 0 and r["identical"] == 0 and r["invalidRuns"] == [1, 2, 3, 4, 5], r
+        assert not any(f["agree"] for f in r["fields"].values()), r
+        assert out.rstrip("\n").splitlines()[-1] == "0/5 identical", out
+        # one malformed field: that run is invalid, the field disagrees, the others still agree
+        broken = impact()
+        broken["decisions"] = "no"
+        d2 = [t.run(i, "impact.json", impact()) for i in range(6, 8)] + [t.run(8, "impact.json", broken)]
+        r = consistency.compare(d2)
+        assert r["identical"] == 2 and r["invalidRuns"] == [3], r
+        assert not r["fields"]["decisions"]["agree"] and r["fields"]["components"]["agree"], r
+        # all runs malformed the same way: still no agreement
+        r = consistency.compare([t.run(9, "impact.json", broken), t.run(10, "impact.json", broken)])
+        assert r["identical"] == 0 and not r["fields"]["decisions"]["agree"], r
+    finally:
+        t.close()
+
+
+def case_diff_names_encodings():
+    t = Tree()
+    try:
+        d1 = t.run(1, "change.json", change())
+        d2 = t.run(2, "change.json", change())
+        d3 = t.run(3, "change.json", change())
+        p1 = t.text("plain.txt", "force-app/a.cls\nforce-app/b.cls\n")
+        p2 = os.path.join(t.base, "bom8.txt")
+        with open(p2, "wb") as fh:
+            fh.write(b"\xef\xbb\xbfforce-app/a.cls\r\nforce-app/b.cls\r\n")
+        p3 = os.path.join(t.base, "utf16.txt")
+        with open(p3, "wb") as fh:
+            fh.write("force-app/b.cls\r\nforce-app/a.cls\r\n".encode("utf-16"))
+        r = consistency.compare([d1, d2, d3], [p1, p2, p3])
+        assert r["fields"]["filesTouched"]["agree"] and r["identical"] == 3, r
+        p4 = os.path.join(t.base, "bad.txt")
+        with open(p4, "wb") as fh:
+            fh.write(b"force-app/\xff\xfe.cls\n")
+        r = consistency.compare([d1, d2], [p1, p4])
+        assert r["fields"]["filesTouched"]["values"][1] is None and r["invalidRuns"] == [2], r
     finally:
         t.close()
 
@@ -272,6 +341,7 @@ def case_malformed_record_is_drift_not_error():
         code, out, _ = call([t.run(1, "impact.json", impact()), t.run(2, "impact.json", broken)])
         r = as_json(out)
         assert code == 0 and r["fields"]["components"]["values"][1] is None and r["identical"] == 1, r
+        assert r["invalidRuns"] == [2] and not r["fields"]["components"]["agree"], r
     finally:
         t.close()
 

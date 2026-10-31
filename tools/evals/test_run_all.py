@@ -137,6 +137,21 @@ def case_bad_usage_exits_2_without_running():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_name_and_model_checks():
+    assert run_all.NAME_RE.match("story-impact") and not run_all.NAME_RE.match("story-impact\n")
+    root = tmp_root()
+    try:
+        for argv in (["--case", "story-impact\n/004-escalation-hops-3"],
+                     ["--case", "story-impact/004-escalation-hops-3\n"],
+                     ["--case", CASE, "--model=--dangerously-skip-permissions"],
+                     ["--case", CASE, "--model=-x"]):
+            fake = Fake()
+            code, _, err = call(argv + ["--n", "1"], fake, root)
+            assert code == 2 and fake.calls == [] and fake.version_calls == [], (argv, code, err)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def case_existing_run_folder_refused():
     root = tmp_root()
     try:
