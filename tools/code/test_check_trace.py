@@ -51,6 +51,9 @@ def read_tests(root, paths):
                 out[p] = fh.read(MAX_READ)
     return out
 
+def source_test_paths(paths):
+    return [p for p in paths if not p.endswith("-meta.xml")]
+
 def criteria_problem(criteria):
     if not criteria:
         return "STUB empty criteria"
@@ -204,6 +207,52 @@ def case_id_only_in_meta_does_not_cover():
         assert code == 1 and doc["missingCriteria"] == ["AC-2"], doc
 
 
+def case_meta_exclusion_comes_from_the_core():
+    # check_trace has no exclusion of its own: it asks the core's source_test_paths, the helper the guard's
+    # tests-first rule uses. A stub whose helper drops every path leaves every criterion missing, even with the
+    # ids in a plain test file; a stub that keeps every path lets an id in a -meta.xml count.
+    meta = TEST_A + "-meta.xml"
+    pkg = {"schemaVersion": 1, "storyId": STORY, "slug": "sample-change",
+           "criteria": [{"id": "AC-1"}, {"id": "AC-2"}],
+           "scope": {"modify": [], "create": [], "tests": [TEST_A, meta]}}
+    none_core = os.path.join(TMP, "none_paths_core.py")
+    write(TMP, "none_paths_core.py", STUB.replace('if not p.endswith("-meta.xml")', "if False"))
+    root = make_root({TEST_A: "// AC-1 AC-2\n", meta: "<x/>\n"}, pkg=pkg)
+    code, doc = run_json(["--skeletons", STORY, "--root", root], core=none_core)
+    assert code == 1 and doc["missingCriteria"] == ["AC-1", "AC-2"], doc
+    assert doc["missingTestFiles"] == [], doc  # the files still exist; only coverage changed
+    all_core = os.path.join(TMP, "all_paths_core.py")
+    write(TMP, "all_paths_core.py", STUB.replace('if not p.endswith("-meta.xml")', ""))
+    root = make_root({TEST_A: "// AC-1\n", meta: "<!-- AC-2 -->\n"}, pkg=pkg)
+    code, doc = run_json(["--skeletons", STORY, "--root", root], core=all_core)
+    assert code == 0 and doc["missingCriteria"] == [], doc
+
+
+def case_core_without_source_test_paths_exits_2():
+    old = os.path.join(TMP, "no_helper_core.py")
+    write(TMP, "no_helper_core.py", STUB.replace("def source_test_paths(", "def _unused_paths("))
+    root = make_root({TEST_A: "// AC-1\n", TEST_B: "// AC-2\n"})
+    code, out, err = run([STORY, "--root", root], core=old)
+    assert code == 2 and "source_test_paths" in err and "Traceback" not in err, (code, err)
+
+
+def case_core_loaded_without_bytecode():
+    # The core is compiled from source, as the guard does: loading it writes no __pycache__ beside it,
+    # even with bytecode writing switched on.
+    folder = tempfile.mkdtemp(prefix="corebc_", dir=TMP)
+    core = os.path.join(folder, "trace_core.py")
+    write(folder, "trace_core.py", STUB)
+    root = make_root({TEST_A: "// AC-1\n", TEST_B: "// AC-2\n"})
+    old = sys.dont_write_bytecode
+    sys.dont_write_bytecode = False
+    try:
+        code, doc = run_json([STORY, "--root", root], core=core)
+    finally:
+        sys.dont_write_bytecode = old
+    assert code == 0, doc
+    assert sorted(os.listdir(folder)) == ["trace_core.py"], os.listdir(folder)
+
+
 def case_unknown_ref_fails():
     root = make_root({TEST_A: "// AC-1\n", TEST_B: "// AC-2 EC-4\n"})
     code, doc = run_json([STORY, "--root", root])
@@ -336,12 +385,26 @@ def case_symlinked_test_escaping_root_exits_2():
 def case_real_core_when_present():
     if not os.path.isfile(REAL_CORE):
         raise Skip("tools/guard/trace_core.py is absent (WS8 guard patch not applied)")
+    # The AC-1 / AC-10 boundary, both ways. AC-1 is referenced (AC-10 does not hide it), so --skeletons passes;
+    # AC-10 is not in a package holding AC-1 and AC-2, so the full check reports it as an unknown reference.
     root = make_root({TEST_A: "// AC-1 and AC-10\n", TEST_B: "// AC-2\n"})
+    code, doc = run_json(["--skeletons", STORY, "--root", root], core=None)
+    assert code == 0 and doc["ok"] is True and doc["missingCriteria"] == [], doc
     code, doc = run_json([STORY, "--root", root], core=None)
-    assert code == 0 and doc["ok"] is True, doc
+    assert code == 1 and doc["ok"] is False, doc
+    assert doc["missingCriteria"] == [] and doc["unknownRefs"] == ["AC-10"], doc
+    # AC-10 alone does not satisfy AC-1.
     root = make_root({TEST_A: "// AC-10\n", TEST_B: "// AC-2\n"})
     code, doc = run_json(["--skeletons", STORY, "--root", root], core=None)
     assert code == 1 and doc["missingCriteria"] == ["AC-1"], doc
+    # The real core's meta exclusion: an id only in X_Test.cls-meta.xml covers nothing (the guard's rule too).
+    meta = TEST_A + "-meta.xml"
+    pkg = {"schemaVersion": 1, "storyId": STORY, "slug": "sample-change",
+           "criteria": [{"id": "AC-1"}, {"id": "AC-2"}],
+           "scope": {"modify": [], "create": [], "tests": [TEST_A, meta]}}
+    root = make_root({TEST_A: "// AC-1\n", meta: "<x>AC-2</x>\n"}, pkg=pkg)
+    code, doc = run_json(["--skeletons", STORY, "--root", root], core=None)
+    assert code == 1 and doc["missingCriteria"] == ["AC-2"] and doc["missingTestFiles"] == [], doc
 
 
 def main():

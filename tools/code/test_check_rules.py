@@ -244,6 +244,14 @@ def case_assert_true_flagged():
     assert only(wrap("    System.assert( TRUE, 'ok');"), "apex-no-assert-true") == [2]
 
 
+def case_assert_istrue_true_flagged():
+    # The Assert class spelling of the same no-op assertion.
+    assert only(wrap("    Assert.isTrue(true);"), "apex-no-assert-true") == [2]
+    assert only(wrap("    Assert . IsTrue( true , 'always');"), "apex-no-assert-true") == [2]
+    assert only(wrap("    Assert.isTrue(n > 0);\n    Assert.isTrue(trueish);\n    Assert.isFalse(true);"),
+                "apex-no-assert-true") == []
+
+
 def case_real_assert_ok():
     assert only(wrap("    System.assert(total > 0);\n    Assert.areEqual(2, n);"), "apex-no-assert-true") == []
 

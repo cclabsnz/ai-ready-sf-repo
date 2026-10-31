@@ -33,7 +33,7 @@ build_index.blank_apex (loaded from this checkout):
                             A SOQL for-loop header, for (X x : [SELECT ...]), is not in the body.
   apex-no-system-debug      System.debug(
   apex-no-seealldata        SeeAllData=true
-  apex-no-assert-true       System.assert(true
+  apex-no-assert-true       System.assert(true or Assert.isTrue(true
   apex-test-naming          an @IsTest class whose name does not end _Test
 
 A baseline entry is {rule, path, hash}: hash is the sha1 of the stripped line text, then "#<n>",
@@ -97,7 +97,7 @@ _LOOP = re.compile(r"\b(for|while)\s*\(", re.I)
 _DO = re.compile(r"\bdo\s*\{", re.I)
 _DEBUG = re.compile(r"\bSystem\s*\.\s*debug\s*\(", re.I)
 _SEEALLDATA = re.compile(r"\bSeeAllData\s*=\s*true\b", re.I)
-_ASSERT_TRUE = re.compile(r"\bSystem\s*\.\s*assert\s*\(\s*true\s*[,)]", re.I)
+_ASSERT_TRUE = re.compile(r"\b(?:System\s*\.\s*assert|Assert\s*\.\s*isTrue)\s*\(\s*true\s*[,)]", re.I)
 
 
 class Usage(Exception):

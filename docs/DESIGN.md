@@ -478,8 +478,8 @@ WS8 lets the assistant write Salesforce code, but only inside one story's confir
 
 - `check_rules.py` runs, and on the demo every finding is baselined (exit 0; the README shows the output).
 - `package.py` runs, but no package exists. `impacts/DEMO-202-round-robin-assignment/` holds only `impact.json` and `impact.md`, so `python3 tools/impacts/package.py DEMO-202` refuses with `story.json is missing; nothing written`. A package needs the owner to confirm the DEMO-202 story, design and impact first (`ai-context/OWNER-QUEUE.md` items 10 and 11 hold the demo and greenfield walkthroughs).
-- `check_trace.py` exits 2 with `trace core not found at <checkout>/tools/guard/trace_core.py; apply the WS8 guard patch (ai-context/ws8/patches)` (`tools/code/check_trace.py:40`). It exits 2 until the patch lands.
-- `start.py` exits 2 as well: first without a terminal, then because `tools/guard/scope_core.py` is missing (`tools/impacts/start.py:36-37`).
+- `check_trace.py` exits 2 with `trace core not found at <checkout>/tools/guard/trace_core.py; apply the WS8 guard patch (ai-context/ws8/patches)` (`tools/code/check_trace.py:42`). It exits 2 until the patch lands.
+- `start.py` exits 2 as well: first without a terminal, then because `tools/guard/scope_core.py` is missing (`tools/impacts/start.py:42-43`).
 - Build mode allows no source write. The applied guard has no scope (`active_scope` returns an empty list, `tools/guard/guard.py:368-369`), so a write under the source root is blocked with `no active story scope; run tools/impacts/start.py <storyId> (WS8)` (`tools/guard/guard.py:55`).
 
 ### The build package
@@ -494,7 +494,7 @@ It refuses (exit 1, naming the reason, nothing written) unless:
 - the impact's index stamp is not stale;
 - no component is a delete ("deletes are done by a human in this version");
 - `.ai-framework.json` names `sourceRoot` explicitly;
-- every derived path passes the guard's scope rules. `package.py` mirrors `scope_core`'s validation, and a drift check keeps the two equal.
+- every derived path passes the guard's scope rules. `package.py` mirrors `scope_core`'s validation, and a drift check keeps the two equal. The fixtures are shared, in `tools/impacts/scope_fixtures.json`. `tools/impacts/test_package.py` compares `validate_package` with `tools/guard/scope_core.py` over them, and prints SKIP while the core is absent. The guard patch's tests run the same comparison against `package.py`, loaded by path.
 
 **Stale** means the source root changed between the stamp commit and `HEAD`, with `impacts/` excluded so that committing the impact or the package never makes its own stamp stale. An unknown stamp commit also counts as stale.
 
@@ -522,7 +522,7 @@ No package is committed for the evals. A committed fixture carrying `confirmedBy
 - `apex-no-soql-dml-in-loop`
 - `apex-no-system-debug`
 - `apex-no-seealldata`
-- `apex-no-assert-true`
+- `apex-no-assert-true` (`System.assert(true` and `Assert.isTrue(true`)
 - `apex-test-naming`
 
 A SOQL for-loop header, `for (X x : [SELECT ...])`, is not a loop body.
@@ -540,14 +540,14 @@ A SOQL for-loop header, `for (X x : [SELECT ...])`, is not a loop body.
 
 - **`--skeletons`:** every `criteria[].id` is referenced by at least one existing `scope.tests` file.
 - **Without the flag:** it also requires that no `AC-n` or `EC-n` reference is one the package does not hold, and that every existing test file references at least one id.
-- **Ids in companion files:** an id found only in a `-meta.xml` companion covers nothing.
+- **Ids in companion files:** an id found only in a `-meta.xml` companion covers nothing. The core's `source_test_paths` decides which files those are, and the guard's tests-first rule uses the same helper.
 - **Exit codes:** 0 no gaps, 1 gaps or invalid criteria, 2 bad usage or nothing to check.
 
-**One implementation.** The matching lives in the guard-owned core, `tools/guard/trace_core.py`. It matches on word boundaries, so `AC-1` is not satisfied by `AC-10`. `check_trace.py` loads it by a path computed from its own location, so this check and the guard's tests-first rule are the same code. There is deliberately no flag to load another core: build mode may run this script, and a selectable core would run unseen code. This reverses the spec's "the guard calls `check_trace.py`", because a guard that runs maintain-writable code is weaker. The spec amendment is queued for the spec owner (`ai-context/OWNER-QUEUE.md` item 9). The core ships in the WS8 guard patch, so **`check_trace.py` runs only after the guard patch is applied**. Until then it exits 2.
+**One implementation.** The matching lives in the guard-owned core, `tools/guard/trace_core.py`. It matches on word boundaries, so `AC-1` is not satisfied by `AC-10`. `check_trace.py` loads it by a path computed from its own location, compiling the source as the guard does (no `.pyc` is read or written), so this check and the guard's tests-first rule are the same code. There is deliberately no flag to load another core: build mode may run this script, and a selectable core would run unseen code. This reverses the spec's "the guard calls `check_trace.py`", because a guard that runs maintain-writable code is weaker. The spec amendment is queued for the spec owner (`ai-context/OWNER-QUEUE.md` item 9). The core ships in the WS8 guard patch, so **`check_trace.py` runs only after the guard patch is applied**. Until then it exits 2.
 
 ### Entering build mode: `start.py`
 
-`python3 tools/impacts/start.py <storyId> [--root .]` is run by a human in a real terminal. It refuses without a TTY (exit 2: `run start.py yourself in a terminal; the assistant cannot start a build session`). It validates the package committed at `HEAD` through the guard's own reader, `tools/guard/scope_core.py`, and writes `ai-context/.active-story` (`<id>-<slug>`). Then it prints the env lines for the human to add under `env` in their git-ignored `.claude/settings.local.json`: `"AI_FRAMEWORK_MODE": "build"` and `"AI_FRAMEWORK_STORY": "<id>-<slug>"`. It never writes settings. The human then restarts Claude Code. Whether settings env reloads mid-session is not verified, so a restart is the safe instruction. To leave build mode, the human removes the lines and restarts. `.active-story` on its own has no effect outside build mode.
+`python3 tools/impacts/start.py <storyId> [--root <repo>]` is run by a human in a real terminal. `--root` defaults to the checkout holding the script, never the current directory. On a fresh clone it creates the git-ignored `ai-context/` as a real folder, and it refuses a symlinked one. The story folder is found with `git ls-tree -d`, so a file with the folder's name does not count. It refuses without a TTY (exit 2: `run start.py yourself in a terminal; the assistant cannot start a build session`). It validates the package committed at `HEAD` through the guard's own reader, `tools/guard/scope_core.py`, and writes `ai-context/.active-story` (`<id>-<slug>`). Then it prints the env lines for the human to add under `env` in their git-ignored `.claude/settings.local.json`: `"AI_FRAMEWORK_MODE": "build"` and `"AI_FRAMEWORK_STORY": "<id>-<slug>"`. It never writes settings. The human then restarts Claude Code. Whether settings env reloads mid-session is not verified, so a restart is the safe instruction. To leave build mode, the human removes the lines and restarts. `.active-story` on its own has no effect outside build mode.
 
 ### The scope lock and tests-first (after the WS8 guard patch)
 
@@ -560,7 +560,7 @@ This subsection describes the guard as the unapplied patch makes it (`ai-context
 5. **The package.** The package is read from `HEAD` and validated strictly. One bad entry rejects the whole package.
 6. **The exact match.** The written path must equal a `scope.modify`, `scope.create[].path` or `scope.tests` entry after `..` and symlinks are resolved. Otherwise the message says to file `ai-context/<id>-<slug>/scope-request.md`, re-assess and re-promote. The exact match replaces the old prefix match, under which `A.cls` also allowed `A.cls-meta.xml`.
 7. **Hard links.** An in-scope target with a link count above 1 is refused.
-8. **Tests first.** An in-scope path that is not in `scope.tests` stays blocked while any criterion id has no referencing `scope.tests` file in the work tree. The message names the missing ids. The read is bounded by the guard's deadline and a 16 MB total.
+8. **Tests first.** An in-scope path that is not in `scope.tests` stays blocked while any criterion id has no referencing `scope.tests` file in the work tree. A `-meta.xml` companion never counts as that file (`trace_core.source_test_paths`, shared with `check_trace.py`). The message names the missing ids. The read is bounded by the guard's deadline and a 16 MB total.
 
 The scope loads lazily, once per guard call. Git runs only after the tripwire's git-state check passes, and a git failure or timeout blocks.
 
@@ -610,11 +610,11 @@ The skill's eval cases are in `framework/skills/implement-story/evals/cases/`. N
 
 **In CI today** the workflow runs none of the WS8 scripts. The WS8 CI patch adds these steps:
 
-- **`guard-and-lint`:** `tools/code/test_check_trace.py`, `test_check_rules.py` and `test_write_change.py`, then `check_rules.py --from-config`. The last one fails the job on a finding the committed baseline lacks.
+- **`guard-and-lint`:** `tools/code/test_check_trace.py`, `test_check_rules.py` and `test_write_change.py`, `tools/impacts/test_package.py` and `test_start.py`, the builder's trajectory eval on its sample run (`tools/evals/run_agent.py --log framework/agents/evals/builder-sample-run.jsonl --spec framework/agents/evals/builder.json`), then `check_rules.py --from-config`, each as its own step. The last one fails the job on a finding the committed baseline lacks.
 - **`impact-checks`:** the base branch's `check_rules.py` checks the PR's source root and compares the PR's baseline with the base copy. A new finding, or a baseline that grew, fails the job.
 - **`impact-checks`:** the base branch's `check_trace.py` runs for each build package the PR adds or changes. It is report-only, following the default-severity rule.
 
-Neither the applied workflow nor the patch runs `tools/impacts/test_package.py` or `test_start.py`.
+The applied workflow runs neither `tools/impacts/test_package.py` nor `test_start.py`. The CI patch adds both.
 
 ### Honest limits
 
@@ -622,7 +622,12 @@ Neither the applied workflow nor the patch runs `tools/impacts/test_package.py` 
 - **The scope lock binds `build` mode only.** `maintain` already writes `demo/`, which holds this repo's source root, and runs arbitrary `tools/**.py`. Whether to exclude `sourceRoot` from `maintain` is owner decision 1 in `APPLY.md`.
 - **Tests-first is structural.** An id in a comment (`// AC-1`) satisfies it. Test quality stays a review and CI question.
 - **Committed at `HEAD` is not reviewed.** The guard proves only that the package is committed. `maintain` can make and commit a package, so PR review and CODEOWNERS are the guarantee. Requiring the package to match `origin/main` is optional and not done (owner decision 3).
-- **The done exits in `change.json` are the session's own report.** `write_change.py` does not run them; CI re-runs the checks.
+- **`change.json` is largely the session's own report.** These parts of it are self-reported:
+  - **The files touched.** `write_change.py` checks that each listed file is in scope, but not that the list matches what changed.
+  - **The done exits.** `write_change.py` does not run them; CI re-runs the checks.
+  - **The component of a modified file.** For a `scope.create` path, the component must equal the entry's `api` (`framework/skills/implement-story/scripts/write_change.py:227`). For a `scope.modify` or `scope.tests` path, any non-empty string passes (`:235-237`).
+
+  So the file-to-component map in `change.json` is not evidence. Repeatability work (WS3) compares the git diff of the build with the package scope, not with `change.json`.
 - **Not scope-checked:**
   - MCP tool path arguments.
   - `pnpm run format` and `pnpm run lint`, which run the adopter's own `package.json` scripts and may rewrite files outside scope (owner decision 5).
@@ -706,7 +711,7 @@ The index and control plane are built together in the first fortnight because th
 | `tools/onboard/` | `onboard.py` (existing or greenfield onboarding, knowledge stubs) and its test script | Starting points; see "Day-one workflow" |
 | `tools/designs/` | `validate_design.py` (the design schema), `design_md.py` (the design.md renderer shared by the writer and promotion), and test scripts for the validator and `write_design.py` | The design record; see "Day-one workflow" |
 | `tools/stories/` | `validate_story.py` (the story schema), `check_ac.py` (vague criteria), `vague_words.json`, and a test script for each plus one for `write_story.py` | The story record; see "Story refinement" |
-| `tools/impacts/` | `validate.py` (the record schema), `register.py` (overlaps, scope, view), `promote.py` (the human promotion step, impacts and stories), `render_register.py` (static HTML view), `pr_check.py` (code overlap and scope drift on a PR), `package.py` (the build package), `start.py` (a human starts a build session), `safe_write.py` (shared output checks for the skill writers, covered by the writer tests), and a test script for each of the others | The impact record and register; see "Impact record and register" |
+| `tools/impacts/` | `validate.py` (the record schema), `register.py` (overlaps, scope, view), `promote.py` (the human promotion step, impacts and stories), `render_register.py` (static HTML view), `pr_check.py` (code overlap and scope drift on a PR), `package.py` (the build package), `start.py` (a human starts a build session), `safe_write.py` (shared output checks for the skill writers, covered by the writer tests), `scope_fixtures.json` (the scope-rule fixtures the package and guard drift tests share), and a test script for each of the others | The impact record and register; see "Impact record and register" |
 | `impacts/` | `squads.json` and the promoted records, one `<storyId>-<slug>/` folder each | The register, in git; records enter through an ordinary PR that a reviewer checks |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |

@@ -11,10 +11,12 @@ checkout). Only files listed in scope.tests count as tests; a file counts by mem
   (full)        the same, plus no AC-n / EC-n reference that the package does not hold, plus every scope.tests
                 file that exists references at least one criterion id
 Files ending -meta.xml are metadata companions and cannot carry ids: an id found only in one covers no
-criterion (both modes), and they are exempt from the "references at least one id" rule.
+criterion (both modes), and they are exempt from the "references at least one id" rule. Which files those are is
+the core's source_test_paths, the same helper the guard's tests-first rule uses.
 
 Matching lives in the guard-owned core, <checkout>/tools/guard/trace_core.py, loaded by a path computed from this
-file, so this check and the guard's tests-first rule are one implementation. There is deliberately no flag or env
+file, so this check and the guard's tests-first rule are one implementation. The core's source is compiled into a
+fresh module, as the guard does, so no .pyc is read or written next to it. There is deliberately no flag or env
 var to load another core: build mode may run this script, and a selectable core would run unseen code. Tests pass
 a stub through main(argv, core_path=...). Matching is structural: an id in a comment counts.
 
@@ -27,19 +29,18 @@ Stdlib only. Offline. Writes nothing.
 """
 import argparse
 import glob
-import importlib.util
 import json
 import os
 import re
 import sys
+import types
 
 CHECKOUT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_CORE = os.path.join(CHECKOUT, "tools", "guard", "trace_core.py")
 STORY_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 MISSING_CORE = "trace core not found at %s; apply the WS8 guard patch (ai-context/ws8/patches)"
-CORE_API = ("read_tests", "criteria_problem", "missing_criteria", "unknown_refs")
-META_SUFFIX = "-meta.xml"
+CORE_API = ("read_tests", "source_test_paths", "criteria_problem", "missing_criteria", "unknown_refs")
 
 
 class Unusable(Exception):
@@ -54,9 +55,13 @@ def load_core(path):
     if not os.path.isfile(path):
         raise Unusable(MISSING_CORE % path)
     try:
-        spec = importlib.util.spec_from_file_location("trace_core", path)
-        core = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(core)
+        # Compiled from source into a fresh module, as the guard loads it: no .pyc is read or written, so a
+        # planted __pycache__ (git-ignored, invisible to the tripwire) can never stand in for the core.
+        with open(path, "rb") as fh:
+            source = fh.read()
+        core = types.ModuleType("trace_core")
+        core.__file__ = path
+        exec(compile(source, path, "exec"), core.__dict__)
     except Exception as exc:  # a broken core is unusable, not a traceback
         raise Unusable("trace core at %s cannot be loaded: %s" % (path, type(exc).__name__))
     absent = [name for name in CORE_API if not callable(getattr(core, name, None))]
@@ -116,9 +121,10 @@ def check(core, root, story, skeletons):
         raise Invalid("%s: %s" % (rel, problem))
     ids = [c["id"] for c in criteria]
     texts = core.read_tests(root, tests)
-    # Metadata companions (*-meta.xml) cannot carry ids: an id found only there covers no criterion,
-    # and they are exempt from the no-refs rule below.
-    source_texts = {t: v for t, v in texts.items() if not t.endswith(META_SUFFIX)}
+    # Metadata companions (*-meta.xml) cannot carry ids: an id found only there covers no criterion, and they
+    # are exempt from the no-refs rule below. The core decides which files those are, for the guard too.
+    sources = set(core.source_test_paths(tests))
+    source_texts = {t: v for t, v in texts.items() if t in sources}
     missing = core.missing_criteria(ids, source_texts)
     files = [{"path": t, "exists": t in texts, "refs": core.unknown_refs([], {t: texts[t]}) if t in texts else []}
              for t in tests]

@@ -2,27 +2,33 @@
 """Start a build session for one story. A human runs this from a real terminal.
 
 Usage:
-  start.py <storyId> [--root .]
+  start.py <storyId> [--root <repo>]
+
+--root defaults to this checkout (the repo holding this file), never the current directory.
 
 It validates the build package committed at git HEAD through the guard-owned reader,
 <checkout>/tools/guard/scope_core.py, writes ai-context/.active-story, and prints the two env entries the human
-pastes under "env" in .claude/settings.local.json. It never writes settings.
+pastes under "env" in .claude/settings.local.json. It never writes settings. On a fresh clone, where the
+git-ignored ai-context/ does not exist yet, it creates it as a real folder; a symlinked ai-context/ is refused.
 
 Order of checks: no TTY (stdin or stdout) exits 2; a missing core exits 2; a package the core refuses exits 1.
-The active story is the single impacts/<storyId>-*/ folder at HEAD (git ls-tree); zero or several refuse (exit 1).
+The active story is the single impacts/<storyId>-*/ folder at HEAD (git ls-tree -d, so a file of that name does
+not count); zero or several refuse (exit 1).
 
-The core is loaded by a path computed from this file. There is deliberately no flag or env var to load another
-core: a selectable core would run unseen code. Tests pass a stub through main(argv, core_dir=..., isatty=...).
+The core is loaded by a path computed from this file and compiled from source into a fresh module, as the guard
+does, so no .pyc is read or written beside it. There is deliberately no flag or env var to load another core: a
+selectable core would run unseen code. Tests pass a stub through main(argv, core_dir=..., isatty=...).
 
 Exit codes: 0 session started, 1 refused (no or several folders, package refused, cannot write), 2 bad usage,
-no terminal, or missing core. Stdlib only. Offline. Writes only ai-context/.active-story.
+no terminal, or missing core. Stdlib only. Offline. Writes only ai-context/.active-story (and ai-context/ itself
+when it is missing).
 """
 import argparse
-import importlib.util
 import os
 import re
 import subprocess
 import sys
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -53,9 +59,12 @@ def load_core(path):
     if not os.path.isfile(path):
         raise Unusable(MISSING_CORE % path)
     try:
-        spec = importlib.util.spec_from_file_location("scope_core", path)
-        core = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(core)
+        # Compiled from source, as the guard loads it: no .pyc is read or written next to the core.
+        with open(path, "rb") as fh:
+            source = fh.read()
+        core = types.ModuleType("scope_core")
+        core.__file__ = path
+        exec(compile(source, path, "exec"), core.__dict__)
     except Exception as exc:
         raise Unusable("scope core at %s cannot be loaded: %s" % (path, type(exc).__name__))
     if not callable(getattr(core, "read_package", None)):
@@ -65,7 +74,7 @@ def load_core(path):
 
 def active_story(root, story):
     """<storyId>-<slug> from the single impacts/<storyId>-*/ folder at HEAD."""
-    cmd = ["git", "-C", root] + register.GIT_SAFE + ["ls-tree", "--name-only", "HEAD", "impacts/"]
+    cmd = ["git", "-C", root] + register.GIT_SAFE + ["ls-tree", "-d", "--name-only", "HEAD", "impacts/"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=register._git_env())
     except (OSError, subprocess.SubprocessError) as exc:
@@ -86,6 +95,11 @@ def active_story(root, story):
 
 def write_active(root, active):
     ctx = os.path.join(root, "ai-context")
+    if not os.path.lexists(ctx):  # a fresh clone: ai-context/ is git-ignored, so it is not there yet
+        try:
+            os.mkdir(ctx)
+        except OSError as exc:
+            raise Refused("cannot create %s: %s" % (ctx, exc))
     if os.path.islink(ctx) or not os.path.isdir(ctx):
         raise Refused("%s is a symlink or not a directory" % ctx)
     try:
@@ -98,7 +112,7 @@ def main(argv=None, core_dir=None, isatty=None):
     """core_dir and isatty are for in-process tests only; no command-line flag or env var can set them."""
     ap = argparse.ArgumentParser(description="Start a build session from a committed package.", allow_abbrev=False)
     ap.add_argument("storyId")
-    ap.add_argument("--root", default=".", help="repo to read (default: the current directory)")
+    ap.add_argument("--root", default=CHECKOUT, help="repo to read (default: this checkout)")
     args = ap.parse_args(argv)
     try:
         if not (isatty or _tty)():

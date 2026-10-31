@@ -1,0 +1,2215 @@
+{
+ "about": "Shared scope-rule fixtures. tools/impacts/test_package.py and the guard's test_guard.py both run package.validate_package and tools/guard/scope_core.py over every case and require the same verdict, equal to accept. Setup: a temp folder holding src/ and elsewhere/, with src/link a symlink to elsewhere/. The active story is <storyId>-<slug>. A case with fill gets count generated entries (pattern % n) in scope[key]. Maintained by hand: change a case and its accept together; both drift tests enforce the agreement.",
+ "cases": [
+  {
+   "accept": true,
+   "name": "good",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "not-object",
+   "pkg": [],
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "schema-true",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": true,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "schema-float",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1.0,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "schema-2",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 2,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "schema-missing",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "story-bad-format",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "demo-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "slug-bad-format",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "Widget_Resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "scope-missing",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "scope-list",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": [],
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "modify-missing",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-not-list",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": {},
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "tests-str",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": "x"
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-empty",
+   "pkg": {
+    "criteria": [],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-missing",
+   "pkg": {
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-oq",
+   "pkg": {
+    "criteria": [
+     {
+      "id": "OQ-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-lower",
+   "pkg": {
+    "criteria": [
+     {
+      "id": "ac-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-dup",
+   "pkg": {
+    "criteria": [
+     {
+      "id": "AC-1"
+     },
+     {
+      "id": "AC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-str",
+   "pkg": {
+    "criteria": [
+     "AC-1"
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "criteria-noid",
+   "pkg": {
+    "criteria": [
+     {}
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-int",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      3
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-empty",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      ""
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-ctrl",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/a\u0001.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-del",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/a\u007f.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-bidi",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/a\u202e.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-backslash",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src\\a.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-abs",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "/src/force-app/main/default/classes/A.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-glob-star",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/*.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-glob-brace",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/{a}.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-dotdot",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/../x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-dot",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/./x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-empty-seg",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src//x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-trailing-slash",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/x/"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-outside",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "other/x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-src-prefix",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "srcx/x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-src-itself",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-dotgit",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/.git/config"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-codeowners",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/CODEOWNERS"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-dup-modify",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "entry-dup-tests",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": true,
+   "name": "cross-list-overlap",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/force-app/main/default/classes/A.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-str",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      "src/force-app/main/default/classes/A.cls"
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-no-path",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-empty-api",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "",
+       "path": "src/b.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-path-int",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": 1,
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-dup",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b.cls",
+       "type": "ApexClass"
+      },
+      {
+       "api": "B",
+       "path": "src/b.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "create-escape",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "impacts/b.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "fill": {
+    "count": 2001,
+    "key": "modify",
+    "pattern": "src/m%d.cls"
+   },
+   "name": "too-many",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": false,
+   "name": "symlinked-entry",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/link/x.cls"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": true,
+   "name": "extra-keys-ok",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "extra": {
+     "x": 1
+    },
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "src/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "src/force-app/main/default/classes/A.cls",
+      "src/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "src/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "src"
+  },
+  {
+   "accept": true,
+   "name": "good",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "force-app/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "force-app/force-app/main/default/classes/A.cls",
+      "force-app/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "force-app/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "."
+  },
+  {
+   "accept": false,
+   "name": "entry-outside",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "force-app/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "impacts/x.cls"
+     ],
+     "tests": [
+      "force-app/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "."
+  },
+  {
+   "accept": false,
+   "name": "entry-dotgit",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "force-app/b/B.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "force-app/.git/config"
+     ],
+     "tests": [
+      "force-app/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "."
+  },
+  {
+   "accept": false,
+   "name": "create-escape",
+   "pkg": {
+    "criteria": [
+     {
+      "examples": [
+       "e"
+      ],
+      "given": "g",
+      "id": "AC-1",
+      "then": "t",
+      "when": "w"
+     },
+     {
+      "id": "EC-1"
+     }
+    ],
+    "design": {},
+    "done": [],
+    "provenance": {},
+    "rules": [],
+    "schemaVersion": 1,
+    "scope": {
+     "create": [
+      {
+       "api": "B",
+       "path": "impacts/b.cls",
+       "type": "ApexClass"
+      }
+     ],
+     "modify": [
+      "force-app/force-app/main/default/classes/A.cls",
+      "force-app/force-app/main/default/classes/A.cls-meta.xml"
+     ],
+     "tests": [
+      "force-app/t/A_Test.cls"
+     ]
+    },
+    "slug": "widget-resize",
+    "storyId": "ZED-951"
+   },
+   "sourceRoot": "."
+  }
+ ],
+ "slug": "widget-resize",
+ "storyId": "ZED-951"
+}

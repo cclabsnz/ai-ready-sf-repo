@@ -119,7 +119,8 @@ BUNDLE_TYPES = ("LightningComponentBundle", "AuraDefinitionBundle")
 APEX_TYPES = ("ApexClass", "ApexTrigger")
 NEW_TYPES = ("ApexClass", "CustomField", "CustomObject", "LightningComponentBundle")
 
-# ---- the guard's scope rules (mirrors scope_core._validate; a drift check keeps the two equal) ----
+# ---- the guard's scope rules (mirrors scope_core._validate; a drift check keeps the two equal: test_package.py and the
+# guard's tests compare both over the shared fixtures in scope_fixtures.json) ----
 
 MAX_BLOB = 1024 * 1024
 MAX_ENTRIES = 2000

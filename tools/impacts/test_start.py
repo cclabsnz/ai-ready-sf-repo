@@ -166,6 +166,72 @@ def case_core_dir_flag_rejected():
     assert p.returncode == 2, p
 
 
+def case_creates_missing_ai_context():
+    # A fresh clone has no ai-context/ (it is git-ignored): start.py creates it as a real folder.
+    root = make_repo()
+    os.rmdir(os.path.join(root, "ai-context"))
+    code, out, err = run([STORY, "--root", root], core_dir=stub_dir())
+    assert code == 0, (code, err)
+    ctx = os.path.join(root, "ai-context")
+    assert os.path.isdir(ctx) and not os.path.islink(ctx), ctx
+    with open(os.path.join(ctx, ".active-story"), newline="") as fh:
+        assert fh.read() == ACTIVE + "\n"
+
+
+def case_symlinked_ai_context_refused():
+    root = make_repo()
+    elsewhere = tmpdir()
+    os.rmdir(os.path.join(root, "ai-context"))
+    os.symlink(elsewhere, os.path.join(root, "ai-context"))
+    code, out, err = run([STORY, "--root", root], core_dir=stub_dir())
+    assert code == 1 and "symlink" in err and out == "", (code, err)
+    assert os.listdir(elsewhere) == [], os.listdir(elsewhere)
+
+
+def case_file_named_like_a_folder_not_counted():
+    # git ls-tree -d: a committed file impacts/<storyId>-<slug> is not a package folder.
+    root = make_repo()
+    with open(os.path.join(root, "impacts", STORY + "-file-slug"), "w") as fh:
+        fh.write("not a folder\n")
+    git(root, "add", "impacts")
+    git(root, "commit", "-q", "-m", "a file")
+    code, out, err = run([STORY, "--root", root], core_dir=stub_dir())
+    assert code == 0 and "more than one" not in err, (code, err)
+    with open(os.path.join(root, "ai-context", ".active-story"), newline="") as fh:
+        assert fh.read() == ACTIVE + "\n"
+
+
+def case_default_root_is_the_checkout_not_cwd():
+    # Without --root, start.py reads this checkout, never the current directory. The temp repo holds a
+    # package for a story id that this checkout never has, so a cwd-based default would start a session there.
+    assert start.CHECKOUT == REPO, start.CHECKOUT
+    story, active = "ZZQ-9", "ZZQ-9-not-in-checkout"
+    root = make_repo(folders=(active,))
+    old = os.getcwd()
+    os.chdir(root)
+    try:
+        code, out, err = run([story], core_dir=stub_dir())
+    finally:
+        os.chdir(old)
+    assert code == 1 and "no impacts/ZZQ-9-*/ folder committed at HEAD" in err and out == "", (code, err)
+    assert not os.path.exists(os.path.join(root, "ai-context", ".active-story"))
+    p = subprocess.run([sys.executable, START, "--help"], capture_output=True, text=True)
+    assert p.returncode == 0 and "default: this checkout" in p.stdout, p.stdout
+
+
+def case_core_loaded_without_bytecode():
+    root = make_repo()
+    core_dir = stub_dir()
+    old = sys.dont_write_bytecode
+    sys.dont_write_bytecode = False
+    try:
+        code, _, err = run([STORY, "--root", root], core_dir=core_dir)
+    finally:
+        sys.dont_write_bytecode = old
+    assert code == 0, err
+    assert sorted(os.listdir(core_dir)) == ["scope_core.py"], os.listdir(core_dir)
+
+
 def case_real_core():
     if not os.path.isfile(REAL_CORE):
         raise Skip("tools/guard/scope_core.py absent (guard patch not applied)")

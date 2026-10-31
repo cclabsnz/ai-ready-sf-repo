@@ -565,6 +565,83 @@ def case_validate_package_matches_guard_rules():
         dict(good, scope={"modify": ["impacts/x.cls"], "create": [], "tests": []}), "."))
 
 
+FIXTURES = os.path.join(HERE, "scope_fixtures.json")
+SCOPE_CORE = os.path.join(REPO, "tools", "guard", "scope_core.py")
+
+
+def _package_mod():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("package_mod", PACKAGE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fixture_runs():
+    """[(case, pkg, top)] for the shared scope fixtures, in a temp folder holding src/, elsewhere/ and the
+    src/link symlink the fixtures expect. The symlink case is left out where symlinks cannot be made."""
+    import copy
+    with open(FIXTURES, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    os.makedirs(CTX, exist_ok=True)
+    top = tempfile.mkdtemp(prefix="scope_fx_", dir=CTX)
+    _ROOTS.append(top)
+    os.makedirs(os.path.join(top, "src"))
+    os.makedirs(os.path.join(top, "elsewhere"))
+    try:
+        os.symlink(os.path.join(top, "elsewhere"), os.path.join(top, "src", "link"))
+        can_link = True
+    except (OSError, NotImplementedError):
+        can_link = False
+    top = os.path.realpath(top)
+    runs = []
+    for case in doc["cases"]:
+        if case["name"] == "symlinked-entry" and not can_link:
+            continue
+        pkg = copy.deepcopy(case["pkg"])
+        fill = case.get("fill")
+        if fill:
+            pkg["scope"][fill["key"]] = [fill["pattern"] % n for n in range(fill["count"])]
+        runs.append((case, pkg, top))
+    return doc, runs
+
+
+def case_shared_scope_fixtures_package_verdicts():
+    # package.validate_package reaches each shared fixture's recorded verdict (no guard core needed).
+    mod = _package_mod()
+    doc, runs = _fixture_runs()
+    assert len(runs) >= 10 and any(c["accept"] for c, _, _ in runs) and not all(c["accept"] for c, _, _ in runs)
+    for case, pkg, top in runs:
+        got = mod.validate_package(pkg, case["sourceRoot"], root=top) == []
+        assert got == case["accept"], (case["sourceRoot"], case["name"], mod.validate_package(pkg, case["sourceRoot"], root=top))
+
+
+def case_drift_package_vs_guard_scope_core():
+    # The drift check behind "package.py mirrors scope_core's validation": over the shared fixtures, the
+    # guard's own tools/guard/scope_core.py and package.validate_package give the same verdict. SKIP while the
+    # core is absent (the WS8 guard patch not applied); a present core without _validate fails.
+    if not os.path.isfile(SCOPE_CORE):
+        raise SkipTest("tools/guard/scope_core.py is absent (WS8 guard patch not applied)")
+    import types
+    with open(SCOPE_CORE, "rb") as fh:
+        source = fh.read()
+    core = types.ModuleType("scope_core_for_drift")
+    core.__file__ = SCOPE_CORE
+    exec(compile(source, SCOPE_CORE, "exec"), core.__dict__)
+    assert callable(getattr(core, "_validate", None)), "scope_core has no _validate; the drift check cannot run"
+    mod = _package_mod()
+    doc, runs = _fixture_runs()
+    active = "%s-%s" % (doc["storyId"], doc["slug"])
+    drift = []
+    for case, pkg, top in runs:
+        import copy
+        mine = mod.validate_package(copy.deepcopy(pkg), case["sourceRoot"], root=top) == []
+        guard = core._validate(top, case["sourceRoot"], active, copy.deepcopy(pkg)) is None
+        if mine != guard or mine != case["accept"]:
+            drift.append((case["sourceRoot"], case["name"], mine, guard))
+    assert not drift, drift
+
+
 def case_register_scope_prefers_package():
     comps = [comp("WidgetService", "ApexClass", "modify", CLS + ":1", CLS),
              comp("WidgetPanel", "ApexClass", "new")]
