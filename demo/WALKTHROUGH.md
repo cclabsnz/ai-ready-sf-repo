@@ -58,8 +58,10 @@ Expected (exit 0):
 [PASS] score-demo-202
 [PASS] consistency
 [PASS] check-rules
-6 passed, 0 failed
+<n> passed, 0 failed
 ```
+
+`<n>` is the number of `[PASS]` lines above it; the check prints the figure itself.
 
 On any difference it prints `[FAIL] <step>`, a unified diff against the file in `demo/expected/`,
 and the step's stderr, then exits 1.

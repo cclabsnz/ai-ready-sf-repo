@@ -6,7 +6,7 @@ This kit measures impact analysis the same way for an assistant run and for a pe
 
 1. **Fix the answer first.** Each demo story has a hand-written key in `demo/stories/*.answer.json`. For your own stories, write the key before anyone starts.
 2. **Capture the record.** The assistant's output is an `impact.json`. A person's output is a file of the same shape: `{"components": [{"api": "..."}]}`.
-3. **Score it.** `score.py` compares the record's component apis with the key's and lists found, missed and extra. Recall and precision are fractions the script computes.
+3. **Score it.** `score.py` compares the record's component apis with the key's, ignoring letter case as Salesforce does, and lists found, missed and extra (found and extra in the record's spelling). Recall and precision are fractions the script computes.
 4. **Time it.** For an assistant run, `timing.py` reads the Claude Code session transcript and prints first and last timestamp, duration and tool-call count. For a person, use a clock and record minutes in the baseline template. Review time is recorded by the reviewer, in the same way.
 
 Scope: `score.py` scores `impact.json` components only. Scoring a refined `story.json` is not covered.

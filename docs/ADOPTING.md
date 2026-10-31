@@ -141,6 +141,13 @@ python3 tools/guard/guard.py --rebaseline
 - **`render.py`** regenerates `CLAUDE.md`, `.claude/` and `.github/` from your `framework/`.
   Edit `framework/` only, never the rendered trees.
 - **The test must end with `<n> passed, 0 failed`.**
+- **`scan_data.py --all`** scans the whole working tree. Today every pattern applies, the NZ
+  bank-account and IRD formats and the nCino `LLC_BI__` record names included. Once the publish
+  owner patch is in the tag you copy, use `scan_data.py --tracked` (only the files git tracks),
+  and the NZ and nCino patterns become opt-in packs: they apply only if
+  `tools/guard/scan_packs.json` names `nz` or `ncino`, and the shipped file names the default
+  pack only. That file sits under `tools/guard/`, so enabling a pack is a guard change: review it
+  like one, commit it, and re-baseline.
 - **Run the re-baseline yourself,** in a real terminal, before opening Claude Code in the repo.
 
 ## 2. The policy file and modes

@@ -102,8 +102,8 @@ Six principles, in order of precedence:
   [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and
   [CHANGELOG.md](CHANGELOG.md) cover contributions, private reports and releases.
 
-**Not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)):
+**Not built** (order and detail in the design spec and plans, which are the maintainers'
+workspace and not published in this repo, and in [docs/DESIGN.md](docs/DESIGN.md)):
 
 - **The Copilot guard (WS6).** Copilot users get the rendered instructions but no guard:
   `.github/hooks/` holds only a README, and no Copilot hook is registered (see
@@ -256,7 +256,7 @@ with `--root` instead, pass an absolute `--out`: a relative `--out` is joined to
 python3 tools/index/query.py consumers Account.Service_Level__c --hops 3 | grep -o '"api": "[^"]*", "type": "[^"]*", "via": "[^"]*", "target": "[^"]*", "hop": 3'
 ```
 
-Expected, four hop-3 lines:
+Expected, the hop-3 lines:
 
 ```
 "api": "Case_Agent_Console", "type": "FlexiPage", "via": "flexipageComponent", "target": "caseEscalationPanel", "hop": 3
@@ -384,7 +384,8 @@ To compare with the answer key:
   step (quick start step 8) wrote: `ai-context/DEMO-201-<slug>/impact.md` and the `impact.json` beside it, where `<slug>`
   is the one the assistant picked. In a fresh clone, run story-impact first; `ai-context/` is
   git-ignored, so the command has nothing to read until then. Any draft at that path works too. It checks that the report names
-  the three hop-3 components, labels every table row, stays within 3 hops and avoids banned phrases. It also
+  the hop-3 components in the case's `must_reference` list (`Case_Escalate_Premium`,
+  `Case_Agent_Console` and `CaseTrigger`; step 5 shows the full hop-3 set), labels every table row, stays within 3 hops and avoids banned phrases. It also
   checks that `impact.json` is a valid draft record and that the report flags the overlap on
   `CaseTriggerHandler` and `CaseTrigger`:
 
@@ -897,11 +898,23 @@ Code, `test_consistency.py`, `test_run_all.py`, the `demo/measure/` tests and th
 scripts run only in `maintain`; in your terminal they just run.
 
 **The data scan.** `python3 tools/guard/scan_data.py --all` walks the whole working tree,
-skipping only `.git`, `node_modules` and `index` (`tools/guard/scan_data.py:28`, `:37-41`). So on
-a maintainer's machine it also reads git-ignored folders such as `ai-context/` and `data/`, which
-a CI checkout never has, and a hit there fails a local run that CI would pass. The publish owner
-patch adds `--tracked`, which scans only the files git tracks; until it lands, `--all` is the
-whole-tree option.
+skipping only the folders in the scanner's `SKIP_DIRS` set (`.git`, `node_modules` and any folder
+named `index`). So on a maintainer's machine it also reads git-ignored folders such as
+`ai-context/` and `data/`, which a CI checkout never has, and a hit there fails a local run that
+CI would pass. Today every pattern applies on every scan, the NZ bank-account and IRD formats and
+the nCino `LLC_BI__` record names included.
+
+**The data scan after the publish owner patch lands.** `ai-context/publish/patches/guard-publish.patch`
+changes two things:
+
+- **`--tracked`:** a new option that scans only the files `git ls-files` lists, so git-ignored
+  folders are never read. `--all` and given paths behave as before. Until it lands, `--all` is
+  the whole-tree option and there is no `--tracked`.
+- **Packs:** the patterns are grouped. The `default` pack (Salesforce IDs, emails, credentialed
+  instance URLs, session IDs) is always on. The `nz` and `ncino` packs apply only when
+  `tools/guard/scan_packs.json` names them, and the patch ships that file with the default pack
+  only. So after it lands, this repo's pre-commit, CI and `promote.py` scans stop applying the
+  NZ and nCino patterns unless an owner enables them.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
@@ -921,7 +934,8 @@ land or a `delete` ships.
   and `validate.py --all`. None of the story checks run yet: not `test_edge_seeds.py`, not the
   `tools/stories/` tests and not `validate_story.py --all`. Nor do the evals, measurement and
   walkthrough checks: zero hits for `consistency`, `run_all`, `measure` or `walkthrough` in
-  `.github/workflows/framework-ci.yml`. Adding them is an owner patch to the workflow.
+  `.github/workflows/framework-ci.yml`. Those arrive with the publish owner patch (see "CI after
+  the publish owner patch lands" below).
 - **gitleaks:** a secret scan.
 - **`impact-checks` job,** on pull requests:
   - It builds the index from the PR's `demo/org`.
@@ -960,15 +974,36 @@ of the WS11 patches, so a human applies WS11 first, then WS10 as
 the WS11 and WS10 patches, so a human applies WS11, then WS10, then WS8 as
 `ai-context/ws8/patches/APPLY.md` describes. Its changes to the workflow:
 
-- **`guard-and-lint`:** `tools/code/test_check_trace.py`, `tools/code/test_check_rules.py` and
-  `tools/code/test_write_change.py` as their own steps, then `check_rules.py --from-config`,
-  which fails the job on a finding the committed baseline lacks.
+- **`guard-and-lint`:** `tools/code/test_check_trace.py`, `tools/code/test_check_rules.py`,
+  `tools/code/test_write_change.py`, `tools/impacts/test_package.py`,
+  `tools/impacts/test_start.py` and the builder sample agent eval as their own steps, then
+  `check_rules.py --from-config`, which fails the job on a finding the committed baseline lacks.
 - **`impact-checks`:** the base branch's `check_rules.py` checks the PR's source root and fails
   the job on a new finding or a baseline that grew against the base copy. The base branch's
   `check_trace.py` runs for each build package the PR adds or changes, report-only.
 
-Neither the applied workflow nor the WS8 patch runs `tools/impacts/test_package.py` or
-`tools/impacts/test_start.py`; run them yourself.
+**CI after the publish owner patch lands.** `ai-context/publish/patches/ci-publish.patch` is cut
+on top of the WS11, WS10 and WS8 patches, so a human applies those first, in that order, then
+the publish patches as `ai-context/publish/patches/APPLY.md` describes. Its changes to the
+workflow:
+
+- **`guard-and-lint`:** the real-data scan step runs `scan_data.py --tracked` instead of
+  `--all`. New steps run `tools/guard/test_scan_data.py`, `tools/evals/test_consistency.py`,
+  `tools/evals/test_run_all.py`, `demo/measure/test_score.py`, `demo/measure/test_timing.py`,
+  `tools/demo/test_walkthrough_check.py` and `tools/demo/walkthrough_check.py`, on Ubuntu and
+  Windows through the existing matrix.
+- **Triggers:** `workflow_dispatch` is added, and `guard-and-lint`, `impact-checks` and `secrets`
+  run only on pull requests.
+- **`live-consistency`:** a new optional job, started by hand (`workflow_dispatch`) from the
+  default branch only, with no schedule. It runs `run_all.py` for one case with the
+  `ANTHROPIC_API_KEY` secret, compares the runs with `consistency.py` and uploads the run
+  folders. It is not a required check.
+
+Until it lands, none of these steps runs in CI; run the ones that exist today yourself (see the
+list above). `tools/guard/test_scan_data.py` arrives with the patch.
+
+The applied workflow does not run `tools/impacts/test_package.py` or
+`tools/impacts/test_start.py`; until the WS8 patch lands, run them yourself.
 
 ## Scoped code writing
 
@@ -1085,7 +1120,6 @@ impacts/              the register: squads.json and promoted <storyId>-<slug>/ r
 docs/
   DESIGN.md           design, layers, modes, what the guard guarantees
   ADOPTING.md         taking the framework into your own repo
-  superpowers/        specs/ (the published-framework spec) and plans/ (per-workstream plans)
 .claude/              GENERATED, plus the hand-written settings.json (hook, deny rules, kill switch)
 .github/              GENERATED instructions/knowledge/skills/agents, plus workflows/ and hooks/
 fixtures/             small synthetic metadata and diffs for tool tests and CI; never real
@@ -1108,8 +1142,8 @@ CHANGELOG.md, CONTRIBUTING.md, SECURITY.md   releases, contribution rules, priva
   onboarding, the design record and the option choice), the impact record and register, story
   refinement, scoped code writing, and what the guard does and does not guarantee.
 - [HANDOFF.md](HANDOFF.md): working rules for contributors, the smoke test and the backlog.
-- [The spec](docs/superpowers/specs/2026-10-29-published-framework-design.md): intent, owner
-  decisions and the workstream order.
+- The design spec and plans (intent, owner decisions and the workstream order) are the
+  maintainers' workspace, not published in this repo.
 
 Onboarding a squad member today: run quick start steps 2 to 7, run the sample agent eval
 (`python3 tools/evals/run_agent.py ...` above), read `framework/rules/00-precedence.md`, and know

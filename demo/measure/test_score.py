@@ -80,6 +80,17 @@ def test_missed_is_reported():
     assert result["precision"] == 1.0
 
 
+def test_api_case_is_ignored_and_record_spelling_kept():
+    code, out, _ = run(rec("alpha", "BETA", "Alpha"), "--key", synthetic_key())
+    result = json.loads(out)
+    assert code == 0
+    assert result["found"] == ["alpha", "BETA"]
+    assert result["missed"] == ["Gamma"]
+    assert result["extra"] == []
+    assert result["precision"] == 1.0
+    assert abs(result["recall"] - 2 / 3) < 1e-9
+
+
 def test_empty_record_gives_null_precision():
     code, out, _ = run(rec(), "--key", synthetic_key())
     result = json.loads(out)

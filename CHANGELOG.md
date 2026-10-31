@@ -71,11 +71,14 @@ The first published version. Each entry names what a workstream delivered; the c
 
 - `tools/code/check_rules.py` runs deterministic Apex rule checks against a baseline that only
   shrinks.
-- `tools/code/check_trace.py` checks test traceability over a guard-owned core.
-- A build package is made from a confirmed story, design and impact. A build session starts only
-  from a committed package.
-- The `implement-story` skill and the `builder` agent write tests first, inside the package
-  scope.
+- `tools/code/check_trace.py`, the test traceability check. Its guard-owned core ships in an
+  owner patch that is not yet applied, so until it lands the check exits 2.
+- `tools/impacts/package.py` makes a build package from a confirmed story, design and impact, and
+  `tools/impacts/start.py` is added. The build-session gating (a session starts only from a
+  committed package), the scope lock and tests-first in `build` mode ship in that same unapplied
+  owner patch; until it lands, `build` mode cannot write source.
+- The `implement-story` skill and the `builder` agent, which write tests first inside the package
+  scope once the patch lands.
 
 ### Consistency eval (WS3)
 
@@ -117,3 +120,18 @@ The first published version. Each entry names what a workstream delivered; the c
   layout. Until then a full copy-in is the install route.
 - An owner role replaces the placeholder owner in the knowledge files.
 - `docs/DESIGN.md` loses its byline.
+
+### Publish owner patches (pending)
+
+These ship as owner patches that are not yet applied. Until a human applies them, none of the
+following is in effect.
+
+- **Scanner packs:** `tools/guard/scan_data.py` groups its patterns into packs. The default pack
+  is always on; the `nz` and `ncino` packs apply only when `tools/guard/scan_packs.json` names
+  them, and it ships with the default pack only. A broken pack file exits 2.
+- **`scan_data.py --tracked`:** scans only the files git tracks. CI's real-data scan moves from
+  `--all` to `--tracked`.
+- **The `run_all` refusal:** the guard refuses `tools/evals/run_all.py` in every mode, so only the
+  owner starts live runs.
+- **CI:** the consistency, live-runner, measurement and walkthrough checks run in
+  `guard-and-lint`, and an optional `live-consistency` job can be started by hand.
