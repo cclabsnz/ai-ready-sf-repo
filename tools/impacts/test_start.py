@@ -55,7 +55,7 @@ def tmpdir():
 
 def git(root, *args):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+    subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com",
                     "-c", "commit.gpgsign=false"] + list(args), check=True, capture_output=True, env=env)
 
 
