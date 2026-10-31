@@ -311,6 +311,7 @@ Expected:
 "category": "automation", "component": "Account", "detail": "validation rule Account.Last_Review_Date_Not_Ancient (active)"
 "category": "automation", "component": "Account", "detail": "validation rule Account.Seat_Count_Not_Negative (active)"
 "category": "bulk", "component": "Account", "detail": "a bulk change of 200 records or more"
+"category": "org-only", "component": "Account", "detail": "sharing settings and real data volumes are org configuration, not in this repo"
 "category": "blank", "component": "Account.Service_Level__c", "detail": "field is not required; value left blank"
 "category": "field-access", "component": "Account.Service_Level__c", "detail": "Sales_Rep edit"
 "category": "field-access", "component": "Account.Service_Level__c", "detail": "Service_Agent read"
@@ -324,7 +325,12 @@ Expected:
   smoke test's fixtures build). Re-run step 4 and try again.
 - **Each line is a candidate edge case.** Drop the `| grep ...` to see the full JSON, with
   `path:line` evidence and a confidence label on every seed.
-- **A field covers its object too,** hence the `Account` flows, rules and bulk seed.
+- **A field covers its object too,** hence the `Account` flows, rules, bulk seed and org-only
+  seed.
+- **The `org-only` seed** is there for every object, with no evidence (`null`) and the label
+  `Unverifiable`: sharing settings and real data volumes are org configuration, which this repo
+  does not hold. Keep it as an edge case, or drop it with a reason; either way it often becomes
+  an open question for the Salesforce Admin.
 - **`Legacy Bronze (inactive)`** is a retired value, kept in the demo as a deliberate sign of age.
   Old records can still hold it, so a story that reads the field may need to handle it.
 - **The `Account` bulk seed has no evidence** (`null`) and is `Unverifiable`: the demo holds
@@ -388,7 +394,9 @@ yet shown by a run:
 
 The skill writes `ai-context/DEMO-201-<slug>/story.json`, `story.md` and `scan/edge-seeds.json`.
 Score it with eval case 002, which checks among other things that the `Escalation_Needs_Level`
-validation rule on `Case` is kept as an edge case. The eval reads the files the `/story-refine`
+validation rule on `Case` is kept as an edge case and becomes a criterion. It also recomputes the
+edge seeds from `index/` (or `--index <dir>`) and fails when the saved `scan/edge-seeds.json`
+differs, so keep the demo index from step 4. The eval reads the files the `/story-refine`
 run above wrote. `ai-context/` is git-ignored, so on a fresh clone the folder does not exist and
 the command has nothing to read until you run the skill:
 
@@ -434,10 +442,17 @@ python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --story --confirmed
 
 - **What it checks first:** the draft `story.json` validates with every evidence file and line
   checked; `check_ac.py` has no findings; every open question has an answer or is
-  `deferred: true`; and the data scan finds nothing in `story.json` and `story.md`.
+  `deferred: true` with `deferredBy` set to the role that deferred it; and the data scan finds
+  nothing in `story.json` and `story.md`. Only you set `deferred` and `deferredBy`, by editing the
+  draft `story.json` before you promote it; the assistant never does.
+- **What it shows you before writing:** every deferred question (`OQ-n`, owner role, deferred
+  by, text) and every answered question with its answer, so you see what you are confirming past.
 - **What it writes:** `impacts/<storyId>-<slug>/story.json` (status `confirmed`, with your
-  `confirmedBy`) and a copy of `story.md`. It never touches `impact.json` or `impact.md` in that
-  folder. `--replace` applies only to the story files.
+  `confirmedBy`) and a `story.md` re-rendered from that record, not copied from the draft. The
+  md reads `Status: confirmed. Confirmed by: <your value>.` and shows every answer and deferral
+  as `story.json` holds it; its Overlaps section is as recorded at refinement. The data scan runs
+  on those final bytes. It never touches `impact.json` or `impact.md` in that folder. `--replace`
+  applies only to the story files.
 - **What it refuses:** the same symlink, cross-folder and final-bytes checks as an impact.
 - **One folder per story id.** A refined story and its impact record must share one
   `<storyId>-<slug>` folder, so give them the same slug. A story id on record in one folder

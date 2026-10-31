@@ -103,6 +103,21 @@ def test_missing_gwt():
     assert only(d, "missing-gwt")
 
 
+def test_no_criteria():
+    d = story()
+    d["acceptanceCriteria"] = []
+    assert C.check_ac(d, VAGUE) == [{"id": "acceptanceCriteria", "rule": "no-criteria",
+                                     "detail": "the story has no acceptance criteria"}]
+    del d["acceptanceCriteria"]
+    assert [r for r, _ in rules(d)] == ["no-criteria"], rules(d)
+    assert not only(story(), "no-criteria")
+    path = os.path.join(TMP, "none.json")
+    with open(path, "w", newline="\n") as fh:
+        json.dump(dict(story(), acceptanceCriteria=[]), fh)
+    p = run([path])
+    assert p.returncode == 1 and json.loads(p.stdout)["findings"][0]["rule"] == "no-criteria", p.stdout
+
+
 def test_finding_ids():
     f = C.check_ac(story(then="loads quickly"), VAGUE)
     assert f[0]["id"] == "AC-1" and set(f[0]) == {"id", "rule", "detail"}

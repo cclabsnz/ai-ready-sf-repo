@@ -4,6 +4,7 @@
 
 | Rule | What fails | Fix |
 |---|---|---|
+| `no-criteria` | The story has no acceptance criteria | Write at least one criterion; a story with none cannot be tested |
 | `missing-gwt` | An empty `given`, `when` or `then` | Fill all three |
 | `multiple-outcomes` | A `then` with `;`, more than one sentence, or the word `and` or `or`, outside quoted text | Split the criterion in two |
 | `no-example` | `examples` is empty | Add at least one concrete example: a value, a record, a user |

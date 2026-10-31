@@ -74,7 +74,7 @@ def good_draft():
         "benefit": "agents pick the right replacement part",
         "inScope": ["Widget size field"], "outOfScope": ["Widget pricing"], "nonFunctional": [],
         "openQuestions": [{"id": "OQ-1", "text": "Which sizes are retired?", "ownerRole": "Product Owner",
-                           "answer": None, "deferred": False}],
+                           "answer": None, "deferred": False, "deferredBy": None}],
         "acceptanceCriteria": [
             {"id": "AC-1", "given": "a widget with no size", "when": "the agent saves it",
              "then": "the widget saves with a blank size", "examples": ["Widget W-1 saves"],
@@ -146,6 +146,9 @@ def test_writes_valid_story():
         assert ("| field-access | `Widget__c.Size__c` | Widget_Editor edit | no such permission set in use |"
                 in md), md
         assert "(Product Owner)" in md or "| Product Owner |" in md, md
+        assert "| OQ | Question | Owner role | Answer | Deferred | Deferred by |" in md, md
+        assert md.splitlines()[2].startswith("Status: draft. Squad:"), md.splitlines()[2]
+        assert "Confirmed by" not in md and "(status draft)" in md, md
         for word in ("should", "we recommend", "approve", "block"):
             fixed = md.replace("Which sizes are retired?", "")
             assert word not in fixed.lower(), word

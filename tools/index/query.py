@@ -53,6 +53,7 @@ def consumers(idx, api, hops):
 
 INTEGRATION_PERMSET = re.compile(r"integration", re.I)
 BULK_DETAIL = "a bulk change of 200 records or more"
+ORG_ONLY_DETAIL = "sharing settings and real data volumes are org configuration, not in this repo"
 
 
 def first_line(root, path, needle):
@@ -129,6 +130,8 @@ def edge_seeds(idx, apis, root):
                 if trigger_ev is None:
                     trigger_ev = e.get("evidence")
         add("bulk", obj, BULK_DETAIL, trigger_ev or at(node.get("path"), "<CustomObject"))
+        # Sharing settings and real data volumes live in the org, never in this repo.
+        add("org-only", obj, ORG_ONLY_DETAIL, None, "Unverifiable")
         prefix = obj + "."
         for e in sorted(edges, key=lambda e: (e["from"], e["to"])):
             if (e["kind"] == "fieldPermission" and e["to"].startswith(prefix)

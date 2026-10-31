@@ -11,7 +11,7 @@
   "outOfScope": ["Changes to case escalation"],
   "nonFunctional": [],
   "openQuestions": [
-    {"id": "OQ-1", "text": "Which tier values does the business use?", "ownerRole": "Product owner", "answer": null, "deferred": false}
+    {"id": "OQ-1", "text": "Which tier values does the business use?", "ownerRole": "Product owner", "answer": null, "deferred": false, "deferredBy": null}
   ],
   "acceptanceCriteria": [
     {"id": "AC-1", "given": "an agent opens a Case on an Account with a tier", "when": "the Case page loads", "then": "the tier shows quickly and properly", "examples": ["Account tier \"Gold\""], "source": "stated"},

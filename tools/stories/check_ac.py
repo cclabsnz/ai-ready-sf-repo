@@ -4,7 +4,8 @@
 Usage:
   check_ac.py <story.json>
 
-Rules: missing-gwt, multiple-outcomes, no-example, vague-word.
+Rules: no-criteria, missing-gwt, multiple-outcomes, no-example, vague-word.
+no-criteria: acceptanceCriteria is missing, not a list, or empty.
 Quoted text ("..." or `...`) is ignored by multiple-outcomes and vague-word.
 Prints {"ok": bool, "findings": [{id, rule, detail}]}.
 Exit codes: 0 no findings, 1 findings, 2 bad usage or unreadable input.
@@ -51,8 +52,9 @@ def check_ac(doc, vague):
     """Return [{id, rule, detail}] for the acceptance criteria in doc."""
     findings = []
     acs = doc.get("acceptanceCriteria") if isinstance(doc, dict) else None
-    if not isinstance(acs, list):
-        return findings
+    if not isinstance(acs, list) or not acs:
+        return [{"id": "acceptanceCriteria", "rule": "no-criteria",
+                 "detail": "the story has no acceptance criteria"}]
     patterns = [(w, re.compile(r"(?<!\w)" + re.escape(w).replace(r"\ ", r"\s+") + r"(?!\w)", re.I)) for w in vague]
     for i, ac in enumerate(acs):
         if not isinstance(ac, dict):

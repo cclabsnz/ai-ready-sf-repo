@@ -6,7 +6,11 @@ Usage:
   validate_story.py --all [--root .]
 
 --all validates every <root>/impacts/*/story.json as confirmed, checks that each
-folder is named <storyId>-<slug>, and that storyIds are unique.
+folder is named <storyId>-<slug>, and that storyIds are unique. It also runs
+tools/stories/check_ac.py on each record and reports its findings as errors.
+
+openQuestions[].deferredBy is the role that deferred the question: a non-empty string when
+deferred is true, null otherwise.
 
 Prints JSON on stdout. Exit codes: 0 valid, 1 validation failure, 2 bad usage.
 Stdlib only. Code comes from the checkout; data comes from --root.
@@ -23,10 +27,12 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "impacts"))
 
 import validate as V  # noqa: E402  (tools/impacts/validate.py, reused, not copied)
+sys.path.insert(0, HERE)
+from check_ac import check_ac, load_vague  # noqa: E402
 
 # Edge-seed categories emitted by tools/index/query.py edge_seeds (query.py exposes no tuple).
 CATEGORIES = ("blank", "picklist-value", "field-access", "record-type", "automation",
-              "bulk", "integration-user")
+              "bulk", "integration-user", "org-only")
 CONFIDENCE = ("Confirmed", "Inferred", "Unverifiable")
 AC_SOURCES = ("stated", "edge-case", "assistant-proposed")
 STATUSES = ("draft", "confirmed")
@@ -39,7 +45,7 @@ TOP_ALLOWED = TOP_REQUIRED + ("confirmedBy",)
 AC_KEYS = ("id", "given", "when", "then", "examples", "source")
 EC_KEYS = ("id", "category", "component", "detail", "evidence", "confidence", "becameCriterion", "reason")
 DS_KEYS = ("category", "component", "detail", "reason")
-OQ_KEYS = ("id", "text", "ownerRole", "answer", "deferred")
+OQ_KEYS = ("id", "text", "ownerRole", "answer", "deferred", "deferredBy")
 OV_KEYS = ("api", "type", "kind", "stories")
 OV_STORY_KEYS = ("storyId", "squad", "status", "changeType", "type", "commit")
 
@@ -181,6 +187,13 @@ def _check_questions(items, stage, errors):
             errors.append("%s: answer is not a string or null" % tag)
         if "deferred" in q and not isinstance(q["deferred"], bool):
             errors.append("%s: deferred is not true or false" % tag)
+        if "deferred" in q and "deferredBy" in q:
+            if q["deferred"] is True:
+                if not _nonempty(q["deferredBy"]):
+                    errors.append("%s: deferredBy is required (a non-empty role) when deferred is true"
+                                  % tag)
+            elif q["deferredBy"] is not None:
+                errors.append("%s: deferredBy is set but deferred is not true" % tag)
         if stage == "confirmed" and "answer" in q and "deferred" in q:
             if not _nonempty(q["answer"]) and q["deferred"] is not True:
                 errors.append("%s: not answered and not deferred" % tag)
@@ -316,6 +329,8 @@ def _run_all(root):
         doc, err = _load_json(p)
         errs = [err] if err else validate_story(doc, "confirmed", root)
         if not err and isinstance(doc, dict):
+            errs += ["acceptance criterion %s: %s: %s" % (f["id"], f["rule"], f["detail"])
+                     for f in check_ac(doc, load_vague())]
             sid, slug = doc.get("storyId"), doc.get("slug")
             if isinstance(sid, str) and isinstance(slug, str) and folder != "%s-%s" % (sid, slug):
                 errs.append("folder '%s' does not match storyId-slug '%s-%s'" % (folder, sid, slug))

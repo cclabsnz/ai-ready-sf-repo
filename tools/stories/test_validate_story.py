@@ -38,7 +38,7 @@ def good():
         "nonFunctional": [],
         "openQuestions": [
             {"id": "OQ-1", "text": "Who owns the queue?", "ownerRole": "Product Owner",
-             "answer": None, "deferred": False}],
+             "answer": None, "deferred": False, "deferredBy": None}],
         "acceptanceCriteria": [
             {"id": "AC-1", "given": "a premium case", "when": "the agent escalates it",
              "then": "the case moves to the premium queue", "examples": ["Case 1 moves"],
@@ -145,10 +145,47 @@ def test_confirmed_needs_resolved_questions():
     d["openQuestions"][0]["answer"] = None
     assert has(v(d, "confirmed"), "not answered and not deferred")
     d["openQuestions"][0]["deferred"] = True
+    d["openQuestions"][0]["deferredBy"] = "Product Owner"
     assert v(d, "confirmed") == []
     d = confirmed()
     del d["confirmedBy"]
     assert has(v(d, "confirmed"), "confirmedBy")
+
+
+def test_deferred_by_rules():
+    # Required and non-empty when deferred is true, in both stages.
+    for stage, make in (("draft", good), ("confirmed", confirmed)):
+        d = make()
+        d["openQuestions"][0]["deferred"] = True
+        assert has(v(d, stage), "deferredBy is required"), (stage, v(d, stage))
+        d["openQuestions"][0]["deferredBy"] = "   "
+        assert has(v(d, stage), "deferredBy is required"), stage
+        d["openQuestions"][0]["deferredBy"] = 7
+        assert has(v(d, stage), "deferredBy is required"), stage
+        d["openQuestions"][0]["deferredBy"] = "Product Owner"
+        assert v(d, stage) == [], (stage, v(d, stage))
+    # Null otherwise.
+    d = good()
+    d["openQuestions"][0]["deferredBy"] = "Product Owner"
+    assert has(v(d), "deferredBy is set but deferred is not true"), v(d)
+    # The key is required, as every openQuestions key is.
+    d = good()
+    del d["openQuestions"][0]["deferredBy"]
+    assert has(v(d), "missing key 'deferredBy'"), v(d)
+
+
+def test_org_only_category_accepted():
+    d = good()
+    d["edgeCases"][1] = {"id": "EC-2", "category": "org-only", "component": "Case",
+                         "detail": "sharing settings and real data volumes are org configuration, "
+                                   "not in this repo",
+                         "evidence": None, "confidence": "Unverifiable", "becameCriterion": None,
+                         "reason": "sharing is org configuration"}
+    assert v(d) == [], v(d)
+    d["droppedSeeds"][0]["category"] = "org-only"
+    assert v(d) == [], v(d)
+    d["edgeCases"][1]["category"] = "org-config"
+    assert has(v(d), "category 'org-config' is not one of"), v(d)
 
 
 def test_ids_unique_and_gapless():
@@ -242,6 +279,27 @@ def test_all_checks_folder_and_empty():
     write(os.path.join(root2, "impacts", "DEMO-301-service-level-escalation", "story.json"),
           json.dumps(confirmed()))
     assert run(["--all", "--root", root2]).returncode == 0
+
+
+def test_all_runs_check_ac_on_confirmed():
+    root = mkroot("all_ac")
+    vague = confirmed()
+    vague["acceptanceCriteria"][0]["then"] = "the case moves quickly to the premium queue"
+    path = os.path.join(root, "impacts", "DEMO-301-service-level-escalation", "story.json")
+    write(path, json.dumps(vague))
+    assert S.validate_story(vague, "confirmed", root) == []  # schema-valid; only the criteria fail
+    p = run(["--all", "--root", root])
+    assert p.returncode == 1, p.stdout
+    errs = json.loads(p.stdout)["results"][0]["errors"]
+    assert errs == ["acceptance criterion AC-1: vague-word: then contains 'quickly'"], errs
+    none = confirmed()
+    none["acceptanceCriteria"] = []
+    none["edgeCases"][0]["becameCriterion"] = None
+    none["edgeCases"][0]["reason"] = "no criterion"
+    write(path, json.dumps(none))
+    p = run(["--all", "--root", root])
+    errs = json.loads(p.stdout)["results"][0]["errors"]
+    assert p.returncode == 1 and any("no-criteria" in e for e in errs), p.stdout
 
 
 def main():

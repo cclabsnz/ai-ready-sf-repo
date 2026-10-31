@@ -17,6 +17,8 @@ sys.path.insert(0, HERE)
 
 from _testutil import run_tests, symlink  # noqa: E402
 from validate import validate  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, "tools", "stories"))
+from story_md import render_md  # noqa: E402
 
 PROMOTE = os.path.join(HERE, "promote.py")
 SCAN = os.path.join(REPO, "tools", "guard", "scan_data.py")
@@ -189,9 +191,9 @@ def story_doc():
         "inScope": ["Widget size"], "outOfScope": ["Pricing"], "nonFunctional": [],
         "openQuestions": [
             {"id": "OQ-1", "text": "Which sizes are retired?", "ownerRole": "Product Owner",
-             "answer": "None", "deferred": False},
+             "answer": "None", "deferred": False, "deferredBy": None},
             {"id": "OQ-2", "text": "Label wording?", "ownerRole": "Product Owner",
-             "answer": None, "deferred": True}],
+             "answer": None, "deferred": True, "deferredBy": "Product Owner"}],
         "acceptanceCriteria": [
             {"id": "AC-1", "given": "a widget with no size", "when": "the agent saves it",
              "then": "the widget saves with a blank size", "examples": ["Widget W-1 saves"],
@@ -249,7 +251,89 @@ def case_story_promote_sets_confirmed():
     doc = json.loads(raw)
     assert doc["status"] == "confirmed" and doc["confirmedBy"] == "Product Owner", doc
     assert raw == json.dumps(doc, indent=2, sort_keys=True) + "\n"
-    assert read_bytes(os.path.join(dest, "story.md")) == SMD.encode("utf-8")
+    md = read_bytes(os.path.join(dest, "story.md"))
+    assert md != SMD.encode("utf-8")  # re-rendered, not copied
+    assert md == render_md(doc, [], None).encode("utf-8")
+
+
+@story_cleanup
+def case_confirmed_md_matches_json():
+    """I1: the committed story.md states what the confirmed story.json holds."""
+    doc = story_doc()
+    doc["openQuestions"][0]["answer"] = "Sizes S1 and S2"
+    root = make_story_root(doc, md=SMD + "Status: draft. stale answer: none\n")
+    code, out = story_run(root, who="Customer Care product owner")
+    assert code == 0, out
+    dest = os.path.join(root, SDEST)
+    pj = json.loads(read_bytes(os.path.join(dest, "story.json")).decode("utf-8"))
+    md = read_bytes(os.path.join(dest, "story.md")).decode("utf-8")
+    assert "Status: confirmed. Confirmed by: Customer Care product owner." in md, md
+    assert "Status: draft" not in md and "stale answer" not in md, md
+    assert "(status draft)" not in md and "(status confirmed)" in md, md
+    rows = {line.split("|")[1].strip(): [c.strip() for c in line.split("|")[1:-1]]
+            for line in md.splitlines() if line.startswith("| OQ-")}
+    for q in pj["openQuestions"]:
+        row = rows[q["id"]]
+        assert row[3] == (q["answer"] if q["answer"] is not None else "none"), row
+        assert row[4] == ("yes" if q["deferred"] else "no"), row
+        assert row[5] == (q["deferredBy"] if q["deferredBy"] is not None else "none"), row
+    assert rows["OQ-1"][3] == "Sizes S1 and S2", rows
+    assert rows["OQ-2"][4:] == ["yes", "Product Owner"], rows
+    assert "- none recorded at refinement" in md, md
+    assert pj["status"] == "confirmed" and pj["confirmedBy"] == "Customer Care product owner"
+
+
+@story_cleanup
+def case_story_prints_deferrals_and_answers_before_writing():
+    """I2: the confirmer sees every deferred question and every answer before the record is written."""
+    doc = story_doc()
+    doc["openQuestions"].append({"id": "OQ-3", "text": "Retire size XL?", "ownerRole": "Salesforce Admin",
+                                 "answer": None, "deferred": True, "deferredBy": "Product Owner"})
+    root = make_story_root(doc)
+    code, out = story_run(root)
+    assert code == 0, out
+    lines = out.splitlines()
+    dest_line = lines.index(os.path.join(root, SDEST))
+    want = ["- OQ-2 (owner role: Product Owner; deferred by: Product Owner): Label wording?",
+            "- OQ-3 (owner role: Salesforce Admin; deferred by: Product Owner): Retire size XL?",
+            "- OQ-1 (owner role: Product Owner): Which sizes are retired? -> answer: None"]
+    for w in want:
+        assert w in lines and lines.index(w) < dest_line, (w, out)
+    assert lines.index("Deferred:") < lines.index(want[0]) < lines.index("Answered:") < lines.index(want[2])
+    for word in ("approve", "should", "block", "recommend"):
+        assert word not in out.lower(), (word, out)
+    # A refused run prints no summary.
+    code, out = story_run(root)
+    assert code == 1 and "already exists" in out and "Deferred:" not in out, out
+
+
+@story_cleanup
+def case_story_refuses_deferred_without_deferred_by():
+    doc = story_doc()
+    doc["openQuestions"][1]["deferredBy"] = None
+    root = make_story_root(doc)
+    code, out = story_run(root)
+    assert code == 1 and "deferredBy is required" in out, out
+    assert not os.path.exists(os.path.join(root, SDEST))
+    doc = story_doc()
+    doc["openQuestions"][0]["deferredBy"] = "Product Owner"
+    root = make_story_root(doc)
+    code, out = story_run(root)
+    assert code == 1 and "deferredBy is set but deferred is not true" in out, out
+    assert not os.path.exists(os.path.join(root, SDEST))
+
+
+@story_cleanup
+def case_story_final_md_scanned():
+    """A data hit in a story.json answer, which the re-rendered md would carry, is refused.
+
+    The draft scan catches it first; scan_final then runs on the rendered md bytes as well."""
+    doc = story_doc()
+    doc["openQuestions"][0]["answer"] = "Account " + "-".join(["12", "3456", "7890123", "00"])
+    root = make_story_root(doc)
+    code, out = story_run(root)
+    assert code == 1 and "data guard" in out, out
+    assert not os.path.exists(os.path.join(root, SDEST))
 
 
 @story_cleanup

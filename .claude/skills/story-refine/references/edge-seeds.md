@@ -1,6 +1,6 @@
 # Edge seeds
 
-`python3 tools/index/query.py edge-seeds <api> [<api>...]` prints `{"seeds": [...], "unresolved": [...]}`. Each seed is `{category, component, detail, evidence, confidence}`, built from index edges and node attributes only. Save the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`; the eval checks `edges_from_seeds_only` and `seeds_accounted` read it. A seed is identified by its (component, category, detail).
+`python3 tools/index/query.py edge-seeds <api> [<api>...]` prints `{"seeds": [...], "unresolved": [...]}`. Each seed is `{category, component, detail, evidence, confidence}`, built from index edges and node attributes only. Save the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`; the eval checks `edges_from_seeds_only` and `seeds_accounted` read it, and first recompute it from the index for the story's `seeds` list, so a saved file that omits, adds or edits a seed fails. A seed is identified by its (component, category, detail).
 
 ## Scope
 
@@ -19,6 +19,7 @@
 | `automation` | Validation rules, record-triggered flows and triggers on the object | The story's change meets the rule or automation |
 | `bulk` | Every object: "a bulk change of 200 records or more" | A data load or mass update |
 | `integration-user` | A permission set whose name contains "integration" and grants a field on the object (`Inferred`) | A write from an integration user |
+| `org-only` | Every object, once: "sharing settings and real data volumes are org configuration, not in this repo" (`Unverifiable`, evidence null) | Who can see the record, or behaviour at real volumes; often an open question for the Salesforce Admin |
 
 ## Judging
 

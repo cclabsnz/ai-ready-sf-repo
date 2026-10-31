@@ -6,32 +6,39 @@ so it works identically under Claude Code, Copilot, Promptfoo, or `claude plugin
 N times (default 5) by producing N outputs and passing them all; the case passes only if every run passes.
 
   python3 tools/evals/run_skill.py --skill story-impact --case 001-new-field-on-account \
-      --output ai-context/9001-risk-rating-field/impact.md [--output ...]
+      --output ai-context/9001-risk-rating-field/impact.md [--output ...] [--index <dir>]
 
 Assertions supported in case JSON: must_reference, must_not_flag, must_flag, must_contain_label,
 must_label_every_claim, banned_phrases, verdict_in, max_hops, impact_json_valid, must_flag_overlap,
-story_json_valid, must_keep_edge, must_list_overlap, edges_from_seeds_only, seeds_accounted.
-Every cited `path:line` must exist.
+story_json_valid, must_keep_edge, must_become_criterion, must_list_overlap, edges_from_seeds_only,
+seeds_accounted. Every cited `path:line` must exist.
 
 impact_json_valid: the impact.json beside each --output validates as a draft, evidence checked.
 must_flag_overlap: each api is the exact backticked Component cell of a row in the table under
 `## Overlaps with other stories`. Rows in that table carry no confidence label and are skipped by
 must_label_every_claim.
 
-story-refine assertions (story_json_valid, must_keep_edge, must_list_overlap,
-edges_from_seeds_only, seeds_accounted). A seed is identified by (component, category, detail).
+story-refine assertions (story_json_valid, must_keep_edge, must_become_criterion,
+must_list_overlap, edges_from_seeds_only, seeds_accounted). A seed is identified by (component,
+category, detail). The skill writes scan/edge-seeds.json, so it is not trusted as ground truth:
+for must_keep_edge, must_become_criterion, edges_from_seeds_only and seeds_accounted the runner
+recomputes tools/index/query.py edge_seeds(load(--index), story.json seeds, <checkout>) and fails
+when the saved scan differs from it (parsed JSON compared, order ignored). --index defaults to
+<checkout>/index.
 story_json_valid: the story.json beside each --output passes validate_story as a draft, evidence
 checked, and check_ac has no findings.
 must_keep_edge: each name matches an edgeCases row of that story.json whose triple is a seed in
 scan/edge-seeds.json: the name equals the row's component, or appears as a whole word in its detail.
+must_become_criterion: as must_keep_edge, and the matching edge case has a non-null becameCriterion.
 must_list_overlap: as must_flag_overlap, for story.md.
 edges_from_seeds_only: every edgeCases triple of that story.json is in the `seeds` list of
 scan/edge-seeds.json beside --output (the query.py edge-seeds output the skill saved), with the
 seed's evidence and confidence copied unchanged.
 seeds_accounted: every seed in scan/edge-seeds.json is an edgeCases or droppedSeeds triple.
-For these three, a missing story.json or edge-seeds.json fails.
+For each of them, a missing story.json, edge-seeds.json or index fails.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -45,6 +52,11 @@ from validate import validate  # noqa: E402
 from validate_story import validate_story  # noqa: E402
 from check_ac import check_ac, load_vague  # noqa: E402
 
+_spec = importlib.util.spec_from_file_location("query", os.path.join(ROOT, "tools", "index", "query.py"))
+query = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(query)
+
+DEFAULT_INDEX = os.path.join(ROOT, "index")
 LABELS = ("Confirmed", "Inferred", "Unverifiable")
 EVIDENCE_RE = re.compile(r"`((?:force-app|pkg-[A-Za-z0-9_-]+|fixtures|demo)/[^`:]+):(\d+)`")
 OVERLAP_HEADING = "## Overlaps with other stories"
@@ -149,18 +161,67 @@ def seed_index(rows):
     return index
 
 
-def check_keep_edge(output_path, wanted):
-    """Only edge cases that are real seeds (triple in scan/edge-seeds.json) count."""
-    doc, rows, fails = load_seed_rows(output_path, "must_keep_edge")
+def check_keep_edge(output_path, wanted, index_dir=None, criterion=False):
+    """Only edge cases that are real seeds (triple in scan/edge-seeds.json) count.
+
+    With criterion=True (must_become_criterion), a matching edge case also needs a non-null
+    becameCriterion."""
+    name = "must_become_criterion" if criterion else "must_keep_edge"
+    doc, rows, fails = load_seed_rows(output_path, name, index_dir)
     if fails:
         return fails
     known = seed_index(rows)
     ecs = [ec for ec in story_edge_cases(doc) if triple(ec) in known]
+    if criterion:
+        return [f"no edge case for {w} became a criterion" for w in wanted
+                if not any(edge_matches(ec, w) and ec.get("becameCriterion") is not None for ec in ecs)]
     return [f"edge case not kept for {w}" for w in wanted if not any(edge_matches(ec, w) for ec in ecs)]
 
 
-def load_seed_rows(output_path, name):
-    """(story doc, seed rows, []) or (None, None, [failure])."""
+def recompute_seeds(doc, index_dir):
+    """(query.edge_seeds over the story's seeds list, None) or (None, failure text)."""
+    seeds = doc.get("seeds") if isinstance(doc, dict) else None
+    if not (isinstance(seeds, list) and all(isinstance(s, str) for s in seeds)):
+        return None, "story.json has no seeds list to recompute edge seeds from"
+    try:
+        idx = query.load(index_dir)
+        return query.edge_seeds(idx, seeds, ROOT), None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return None, f"cannot recompute edge seeds from index {index_dir}: {type(exc).__name__}: {exc}"
+
+
+def canonical_scan(scan):
+    """Order-free form of an edge-seeds result: sorted seed JSON and sorted unresolved."""
+    if not isinstance(scan, dict):
+        return None
+    seeds, unresolved = scan.get("seeds"), scan.get("unresolved")
+    if not isinstance(seeds, list) or not isinstance(unresolved, list):
+        return None
+    return (sorted(json.dumps(s, sort_keys=True) for s in seeds),
+            sorted(json.dumps(u) for u in unresolved))
+
+
+def scan_mismatch(saved, fresh):
+    """Failure lines when the saved scan differs from the recomputed one; [] when they match."""
+    a, b = canonical_scan(saved), canonical_scan(fresh)
+    if a is None:
+        return ["scan/edge-seeds.json is not {seeds: [...], unresolved: [...]}"]
+    if a == b:
+        return []
+    fails = ["scan/edge-seeds.json differs from query.py edge-seeds recomputed from the index "
+             "for the story's seeds"]
+    fails += [f"   omitted seed: {s}" for s in sorted(set(b[0]) - set(a[0]))]
+    fails += [f"   seed not in the recomputed scan: {s}" for s in sorted(set(a[0]) - set(b[0]))]
+    if a[1] != b[1]:
+        fails.append(f"   unresolved differs: saved {a[1]}, recomputed {b[1]}")
+    return fails
+
+
+def load_seed_rows(output_path, name, index_dir=None):
+    """(story doc, seed rows, []) or (None, None, [failure]).
+
+    The saved scan counts only when it equals edge_seeds() recomputed from the index for the
+    story's seeds list, so the skill cannot write its own ground truth."""
     doc, err = load_sibling(output_path, "story.json", name)
     if err:
         return None, None, [err]
@@ -170,11 +231,17 @@ def load_seed_rows(output_path, name):
     rows = seeds.get("seeds") if isinstance(seeds, dict) else None
     if not isinstance(rows, list):
         return None, None, ["scan/edge-seeds.json has no seeds list"]
+    fresh, err = recompute_seeds(doc, index_dir or DEFAULT_INDEX)
+    if err:
+        return None, None, [err]
+    fails = scan_mismatch(seeds, fresh)
+    if fails:
+        return None, None, fails
     return doc, [s for s in rows if isinstance(s, dict)], []
 
 
-def check_edges_from_seeds(output_path):
-    doc, rows, fails = load_seed_rows(output_path, "edges_from_seeds_only")
+def check_edges_from_seeds(output_path, index_dir=None):
+    doc, rows, fails = load_seed_rows(output_path, "edges_from_seeds_only", index_dir)
     if fails:
         return fails
     known = seed_index(rows)
@@ -189,8 +256,8 @@ def check_edges_from_seeds(output_path):
     return fails
 
 
-def check_seeds_accounted(output_path):
-    doc, rows, fails = load_seed_rows(output_path, "seeds_accounted")
+def check_seeds_accounted(output_path, index_dir=None):
+    doc, rows, fails = load_seed_rows(output_path, "seeds_accounted", index_dir)
     if fails:
         return fails
     dropped = doc.get("droppedSeeds") if isinstance(doc, dict) else None
@@ -200,8 +267,17 @@ def check_seeds_accounted(output_path):
             for s in rows if triple(s) not in seen]
 
 
-def check(output_text, asserts, output_path=None):
+def check(output_text, asserts, output_path=None, index_dir=None):
+    """index_dir: the index edge seeds are recomputed from (default <checkout>/index)."""
     fails = []
+    seed_fails = []
+
+    def add_seed_fails(more):
+        # A scan mismatch is reported once, not once per seed-reading assertion.
+        for f in more:
+            if f not in seed_fails:
+                seed_fails.append(f)
+                fails.append(f)
     for ref in asserts.get("must_reference", []):
         if ref not in output_text:
             fails.append(f"missing reference {ref}")
@@ -249,15 +325,18 @@ def check(output_text, asserts, output_path=None):
     if asserts.get("story_json_valid"):
         fails += check_story_json(output_path)
     if asserts.get("must_keep_edge"):
-        fails += check_keep_edge(output_path, asserts["must_keep_edge"])
+        add_seed_fails(check_keep_edge(output_path, asserts["must_keep_edge"], index_dir))
+    if asserts.get("must_become_criterion"):
+        add_seed_fails(check_keep_edge(output_path, asserts["must_become_criterion"], index_dir,
+                                       criterion=True))
     listed = overlap_components(output_text) if asserts.get("must_list_overlap") else set()
     for api in asserts.get("must_list_overlap", []):
         if api not in listed:
             fails.append(f"overlap not listed for {api}")
     if asserts.get("edges_from_seeds_only"):
-        fails += check_edges_from_seeds(output_path)
+        add_seed_fails(check_edges_from_seeds(output_path, index_dir))
     if asserts.get("seeds_accounted"):
-        fails += check_seeds_accounted(output_path)
+        add_seed_fails(check_seeds_accounted(output_path, index_dir))
     return fails
 
 
@@ -266,6 +345,8 @@ def main():
     ap.add_argument("--skill", required=True)
     ap.add_argument("--case", required=True)
     ap.add_argument("--output", action="append", required=True)
+    ap.add_argument("--index", default=DEFAULT_INDEX,
+                    help="index dir edge seeds are recomputed from (default <checkout>/index)")
     a = ap.parse_args()
     case_path = os.path.join(ROOT, "framework", "skills", a.skill, "evals", "cases", a.case + ".json")
     with open(case_path) as fh:
@@ -274,7 +355,7 @@ def main():
     for i, out in enumerate(a.output, 1):
         with open(out, encoding="utf-8") as fh:
             txt = fh.read()
-        fails = check(txt, case["assert"], out)
+        fails = check(txt, case["assert"], out, a.index)
         ok = not fails
         all_ok &= ok
         print(f"run {i}: {'PASS' if ok else 'FAIL'}")

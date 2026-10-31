@@ -151,6 +151,19 @@ def case_integration_user_only_when_permset_matches():
     assert not by(without["seeds"], "integration-user")
 
 
+def case_org_only_once_per_object_unverifiable():
+    r = query.edge_seeds(make_idx(), ["Thing__c.Pick__c", "Thing__c", "Thing__c.Glob__c", "Case"],
+                         make_root())
+    org = by(r["seeds"], "org-only")
+    assert sorted(s["component"] for s in org) == ["Case", "Thing__c"], org
+    for s in org:
+        assert s["detail"] == ("sharing settings and real data volumes are org configuration, "
+                               "not in this repo"), s
+        assert s["evidence"] is None and s["confidence"] == "Unverifiable", s
+    assert not [s for s in org if s["component"].startswith("Thing__c.")]
+    assert query.edge_seeds(make_idx(), ["Nope__c"], make_root())["seeds"] == []
+
+
 def case_no_blank_seed_for_derived_or_master_detail():
     idx = make_idx()
     for name, extra in (("Md", {"fieldType": "MasterDetail"}), ("Auto", {"fieldType": "AutoNumber"}),

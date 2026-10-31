@@ -144,7 +144,7 @@ The first two skills, in order:
 1. **story-impact.** Input: a work item (story, feature, defect) as text. Method: seed terms from the taxonomy, `consumers()` to two hops by default (an optional `hops` input takes 1 to 3), triage with recorded drop reasons, classify each hit (layer, ownership, change type, impact, confidence), write `ai-context/<id>-<slug>/impact.md`, the draft record `impact.json` (see "Impact record and register") and, later, the RICEFW workbook. This is the skill that proves the index and pays back first.
 2. **pr-reference-check.** Input: a diff. Method: extract every API name referenced in changed files, `exists()` and `type()` against the index, report invented names and type mismatches with `path:line`. Deterministic checks (secrets, manifest completeness, naming, debug statements) are not in this skill; they are CI steps the skill links to.
 
-Then, by demand and only once the first two are stable on one squad: release-impact (reads `inventory.json` against release notes), discovery-pack, test-case-design, wiki-page. Each is a consumer of the same index and the same evidence taxonomy, so each is mostly method and templates.
+Then, by demand and only once the first two are stable on one squad: release-impact (reads `inventory.json` against release notes), test-case-design, wiki-page. Each is a consumer of the same index and the same evidence taxonomy, so each is mostly method and templates. The discovery-pack backlog item is no longer on this list: story-refine absorbed it (see "Story refinement").
 
 Evals run on every PR touching `framework/skills/`. A case passes when the deterministic assertions hold on all five runs (every cited `path:line` exists, no banned phrases, evidence labels on every claim) and the rubric score is at or above the committed threshold on at least four.
 
@@ -249,10 +249,10 @@ Story refinement is step 0 of the workflow, before story-impact sizes anything. 
 - **Each acceptance criterion:** `id` (`AC-n`), `given`, `when`, `then`, `examples`, `source` (`stated`, `edge-case` or `assistant-proposed`).
 - **Each edge case:** `id` (`EC-n`), `category`, `component`, `detail`, `evidence`, `confidence`, `becameCriterion` (an `AC-n` id, or null with a `reason`), `reason`.
 - **Each dropped seed:** `category`, `component`, `detail`, `reason`.
-- **Each open question:** `id` (`OQ-n`), `text`, `ownerRole`, `answer` (text or null), `deferred` (true or false).
+- **Each open question:** `id` (`OQ-n`), `text`, `ownerRole`, `answer` (text or null), `deferred` (true or false), `deferredBy` (the role that deferred it: a non-empty string when `deferred` is true, null otherwise). Only the owner sets `deferred` and `deferredBy`, before promotion; the assistant writes `deferred: false` and `deferredBy: null`.
 - **Each overlap:** `api`, `type`, `kind`, `stories` (each with `storyId`, `squad`, `status`, `changeType`, `type`, `commit`).
 
-`status` is `draft` in `ai-context/` and `confirmed` in `impacts/`, where `confirmedBy` is set. `AC`, `EC` and `OQ` ids run from 1 with no gaps. The id formats are fixed now because WS8's `check_trace.py` will read them. `validate_story.py --all` checks every `impacts/*/story.json` as confirmed, checks that its folder is named `<storyId>-<slug>`, and checks that no `storyId` appears twice among the story records.
+`status` is `draft` in `ai-context/` and `confirmed` in `impacts/`, where `confirmedBy` is set. `AC`, `EC` and `OQ` ids run from 1 with no gaps. The id formats are fixed now because WS8's `check_trace.py` will read them. `validate_story.py --all` checks every `impacts/*/story.json` as confirmed, checks that its folder is named `<storyId>-<slug>`, checks that no `storyId` appears twice among the story records, and runs `check_ac` on each record, reporting its findings as errors.
 
 **Decision: `detail` on edge cases and dropped seeds.** The spec's `story.json` list gives `edgeCases[]` no `detail` and has no `droppedSeeds[]` at all. WS11 adds both. Several seeds share a component and a category (on `Case`: a validation rule, a trigger and a flow are all `automation`). Without `detail` they collapse into one, and "each seed kept or dropped with a reason" cannot be checked. A seed is identified by its (component, category, detail). The skill copies the component, category and detail verbatim from the seed and never rewords `detail`. The spec text still lacks `detail`; this section records the extension.
 
@@ -260,6 +260,7 @@ Story refinement is step 0 of the workflow, before story-impact sizes anything. 
 
 `tools/stories/check_ac.py <story.json>` prints `{"ok", "findings": [{id, rule, detail}]}` and exits 1 when there are findings. Its rules:
 
+- **`no-criteria`:** the story has no acceptance criteria (`acceptanceCriteria` is empty, missing or not a list). The finding's `id` is `acceptanceCriteria`.
 - **`missing-gwt`:** `given`, `when` or `then` is empty or missing.
 - **`multiple-outcomes`:** `then` holds a `;`, a sentence break (`.`, `!` or `?`, then whitespace, then a capital or a digit), or the word `and` or `or`. The documented fix is to split it into separate criteria, one outcome each.
 - **`no-example`:** `examples` holds no non-empty string.
@@ -288,10 +289,13 @@ Quoted text (`"..."` or `` `...` ``) is ignored by `multiple-outcomes` and `vagu
 | `automation` | Each validation rule on the object, with its state (`active`, `inactive` or `status unknown`); each flow whose trigger object is the object, with its status; each trigger on the object (`status not in index`) | The rule, flow or trigger | Confirmed |
 | `bulk` | Every object: `a bulk change of 200 records or more` | The object's first trigger, else the object file's `<CustomObject` line, else none. A standard object with no trigger and no object file in the repo (such as `Account` in the demo) gets no evidence | Confirmed; Unverifiable with no evidence |
 | `integration-user` | A permission set whose api name contains `integration` (any case) and that grants a field on the object | That grant | Inferred: the codebase holds no users |
+| `org-only` | Every object, once: `sharing settings and real data volumes are org configuration, not in this repo` | None | Unverifiable: the spec's "org-only facts (sharing settings, real data volumes) are labelled Unverifiable" |
 
 The code differs from the spec's wording on automation and on the integration user. The spec says validation rules, flows and triggers "already active"; the code emits every one it finds and puts the state in `detail`, so the skill can judge an inactive rule. The spec says "the integration user, when the codebase has one"; the code infers one only from a permission set named for integration that grants a field on the object.
 
 The skill saves the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`. It must account for every seed: keep it as an edge case (copying `category`, `component`, `detail`, `evidence` and `confidence` verbatim) or drop it with a one-line reason. It never adds an edge case that is not a seed. A risk the index cannot see becomes an open question. For a greenfield story the scan returns few or no seeds, and the skill says so rather than inventing any.
+
+**Greenfield seeds arrive with WS10.** Today a planned new component (an `unresolved` term) gives no seeds, so a greenfield story gets edge cases only from the existing objects it touches. Seeds from a confirmed design's declared components (the new object, its fields and its automation, before any metadata exists) arrive with WS10, which brings the design input. Until then the greenfield edge cases are open questions with owner roles.
 
 ### Writing the draft
 
@@ -300,7 +304,7 @@ The skill saves the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`. It 
 - `checkout_out_dir` refuses (exit 2) a folder that resolves outside `<root>/ai-context/` or outside this checkout's `ai-context/`, or an `ai-context/` that is a symlink.
 - `write_nofollow` never writes through a symlink.
 
-**Every overlap at refinement is a watch.** The writer sends each term in the story's `seeds` list through `register.overlaps()` as a `changeType: "review"` component. A watch is any overlap where one side marks the component `review`, so every refinement overlap is a watch. Whether the story will modify a component is not known until it is sized. `story.md`'s `## Overlaps with other stories` section is a snapshot of the register at write time, built the same way as `impact.md`'s.
+**Every overlap at refinement is a watch.** The writer sends each term in the story's `seeds` list through `register.overlaps()` as a `changeType: "review"` component. A watch is any overlap where one side marks the component `review`, so every refinement overlap is a watch. Whether the story will modify a component is not known until it is sized. `story.md`'s `## Overlaps with other stories` section is a snapshot of the register at write time, built the same way as `impact.md`'s. `story.md` is rendered by `tools/stories/story_md.py`, which `promote.py --story` also uses for the confirmed record, so the draft md and the confirmed md come from the same renderer.
 
 ### Confirmation by the product owner
 
@@ -315,15 +319,17 @@ Promotion is the confirmation, and it is a human step. The assistant never runs 
 1. `story.json` or `story.md` is missing or a symlink, or `story.json` cannot be parsed (deeply nested JSON included).
 2. The draft fails `validate_story` with evidence files checked.
 3. `check_ac` has any finding.
-4. An open question is neither answered (non-empty `answer`) nor `deferred: true`.
+4. An open question is neither answered (non-empty `answer`) nor `deferred: true` (with `deferredBy` set; step 2 refuses a deferral without it).
 5. The data scan finds a hit in `story.json` or `story.md`.
 6. Destination checks: `impacts/`, the destination folder or a destination file is a symlink; the folder resolves outside `<root>/impacts/`; `story.json` or `story.md` already exists there (unless `--replace`); or the same `storyId` already has an `impact.json` or `story.json` in another `impacts/` folder.
 7. The confirmed record (status `confirmed`, `confirmedBy` set) fails validation.
 8. The data scan finds a hit in the exact bytes about to be written, `--confirmed-by` included.
 
-It writes `impacts/<storyId>-<slug>/story.json` and a byte-for-byte copy of `story.md`, and never touches `impact.json` or `impact.md` in the same folder. `--replace` applies only to the story files.
+Before writing, it prints every deferred question (`OQ-n`, owner role, deferred by, text) and every answered question with its answer, so the product owner sees what they are confirming past. A refused run prints none of it.
 
-**One folder per story id.** Because of the cross-folder refusal, a story and its impact record must share one `<storyId>-<slug>` folder, so the refinement and the sizing need the same slug. A story confirmed as `DEMO-201-premium-escalation-refined` blocks an impact promoted as `DEMO-201-premium-escalation-key`, and the other way round. The impact path refuses a destination folder that exists at all unless `--replace` is given (`promote.py` main path); with `--replace` it rewrites only `impact.json` and `impact.md`.
+It writes `impacts/<storyId>-<slug>/story.json` and a `story.md` re-rendered from the confirmed record by `tools/stories/story_md.py`, the renderer `write_story.py` uses. The draft `story.md` is not copied. The promoted md therefore states `Status: confirmed`, `Confirmed by: <value>` and every answer and deferral that `story.json` holds. Its Overlaps section shows the overlaps as recorded at refinement, without a register commit, because promotion does not re-read the register. Step 8's scan runs on these final bytes. Promotion never touches `impact.json` or `impact.md` in the same folder, and `--replace` applies only to the story files. (The impact path is different: it still writes a byte-for-byte copy of `impact.md`.)
+
+**One folder per story id.** Because of the cross-folder refusal, a story and its impact record must share one `<storyId>-<slug>` folder, so the refinement and the sizing need the same slug. The demo uses the slug `premium-escalation` for the DEMO-201 story and for its impact. A story confirmed as `DEMO-201-premium-escalation` would block an impact promoted as `DEMO-201-premium-escalation-key`, and the other way round. The impact path refuses a destination folder that exists at all unless `--replace` is given (`promote.py` main path); with `--replace` it rewrites only `impact.json` and `impact.md`.
 
 ### Where it runs
 
@@ -341,12 +347,15 @@ In CI today the workflow runs none of the story checks. After the WS11 CI patch,
 
 ### Evals and what is proven
 
-The skill's eval cases are in `framework/skills/story-refine/evals/cases/`: a vague story (001, DEMO-101), a story whose seeds include an existing validation rule that must be kept (002, DEMO-201, `must_keep_edge: ["Escalation_Needs_Level"]`), and a greenfield story (003, DEMO-301). `tools/evals/run_skill.py` applies these assertions:
+The skill's eval cases are in `framework/skills/story-refine/evals/cases/`: a vague story (001, DEMO-101), a story whose seeds include an existing validation rule that must be kept and must become a criterion (002, DEMO-201, slug `premium-escalation`, `must_keep_edge` and `must_become_criterion: ["Escalation_Needs_Level"]`), and a greenfield story (003, DEMO-301). `tools/evals/run_skill.py` applies these assertions:
 
 - `story_json_valid`: the `story.json` beside the output passes `validate_story` as a draft, with evidence, and `check_ac` has no findings.
 - `edges_from_seeds_only`: every edge case's triple is in `scan/edge-seeds.json`, with the seed's evidence and confidence unchanged.
 - `seeds_accounted`: every seed is an edge case or a dropped seed.
 - `must_keep_edge`: the named item is an edge case that is a real seed (by component, or a whole word in `detail`).
+- `must_become_criterion`: as `must_keep_edge`, and that edge case has a non-null `becameCriterion`.
+
+**The scan is not ground truth until recomputed.** The skill writes `scan/edge-seeds.json` itself, so a skill that omits or invents a seed there could pass the seed assertions. For `must_keep_edge`, `must_become_criterion`, `edges_from_seeds_only` and `seeds_accounted`, `run_skill.py` recomputes `edge_seeds(load(<index>), story.json seeds, <checkout>)` from `tools/index/query.py` (`--index`, default `<checkout>/index`). It fails when the saved scan differs, comparing parsed JSON with order ignored. The index must be the one the skill ran against (for the demo cases, built with `--root demo/org`).
 - `must_list_overlap`: as story-impact's `must_flag_overlap`, for `story.md`.
 
 No case asserts an overlap: DEMO-201's natural seeds share no component with DEMO-202, the only story on the register.

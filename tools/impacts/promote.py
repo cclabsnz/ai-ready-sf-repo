@@ -8,10 +8,15 @@ with the data guard, then writes impacts/<storyId>-<slug>/impact.json (status in
 set) and a byte-for-byte copy of impact.md. Nothing else is copied. The result is validated as
 promoted. This script does not decide anything: --confirmed-by records who did.
 
-With --story, promotes <draft-dir>/story.json and story.md instead, to impacts/<storyId>-<slug>/
-(status confirmed, confirmedBy set). Refusal order: draft validation with evidence, acceptance
-criteria check, open questions, data scan, destination checks. impact.json and impact.md are never
-touched. --replace applies only to story.json and story.md.
+With --story, promotes <draft-dir>/story.json instead, to impacts/<storyId>-<slug>/story.json
+(status confirmed, confirmedBy set). story.md is not copied: it is re-rendered from the confirmed
+record by tools/stories/story_md.py (the writer's renderer), so it states the confirmed status,
+the confirmer and every answer and deferral; overlaps are shown as recorded at refinement.
+Refusal order: draft validation with evidence, acceptance criteria check, open questions, data
+scan of the draft, destination checks, data scan of the final bytes. Before writing, it prints
+every deferred question (id, owner role, deferred by, text) and every answered one with its
+answer. impact.json and impact.md are never touched. --replace applies only to story.json and
+story.md.
 
 Exit codes: 0 ok, 1 refused (invalid draft, data hit, destination exists, symlink), 2 bad usage.
 Code comes from this checkout (located from __file__); data comes from --root.
@@ -32,6 +37,7 @@ sys.path.insert(1, os.path.join(REPO, "tools", "stories"))
 from validate import validate  # noqa: E402
 from validate_story import validate_story  # noqa: E402
 from check_ac import check_ac, load_vague  # noqa: E402
+from story_md import render_md  # noqa: E402  (tools/stories/story_md.py, shared with write_story.py)
 
 SCAN = os.path.join(REPO, "tools", "guard", "scan_data.py")
 
@@ -89,6 +95,25 @@ def other_folder_record(imp, dest, story_id):
             if isinstance(rec, dict) and rec.get("storyId") == story_id:
                 return other
     return None
+
+
+def confirmation_summary(doc):
+    """Lines listing what the confirmer confirms past: deferred questions, then answered ones."""
+    def one_line(v):
+        return " ".join(str(v).split())
+
+    qs = doc["openQuestions"]
+    deferred = [q for q in qs if q["deferred"] is True]
+    answered = [q for q in qs if isinstance(q["answer"], str) and q["answer"].strip()]
+    lines = ["Open questions at confirmation (story %s):" % doc["storyId"], "Deferred:"]
+    lines += ["- %s (owner role: %s; deferred by: %s): %s" % (
+        q["id"], one_line(q["ownerRole"]), one_line(q["deferredBy"]), one_line(q["text"]))
+        for q in deferred] or ["- none"]
+    lines.append("Answered:")
+    lines += ["- %s (owner role: %s): %s -> answer: %s" % (
+        q["id"], one_line(q["ownerRole"]), one_line(q["text"]), one_line(q["answer"]))
+        for q in answered] or ["- none"]
+    return lines
 
 
 def promote_story(a, who, draft):
@@ -154,13 +179,14 @@ def promote_story(a, who, draft):
         for e in errors:
             print(e, file=sys.stderr)
         return refuse("confirmed record is not valid; nothing written")
-    with open(msrc, "rb") as fh:
-        md_bytes = fh.read()
+    # Overlaps were computed at refinement: no register re-read, no promotion-time commit.
+    md_bytes = render_md(confirmed, [], None).encode("utf-8")
     json_bytes = (json.dumps(confirmed, indent=2, sort_keys=True) + "\n").encode("utf-8")
     hit = scan_final(json_bytes, md_bytes)
     if hit:
         sys.stderr.write(hit)
         return refuse("data guard reported hits in the final record; nothing written")
+    print("\n".join(confirmation_summary(confirmed)))
     os.makedirs(dest, exist_ok=True)
     try:
         write_nofollow(djson, json_bytes)
