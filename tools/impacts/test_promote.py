@@ -846,6 +846,32 @@ def case_impact_without_design_unchanged():
     assert code == 1 and "the draft has no design.json" in out, out
 
 
+@story_cleanup
+def case_impact_after_story_needs_no_replace():
+    root = make_root()
+    dest = os.path.join(root, DEST)
+    write(os.path.join(dest, "story.json"), '{"keep": 1}\n')
+    write(os.path.join(dest, "story.md"), "keep\n")
+    code, out = run(root)
+    assert code == 0, out
+    assert read_bytes(os.path.join(dest, "story.json")) == b'{"keep": 1}\n'
+    assert read_bytes(os.path.join(dest, "story.md")) == b"keep\n"
+    assert sorted(os.listdir(dest)) == ["impact.json", "impact.md", "story.json", "story.md"]
+
+
+@story_cleanup
+def case_impact_over_existing_impact_needs_replace():
+    root = make_root()
+    dest = os.path.join(root, DEST)
+    write(os.path.join(dest, "story.json"), '{"keep": 1}\n')
+    assert run(root)[0] == 0
+    code, out = run(root)
+    assert code == 1 and "already exists and holds" in out and "impact.json" in out, out
+    code, out = run(root, "--replace")
+    assert code == 0, out
+    assert read_bytes(os.path.join(dest, "story.json")) == b'{"keep": 1}\n'
+
+
 def main():
     cases =[(n, f) for n, f in sorted(globals().items()) if n.startswith("case_") and callable(f)]
     return run_tests(cases)

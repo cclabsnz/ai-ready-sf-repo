@@ -332,8 +332,10 @@ def main(argv=None):
     imp_real = os.path.join(os.path.realpath(a.root), "impacts")
     if not os.path.realpath(dest).startswith(imp_real + os.sep):
         return refuse("%s resolves outside <root>/impacts/; nothing written" % dest)
-    if os.path.exists(dest) and not a.replace:
-        return refuse("%s already exists; use --replace to overwrite" % dest)
+    held = [p for p in (djson, dmd, ddjson, ddmd) if os.path.lexists(p)]
+    if held and not a.replace:
+        return refuse("%s already exists and holds %s; use --replace to overwrite"
+                      % (dest, ", ".join(os.path.basename(p) for p in held)))
     if not has_design:
         for p in (ddjson, ddmd):
             if os.path.lexists(p):

@@ -1,6 +1,7 @@
 # Demo org
 
-A synthetic Sales/Service org used to exercise the index, story-refine, story-impact and the evals. Nothing here
+A synthetic Sales/Service org used to exercise the index, story-refine, solution-design, story-impact and the evals,
+plus an empty greenfield skeleton. Nothing here
 comes from a real org; names are fictional. Nothing was deployed anywhere.
 
 ## Layout
@@ -13,6 +14,33 @@ comes from a real org; names are fictional. Nothing was deployed anywhere.
   whose criteria are vague on purpose. It passes `tools/stories/validate_story.py` and fails
   `tools/stories/check_ac.py`, to show what that check reports (README quick start step 9). It is
   not story-refine output: the skill's writer refuses vague criteria.
+- `demo/greenfield/`: the empty greenfield skeleton (see below).
+
+## The greenfield skeleton
+
+`demo/greenfield/` is what greenfield onboarding creates for a repo with no code yet:
+`sfdx-project.json` (`packageDirectories` of `force-app` as the default, and `sourceApiVersion`
+`62.0`, matching `demo/org/sfdx-project.json`) and `force-app/main/default/` with a `.gitkeep`
+in `classes`, `objects`, `lwc`, `flows` and `permissionsets`. It holds no metadata, so its index
+is empty: `query.py exists`, `consumers` and `edge-seeds` on it exit 0 with empty results
+(`case_empty_source_root_indexes` in `tools/onboard/test_onboard.py`).
+
+It was generated, not hand-written, and is committed as generated:
+
+```sh
+python3 tools/onboard/onboard.py --starting-point greenfield --source-root demo/greenfield
+```
+
+That run leaves the repo's `.ai-framework.json` (`sourceRoot` `demo/org`) as it is, because it
+has no `--write-config`. It replaces `index/` with the empty greenfield index, so rebuild the
+demo index afterwards with `python3 tools/index/build_index.py --from-config`.
+
+solution-design's eval case 002 (`framework/skills/solution-design/evals/cases/002-greenfield-warranty.json`,
+story DEMO-301, a warranty claim object) runs against this skeleton. Its `indexRoot` is
+`demo/greenfield`, so the operator builds that index with `--root demo/greenfield` and an absolute
+`--out` of their choosing and passes it to `run_skill.py` as `--index`. Against the empty index,
+every component of every option must be `new`. DEMO-301 has no story file or answer key under
+`demo/stories/`; the case's input holds the story text.
 
 ## What the index models
 
@@ -112,8 +140,12 @@ keys are unaffected: a picklist value is a field attribute in the index, not a n
 
 ## Building an index of the demo
 
-`build_index.py --out` resolves relative to `--root`, and so does the default (`index`), which would
-write `demo/org/index` inside the scanned tree. Always pass an absolute `--out`.
+`python3 tools/index/build_index.py --from-config` builds it: `.ai-framework.json` names
+`demo/org` as the source root, and `--from-config` always writes `index/` at the repo root.
+
+A manual build with `--root demo/org` is different. `--out` resolves relative to `--root`, and so
+does the default (`index`), which would write `demo/org/index` inside the scanned tree. Pass an
+absolute `--out` there.
 
 ## Index limits on a real org
 

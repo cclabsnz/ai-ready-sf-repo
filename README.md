@@ -30,10 +30,28 @@ Six principles, in order of precedence:
   a story's fields and objects, each with evidence.
 - **Demo org** (`demo/`): a synthetic Sales/Service org with three stories and a reviewed answer
   key for each.
-- **Skills**: `story-refine` (step 0: one rough story turned into Given/When/Then criteria and
+- **Skills**: `story-refine` (one rough story turned into Given/When/Then criteria and
   edge cases seeded from the index, written as a draft `story.json` and `story.md`),
-  `story-impact` (the evidenced impact of one story, written as `impact.md` plus a draft record,
-  `impact.json`) and `pr-reference-check` (invented or mistyped API names in a diff).
+  `solution-design` (evidenced options for one story, always including "do nothing", with one
+  provisional recommendation, written as a draft `design.json` and `design.md`),
+  `story-impact` (the evidenced impact of one story, or of one design option, written as
+  `impact.md` plus a draft record, `impact.json`) and `pr-reference-check` (invented or mistyped
+  API names in a diff). story-refine, solution-design and story-impact make up the
+  [day-one workflow](#the-day-one-workflow).
+- **Starting points** (`tools/onboard/`, `tools/config/`, WS10): `.ai-framework.json` names the
+  repo's starting point (`existing` or `greenfield`) and its source root, read by one module,
+  `tools/config/framework_config.py`. `build_index.py --from-config` indexes that source root.
+  `onboard.py` sets a repo up from either starting point (see
+  [Two starting points](#two-starting-points)); `demo/greenfield/` is the committed greenfield
+  skeleton.
+- **Solution design** (`tools/designs/`, WS10): the `design.json` schema
+  (`validate_design.py`), and the owner's choice of option at promotion
+  (`promote.py --option`). No model has run solution-design, or story-impact on a design option,
+  under Claude Code yet: they are shown only by writer smoke tests (see
+  [Day-one workflow](docs/DESIGN.md#day-one-workflow)). The WS10 guard and CI patches are not
+  applied yet: until they are, the assistant runs `validate_design.py` and
+  `framework_config.py` directly only in `maintain`, and CI runs none of the new WS10 test scripts. The rule
+  baseline for an existing codebase is deferred to WS8, which creates `check_rules.py`.
 - **Story refinement** (`tools/stories/`, WS11): the `story.json` schema
   (`validate_story.py`), a vague-criteria check (`check_ac.py`), and confirmation by the product
   owner, who promotes the story into `impacts/` (`promote.py --story`). No model has run
@@ -47,7 +65,8 @@ Six principles, in order of precedence:
   components; that section never fails anything. At PR time, `pr_check.py` maps the changed
   files to components and lists the registered stories and other open PRs that touch the same
   components; that listing never fails anything. It also reports scope drift (`outOfScope`,
-  `noImpact`) as comments, unless `.ai-framework.json` sets a finding class to `fail`. The PR
+  `noImpact`) as comments, unless `impactChecks` in `.ai-framework.json` sets a finding class
+  to `fail`. The PR
   check runs in CI (see [Running the checks](#running-the-checks)).
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
@@ -55,11 +74,52 @@ Six principles, in order of precedence:
   (deterministic assertions on a skill's output).
 
 **Planned, not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)): solution design and starting points (WS10), scoped code
-writing in `build` mode and `check_trace.py`, which traces each confirmed criterion to its tests
-(WS8; until then `build` cannot write source), consistency evals that
+and [docs/DESIGN.md](docs/DESIGN.md)): scoped code writing in `build` mode, the rule-violation
+baseline for an existing codebase (`check_rules.py`) and `check_trace.py`, which traces each
+confirmed criterion to its tests (WS8; until then `build` cannot write source), consistency evals that
 score repeated runs against the answer keys (WS3), versioned packaging and pinning (WS7), and the
 Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
+
+## The day-one workflow
+
+This is the main path for one story, on an existing codebase or a greenfield one. The assistant
+does the analysis and may recommend and proceed provisionally. A named owner confirms each
+result by promoting it; the assistant never does.
+
+1. **Refine** with `story-refine`. A rough story becomes Given/When/Then criteria, edge cases
+   from the index and open questions with owner roles, written as a draft `story.json` and
+   `story.md`. The product owner confirms it with `promote.py --story`
+   (see [Confirming a refined story](#confirming-a-refined-story)).
+2. **Understand** with the front half of `story-impact`. It checks that the index is current
+   (rebuilding with `python3 tools/index/build_index.py --from-config` when it is stale), frames
+   the story, derives seed terms and scans the index.
+3. **Design** with `solution-design`. It writes options, exactly one of them "do nothing", each
+   with trade-offs on named criteria and the components it touches with evidence. It names one
+   provisional recommendation with reasons, written as a draft `design.json` and `design.md`.
+4. **Assess** with `story-impact` on the recommended option. solution-design hands that option
+   on, and story-impact sizes only its components. The draft `impact.json` names the option in
+   `designOption`.
+5. **Confirm**, a human step. The owner promotes the impact and chooses the option:
+   `promote.py ai-context/<storyId>-<slug> --confirmed-by "<name or role>" --option OPT-<n>`.
+   When step 1's story was promoted first, the impact goes into the same folder without
+   `--replace`; the story files stay as they are.
+   Leaving out `--option` chooses the recommendation. If the impact assessed a different option,
+   promotion refuses and asks for story-impact to be re-run for the chosen one (see
+   [Choosing a design option](#choosing-a-design-option)).
+
+All of these write to `ai-context/<storyId>-<slug>/`, and the promotions copy the confirmed
+records into `impacts/<storyId>-<slug>/`. The skills run in Claude Code (`/story-refine`,
+`/solution-design`, `/story-impact`, or through the `discovery-lead` and `analyst` agents). The
+promotions run in your own terminal.
+
+**What is proven.** The scripts behind each step have tests. The quick start below runs the
+index and the refinement checks on the demo, and has you run story-impact on one demo story in
+Claude Code. No model has run story-refine,
+solution-design or story-impact's assessment of a design option under Claude Code yet. Their
+writers and eval assertions are shown only by writer smoke tests on hand-built drafts. A story
+can skip the design step: story-impact without a `design.json` sizes the story as before.
+
+To set a repo up for this workflow, see [Two starting points](#two-starting-points).
 
 ## Prerequisites
 
@@ -114,23 +174,23 @@ Adding a remote or setting branch tracking does not need it.
 
 **4. Build the index of the demo org.**
 
-Replace `/full/path/to/ai-ready-sf-repo` with your clone's absolute path:
-
 ```sh
-python3 tools/index/build_index.py --root demo/org --out /full/path/to/ai-ready-sf-repo/index
+python3 tools/index/build_index.py --from-config
 ```
-
-This form works both in your terminal and inside Claude Code. In a plain terminal, you can use
-`--out "$PWD/index"` as a shortcut. Claude Code's guard refuses any `$`, so there you must type
-the path out.
 
 Expected: `indexed <n> nodes, <n> edges at <commit>`.
 
-`--out` must be absolute. A relative `--out` is joined to `--root`, so `--out index` writes
-`demo/org/index/`, inside the tree being scanned. `index/` at the repo root is git-ignored. It is
-also where `query.py`, `story-impact` and its report writer look by default. (On Windows, Git
-Bash is expected to convert `$PWD` into a path `py -3` understands. This is Inferred, not
-tested.)
+`--from-config` indexes the `sourceRoot` named in `.ai-framework.json`, which this repo sets to
+`demo/org`, into `index/` at the repo root. `index/` is git-ignored. It is also where `query.py`,
+the skills and their writers look by default. The same command works in your terminal and inside
+Claude Code, and it is what story-impact and solution-design run when they find the index stale.
+To see the configured source root, run `python3 tools/config/framework_config.py source-root`
+in your terminal (expected: `demo/org`). Inside Claude Code that script needs `maintain` until
+the owner applies the WS10 guard patch.
+
+`--from-config` refuses `--root` or `--out` alongside it (exit 2). If you build an index by hand
+with `--root` instead, pass an absolute `--out`: a relative `--out` is joined to `--root`, so
+`--root demo/org --out index` writes `demo/org/index/`, inside the tree being scanned.
 
 **5. See the hidden 3-hop chain.**
 
@@ -254,10 +314,9 @@ picks the slug, so the folder is something like `ai-context/DEMO-201-premium-esc
 register. Its rows can differ from step 7's. A row's kind follows the change type the assistant
 assigns, so a component it marks `modify` shows as a conflict with DEMO-202, not a watch.
 
-**If story-impact reports the index as stale, re-run step 4 yourself; don't let it rebuild from
-the repo root.** Its fallback rebuilds with default arguments, which index the repo root, and
-the repo root holds no `force-app/`. If you ask the assistant to run step 4 for you, give it the
-literal absolute `--out` path.
+If story-impact finds the index stale, it rebuilds it with `build_index.py --from-config`, the
+command from step 4, so the rebuild indexes `demo/org`. The guard admits that command in
+`normal`, as a write to `index/`.
 
 To compare with the answer key:
 
@@ -409,6 +468,131 @@ gives no expected output for it. Case 002 has passed only as a smoke test of the
 hand-built draft fed through `write_story.py`. That shows the writer and the assertions work, not
 that the skill does.
 
+## Two starting points
+
+A repo comes to this framework either with a codebase already in it (`existing`) or with none
+(`greenfield`). `tools/onboard/onboard.py` sets it up from either. Run it in your own terminal:
+in Claude Code it runs only in `maintain`, and the WS10 guard patch does not change that. This
+repo is already onboarded as `existing`, with `.ai-framework.json` reading
+`{"startingPoint": "existing", "sourceRoot": "demo/org"}`.
+
+What each run writes, in a clone of this repo:
+
+- **existing** rebuilds `index/` from the source root and writes knowledge stubs to
+  `framework/knowledge/stubs/`. That folder is not git-ignored, so the stubs show as untracked
+  files. Delete them afterwards if you are only trying the command.
+- **greenfield** replaces `index/` with the index of an empty source root. Run step 4's
+  `python3 tools/index/build_index.py --from-config` afterwards, before anything that needs the
+  demo index.
+- Neither touches `.ai-framework.json` unless you pass `--write-config`, which writes
+  `startingPoint` and `sourceRoot` and keeps any `impactChecks`.
+
+The outputs below are real runs, with every count replaced by `<n>` and the commit by
+`<commit>`.
+
+**Existing codebase.** `--owner-role` is required: it becomes the `owner` of every stub. The
+source root comes from `.ai-framework.json` unless you pass `--source-root`.
+
+```sh
+python3 tools/onboard/onboard.py --starting-point existing --owner-role "Salesforce Architect"
+```
+
+Expected:
+
+```
+# Onboarding: existing
+
+Source root: `demo/org`
+
+Index: `index` (build_index.py: indexed <n> nodes, <n> edges at <commit>)
+
+## Inventory (from index/inventory.json)
+
+### Apex by API version
+
+| API version | Classes and triggers |
+|---|---|
+| 45.0 | <n> |
+| 48.0 | <n> |
+| 52.0 | <n> |
+| 62.0 | <n> |
+
+### Apex by sharing
+
+| Sharing | Classes and triggers |
+|---|---|
+| inherited/unspecified | <n> |
+| with sharing | <n> |
+| without sharing | <n> |
+
+### Aura vs LWC
+
+| Framework | Bundles |
+|---|---|
+| Aura | <n> |
+| LWC | <n> |
+
+## Knowledge stubs (framework/knowledge/stubs/)
+
+Owner role: Salesforce Architect. Topics: the objects with the most inbound edges in the index; each stub names leads to verify, not facts.
+
+- `framework/knowledge/stubs/opportunity.md`: Opportunity
+- `framework/knowledge/stubs/account.md`: Account
+- `framework/knowledge/stubs/lead.md`: Lead
+- `framework/knowledge/stubs/contact.md`: Contact
+- `framework/knowledge/stubs/case.md`: Case
+
+Rule baseline: arrives with WS8 (check_rules.py)
+```
+
+- **The inventory** is read from `index/inventory.json`, not counted by the model.
+- **A stub holds leads, not facts.** `framework/knowledge/stubs/case.md` lists index components
+  under "Leads to verify:", with `last_verified` and `verified_by` empty. A human verifies the
+  leads, fills the stub and moves it up a level into `framework/knowledge/`. Lint and rendering
+  skip `stubs/`; they apply once the file is moved.
+- **Running it again** changes no stub or config. A stub you have edited is kept and reported; `--replace`
+  overwrites it.
+- **The rule baseline** (which existing rule violations to accept as debt) arrives with WS8,
+  which creates `check_rules.py`. Until then there is none.
+
+**Greenfield.** This repo keeps its greenfield skeleton in `demo/greenfield/`, so pass that as
+the source root. Without `--write-config` the repo's `.ai-framework.json` stays as it is.
+
+```sh
+python3 tools/onboard/onboard.py --starting-point greenfield --source-root demo/greenfield
+```
+
+Expected, in a clone where `demo/greenfield/` is already committed:
+
+```
+# Onboarding: greenfield
+
+Source root: `demo/greenfield`
+
+## Greenfield layout
+
+- `demo/greenfield/sfdx-project.json`: present
+- `demo/greenfield/force-app/main/default/classes/.gitkeep`: present
+- `demo/greenfield/force-app/main/default/objects/.gitkeep`: present
+- `demo/greenfield/force-app/main/default/lwc/.gitkeep`: present
+- `demo/greenfield/force-app/main/default/flows/.gitkeep`: present
+- `demo/greenfield/force-app/main/default/permissionsets/.gitkeep`: present
+
+Index: `index` (build_index.py: indexed <n> nodes, <n> edges at <commit>)
+
+Greenfield replaced `index/` with the index of `demo/greenfield`; `python3 tools/index/build_index.py --from-config` rebuilds it from the configured source root.
+
+no baseline: rules are strict from the first commit
+```
+
+- **On an empty folder** each line reads `created` instead of `present`.
+- **On a folder that already holds a codebase**, greenfield writes nothing and exits 1, naming
+  the files it found and pointing to the existing starting point. Try it on the demo org:
+  `python3 tools/onboard/onboard.py --starting-point greenfield --source-root demo/org`.
+- **No baseline is needed:** with no code yet, the rules apply in full from the first commit.
+
+Now rebuild the demo index: `python3 tools/index/build_index.py --from-config`.
+
 ## Promoting an impact
 
 A draft in `ai-context/` is workspace output. Neither the register nor the PR check reads it. To
@@ -421,15 +605,50 @@ python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --confirmed-by "<yo
 - **What it checks first:** it validates the draft, including that every evidence file and line
   exists, and it runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`.
 - **What it writes:** `impacts/<storyId>-<slug>/`, holding `impact.json` (with `status`
-  `in-flight` and your `confirmedBy`) and a copy of `impact.md`.
-- **What it refuses:** a folder that already exists (unless you pass `--replace`); a symlinked
+  `in-flight` and your `confirmedBy`) and a copy of `impact.md`, plus the confirmed design files
+  when the draft holds `design.json` (see [Choosing a design option](#choosing-a-design-option)).
+- **What it refuses:** a folder that already holds `impact.json`, `impact.md`, `design.json` or
+  `design.md` (unless you pass `--replace`; a folder holding only the confirmed story's
+  `story.json` and `story.md` is fine); a symlinked
   source, destination or `impacts/`; JSON it cannot parse, deeply nested JSON included; a story
-  id that already has a record (`impact.json` or `story.json`) in another `impacts/` folder; and
+  id that already has a record (`impact.json`, `story.json` or `design.json`) in another
+  `impacts/` folder; and
   a data-scan hit in the sources or in the exact bytes it would write. That last scan includes
   your `--confirmed-by`, so give a name or a role, never an email address.
 
 Then `git add` the folder and open a PR; a reviewer checks the impact before merge. When the story
 ships, edit its `status` to `shipped` in a later PR, and the register stops listing it.
+
+### Choosing a design option
+
+When solution-design ran for the story, the draft folder also holds `design.json`, and promotion
+is where the owner chooses the option. This is step 5 of the
+[day-one workflow](#the-day-one-workflow).
+
+```sh
+python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --confirmed-by "<name or role>" --option OPT-<n>
+```
+
+- **The choice:** `--option`, or the design's recommendation when you leave it out.
+- **What it checks first:** `design.json` validates as a draft against the index (`--index`,
+  default `index/`) with evidence checked, and names the same story id and slug as the impact.
+  Keep the index the design was written against: the greenfield onboarding run above replaces it.
+- **A mismatch is refused (exit 1):** when the impact assesses another option, promotion prints
+  `impact assesses OPT-a; re-run story-impact for OPT-b before promoting`. Re-run story-impact
+  for your option; never hand-edit the record.
+- **Choosing "do nothing":** an impact that marks any component `new`, `modify` or `delete` is
+  refused with `the chosen option is do nothing; the impact must not change components`. The
+  message also lists the changing components. `review` components are allowed.
+- **What it writes:** the impact as above, with `chosenOption` added to `impact.json`, plus
+  `design.json` (status `confirmed`, your `confirmedBy`, `chosenOption`) and a `design.md`
+  re-rendered from it. The design files get the same symlink, data-scan and cross-folder checks
+  as the impact.
+- **Without `design.json`:** `--option` is a usage error (exit 2), and an impact that names a
+  `designOption` is refused.
+- **After a confirmed story:** when step 1's confirmed story is already in
+  `impacts/<storyId>-<slug>/`, promote the impact into the same folder with no `--replace`; the
+  story files stay byte-identical (see
+  [Confirming a refined story](#confirming-a-refined-story), "One folder per story id").
 
 ### Confirming a refined story
 
@@ -456,8 +675,9 @@ python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --story --confirmed
 - **What it refuses:** the same symlink, cross-folder and final-bytes checks as an impact.
 - **One folder per story id.** A refined story and its impact record must share one
   `<storyId>-<slug>` folder, so give them the same slug. A story id on record in one folder
-  blocks a promotion into any other. Promoting an impact into a folder that already holds the
-  confirmed story needs `--replace`, which rewrites only `impact.json` and `impact.md`.
+  blocks a promotion into any other. Promoting an impact into a folder that holds only the
+  confirmed story needs no `--replace`. `--replace` is needed only when the folder already holds
+  `impact.json`, `impact.md`, `design.json` or `design.md`; it rewrites only those files.
 
 **Promotion is a human step.** In `normal` mode the guard blocks the assistant both from running
 `promote.py` and from writing `impacts/`. `maintain` allows both, so there it is a working rule
@@ -524,7 +744,7 @@ Common reasons:
 | `cannot determine what this command writes; run it as a human` | The guard cannot work out a write target, so it blocks (`python3 -c`, `python3 --version`, `bash -c`, complex compound lines) | Split the line into simple commands, use a script file, or run it yourself |
 | `scripts, pnpm and the Salesforce CLI run only from the project root, with no cd before them` | A `cd` came first | Drop the `cd`; use paths relative to the repo root |
 | `write to '...' is outside (...) in NORMAL mode` | Write outside the mode's paths | Write under `ai-context/` or `index/`, or switch mode |
-| `write to 'demo/org/index...' is outside ...` | A relative `--out` on `build_index.py` is joined to `--root` and lands in the scanned tree | Pass an absolute `--out` (step 4). In `maintain`, `demo/` is writable, so this is **not** blocked and silently writes into the demo; always use an absolute path |
+| `write to 'demo/org/index...' is outside ...` | A manual build with a relative `--out` on `build_index.py`: it is joined to `--root` and lands in the scanned tree | Use `build_index.py --from-config` (step 4), or pass an absolute `--out`. In `maintain`, `demo/` is writable, so a relative `--out` is **not** blocked and silently writes into the demo |
 | `write to '...' is never allowed (matches ...)` | Guard, settings, CI, CODEOWNERS and `.git/` change only by human-applied patch | Make the change yourself, reviewed |
 | `command matches blocked pattern '(?<![A-Za-z0-9_])guard\\.py'` or `the guard's own script and --rebaseline are for a human at a terminal` | Any Bash line naming the guard script is blocked, even `cat` or `grep` | Open the file in your editor or with the Read tool |
 | `framework is in ADVISE mode` | The kill switch is on | Nothing to fix locally; the assistant can only recommend |
@@ -539,6 +759,10 @@ Common reasons:
 | `write_story.py` exits 1 and writes nothing | The draft failed validation or the criteria check; the errors are on stderr | Fix the draft and run it again. A `vague-word` or `multiple-outcomes` finding means rewording or splitting a criterion, not deleting it |
 | `promote.py` refuses with `story <id> already has a record in ...` | That story id is on record in another `impacts/` folder | Use the existing folder's slug (see [Confirming a refined story](#confirming-a-refined-story)) |
 | `query.py edge-seeds` gives no `picklist-value` seeds for a picklist field | The index predates version `0.5.0`, or the field uses a global value set (one `Unverifiable` seed) | Rebuild the index (quick start step 4) |
+| `promote.py` refuses with `impact assesses OPT-a; re-run story-impact for OPT-b before promoting` | The owner chose an option the draft impact did not assess | Re-run story-impact for the chosen option (see [Choosing a design option](#choosing-a-design-option)) |
+| `build_index.py --from-config` exits 2 | `.ai-framework.json` is invalid (an unknown key, a bad value, or a `sourceRoot` outside the repo or not a folder), or `--root` or `--out` was given too | Fix the config; `python3 tools/config/framework_config.py source-root` prints the error. Drop `--root` and `--out` |
+| The guard blocks `tools/onboard/onboard.py` | Onboarding is on no `normal` allowlist, before or after the WS10 guard patch | Run it in your own terminal (see [Two starting points](#two-starting-points)) |
+| The guard blocks `validate_design.py` or `framework_config.py` in `normal` | The WS10 guard patch is not applied yet | Run them from your own terminal, or apply `ai-context/ws10/patches/` as `APPLY.md` there describes. `write_design.py` is on `normal`'s allowlist either way and runs the validator in-process |
 
 ## Running the checks
 
@@ -565,17 +789,26 @@ python3 tools/index/test_edge_seeds.py     # edge seeds from the index
 python3 tools/stories/test_validate_story.py # story.json schema
 python3 tools/stories/test_check_ac.py     # vague-criteria check
 python3 tools/stories/test_write_story.py  # story-refine writer: story.json and overlaps
+python3 tools/config/test_framework_config.py # .ai-framework.json reader
+python3 tools/onboard/test_onboard.py      # onboarding: existing and greenfield
+python3 tools/designs/test_validate_design.py # design.json schema
+python3 tools/designs/test_write_design.py # solution-design writer
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
+python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
-The impact and story test scripts each end with a `<n> passed, 0 failed` line; some add a
-skipped count, which covers symlink cases on machines without symlinks.
+The impact, story, config, onboarding and design test scripts each end with a
+`<n> passed, 0 failed` line; some add a skipped count, which covers symlink cases on machines
+without symlinks.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
+`validate_design.py --all` loads the index only when a design is committed under `impacts/`, so
+with no committed design it passes whatever `index/` holds. Once a design is committed, it
+needs the index of the source root (step 4), not the fixtures index.
 
 **CI today.** The WS1 and WS2 owner patches are applied (`3fb9e73`).
 `.github/workflows/framework-ci.yml` runs on pull requests that touch `framework/`, `tools/`,
@@ -607,14 +840,28 @@ applies as `ai-context/ws11/patches/APPLY.md` describes, adds these steps to `gu
 `tools/stories/test_write_story.py`, `tools/index/test_edge_seeds.py`, then
 `validate_story.py --all`. The `paths` filter already covers `tools/stories/`.
 
+**CI after the WS10 owner patch lands.** `ai-context/ws10/patches/ci-ws10.patch` is cut on top
+of the WS11 patches, so a human applies WS11 first, then WS10 as
+`ai-context/ws10/patches/APPLY.md` describes. Its changes to the workflow:
+
+- **`paths` filter:** gains `.ai-framework.json`.
+- **`guard-and-lint`:** `python tools/index/build_index.py --from-config` runs just before
+  `validate.py --all`. After the WS11 steps come `tools/config/test_framework_config.py`,
+  `tools/onboard/test_onboard.py`, `tools/designs/test_validate_design.py`,
+  `tools/designs/test_write_design.py` and `validate_design.py --all`.
+- **`impact-checks`:** the index is built from the base branch's `sourceRoot`
+  (`framework_config.py source-root --root base`) instead of a hard-coded `demo/org`, falling
+  back to `demo/org` when the base branch has no `framework_config.py`.
+
 ## Layout
 
 ```
 framework/            the ONE source tree squads edit (guild-owned via CODEOWNERS)
   rules/              always-on rules; scope front-matter -> Copilot applyTo
   knowledge/          owned, dated facts; no counts allowed (lint enforces)
-  skills/<name>/      SKILL.md + references/ + scripts/ + evals/ (story-refine, story-impact,
-                      pr-reference-check)
+  knowledge/stubs/    onboarding's knowledge stubs (leads only); outside lint and rendering
+  skills/<name>/      SKILL.md + references/ + scripts/ + evals/ (story-refine, solution-design,
+                      story-impact, pr-reference-check)
   agents/             posture + skill table, nothing else; evals/ holds trajectory specs
 tools/
   index/              build_index.py (the index), query.py (what skills call instead of grep),
@@ -630,8 +877,12 @@ tools/
                       pr_check.py, safe_write.py (shared writer checks), tests
   stories/            validate_story.py (story schema), check_ac.py + vague_words.json (vague
                       criteria), tests
+  designs/            validate_design.py (design schema), design_md.py (design.md renderer), tests
+  config/             framework_config.py (the one reader of .ai-framework.json), test
+  onboard/            onboard.py (existing and greenfield starting points), test
 demo/
   org/force-app/      synthetic Sales/Service org: hand-written story core + generated filler
+  greenfield/         the empty greenfield skeleton onboard.py creates (sfdx-project.json, .gitkeep)
   stories/            DEMO-*.md story text, DEMO-*.answer.json reviewed answer keys, and
                       DEMO-101.vague-example.story.json (a draft story.json with vague criteria)
 impacts/              the register: squads.json and promoted <storyId>-<slug>/ records (in git)
@@ -644,14 +895,17 @@ fixtures/             small synthetic metadata and diffs for tool tests and CI; 
 ai-context/           every assistant output lands here; git-ignored as a whole
 index/                generated; git-ignored, never committed
 VERSION               framework version (no install or pinning mechanism yet; WS7)
+.ai-framework.json    starting point, source root and PR-check severity
+                      ({"startingPoint": "existing", "sourceRoot": "demo/org"} here)
 ```
 
 ## Where to go next
 
 - [demo/README.md](demo/README.md): the demo org, what the index models, the stories and how
   the answer keys work.
-- [docs/DESIGN.md](docs/DESIGN.md): the five layers, the modes, the impact record and register,
-  story refinement, and what the guard does and does not guarantee.
+- [docs/DESIGN.md](docs/DESIGN.md): the layers, the modes, the day-one workflow (config,
+  onboarding, the design record and the option choice), the impact record and register, story
+  refinement, and what the guard does and does not guarantee.
 - [HANDOFF.md](HANDOFF.md): working rules for contributors, the smoke test and the backlog.
 - [The spec](docs/superpowers/specs/2026-10-29-published-framework-design.md): intent, owner
   decisions and the workstream order.

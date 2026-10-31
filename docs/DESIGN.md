@@ -137,7 +137,7 @@ Every skill has the same anatomy, enforced by `tools/build/lint_skill.py`:
 | `scripts/*.py` | Anything deterministic: queries, counts, docx/pptx/xlsx builders | stdlib only; `--version` flag; runs on Windows via `py -3` |
 | `evals/cases/*.json` and `evals/expected/*` | Three to five synthetic inputs with expected outputs | Required to merge; run with variance (N=5) |
 
-Step 0 of the workflow comes before story-impact and pr-reference-check: **story-refine** turns one rough story into Given/When/Then acceptance criteria and edge cases seeded from the index, and writes a draft `story.json` and `story.md` (see "Story refinement"). Sizing the refined story is then story-impact's job.
+Step 0 of the workflow comes before story-impact and pr-reference-check: **story-refine** turns one rough story into Given/When/Then acceptance criteria and edge cases seeded from the index, and writes a draft `story.json` and `story.md` (see "Story refinement"). Between understanding a story and sizing it, **solution-design** writes evidenced options, always including "do nothing", with one provisional recommendation; story-impact then sizes the recommended option. "Day-one workflow" below gives the order.
 
 The first two skills, in order:
 
@@ -147,6 +147,96 @@ The first two skills, in order:
 Then, by demand and only once the first two are stable on one squad: release-impact (reads `inventory.json` against release notes), test-case-design, wiki-page. Each is a consumer of the same index and the same evidence taxonomy, so each is mostly method and templates. The discovery-pack backlog item is no longer on this list: story-refine absorbed it (see "Story refinement").
 
 Evals run on every PR touching `framework/skills/`. A case passes when the deterministic assertions hold on all five runs (every cited `path:line` exists, no banned phrases, evidence labels on every claim) and the rubric score is at or above the committed threshold on at least four.
+
+## Day-one workflow
+
+One path takes a story from rough text to a confirmed impact, for an existing codebase and for a greenfield one alike. The assistant may recommend and proceed provisionally; a named owner confirms each recommendation before it becomes a committed impact. The steps, in order:
+
+| Step | What happens | Skill | Scripts | Output |
+| --- | --- | --- | --- | --- |
+| 1. Refine | A rough story becomes Given/When/Then criteria, edge cases from the index and open questions with owner roles. The product owner confirms it by promoting it | `story-refine` | `query.py edge-seeds`, `write_story.py`; the owner runs `promote.py --story` | Draft `story.json` and `story.md`; the confirmed records in `impacts/<storyId>-<slug>/` |
+| 2. Understand | story-impact's front half: freshness, inputs, a framing of the story, seed terms and the index scan | `story-impact` (Steps 0 to 3) | `query.py check-stale`, `build_index.py --from-config` when stale, `query.py exists` and `consumers` | The framing, `scan/terms.txt` |
+| 3. Design | Options within the range `MIN_OPTIONS` to `MAX_OPTIONS` in `tools/designs/validate_design.py`, exactly one of them "do nothing", each with trade-offs on named criteria and its components with evidence, plus one provisional recommendation with reasons | `solution-design` | `query.py exists` and `consumers`, `register.py view`, `write_design.py` (runs `validate_design.py` in-process) | Draft `design.json` and `design.md` in `ai-context/<id>-<slug>/` |
+| 4. Assess | story-impact sizes the recommended option, using only that option's components (Step 3a) | `story-impact` (Steps 3a to 5) | `write_report.py` | Draft `impact.json` with `designOption` and `provenance.recommendedBy: "assistant"`; `impact.md` names the assessed option |
+| 5. Confirm | A human promotes the impact and chooses the option, into the story's folder without `--replace` when the story was promoted first. A choice that differs from the assessed option is refused, with a request to re-run story-impact for it | none (a human step) | `promote.py --option OPT-n` | `impacts/<storyId>-<slug>/`: `impact.json` with `chosenOption`, a copy of `impact.md`, and `design.json` and `design.md` confirmed |
+
+The `analyst` agent runs solution-design and story-impact; the `discovery-lead` agent runs story-refine. Design is optional for a story: story-impact without a `design.json` sizes the story as it did before WS10, its impact carries no `designOption`, and promotion works as before. WS2's DEMO-202 record on the register is such an impact.
+
+### `.ai-framework.json`
+
+An optional file at the repo root, read only by `tools/config/framework_config.py`. Its keys:
+
+- **`startingPoint`:** `existing` or `greenfield`. Default `existing`.
+- **`sourceRoot`:** the folder that holds `force-app/` and `pkg-*/`, relative to the repo. Default `.`. It must resolve (realpath) to a folder inside the repo.
+- **`impactChecks`:** the PR check's severity switch (see "The right check"). Default `comment` for each class.
+
+A missing file means the defaults. An unknown top-level key is an error, so a typo surfaces. Every invalid value is exit 2 from the CLI (`framework_config.py source-root` prints the source root relative to the repo; `framework_config.py show` prints the whole config with defaults filled in). `pr_check.py` reads `impactChecks` through the same module, validating only the file's keys and `impactChecks`, so a bad `sourceRoot` cannot stop the PR check.
+
+This repo commits `{"startingPoint": "existing", "sourceRoot": "demo/org"}`. `python3 tools/index/build_index.py --from-config` indexes `sourceRoot` into `<checkout>/index`, the checkout being the script's own, never the cwd. It refuses `--root` or `--out` alongside it (exit 2). build_index's own defaults (`--root .`, `--out index` joined to `--root`) are unchanged. story-impact and solution-design rebuild a stale index with `--from-config`, so a stale rebuild indexes the configured source root, not the repo root.
+
+### Onboarding: both starting points
+
+`tools/onboard/onboard.py --starting-point existing|greenfield` sets a repo up for the workflow. `--source-root` defaults to `sourceRoot` from `.ai-framework.json`. `--write-config` writes `startingPoint` and `sourceRoot` into `.ai-framework.json`, keeping any `impactChecks`; without it the config is untouched. A target outside `--root`, or one that passes through a symlink, is exit 2 before anything is written.
+
+- **existing** (needs `--owner-role`): builds the index of the source root into `<root>/index`, prints the inventory from `index/inventory.json` (Apex by API version, Apex by sharing, Aura vs LWC) and writes knowledge stubs.
+- **greenfield:** creates the SFDX layout under the source root where it is absent (`sfdx-project.json` and `force-app/main/default/<folder>/.gitkeep` for `classes`, `objects`, `lwc`, `flows` and `permissionsets`), then builds the empty index, which replaces `<root>/index`. It exits 1 with nothing written when the source root already holds a codebase: any entry under `force-app/main/default/` beyond the skeleton, or an `sfdx-project.json` that differs from the one greenfield writes. `demo/greenfield/` is the committed skeleton, created by `onboard.py --starting-point greenfield --source-root demo/greenfield`.
+
+A second run changes nothing: an identical file is left alone, and a file that differs from what onboarding generates is kept and reported unless `--replace` is given.
+
+**The stub rule.** Stubs go to `framework/knowledge/stubs/<topic-slug>.md`, below lint's top-level scan of `framework/knowledge/` and outside rendering. Topics are the objects with the most inbound edges in the index (`STUB_TOPICS` in `onboard.py`, with the rationale in a comment), ties broken by name. Each stub's front-matter holds `topic`, `owner` (from `--owner-role`), `last_verified: ""` and `verified_by: ""`. Its body holds only "Leads to verify:" lines naming index components, never facts. A human fills a stub and moves it up a level into `framework/knowledge/`, where lint then applies. The stubs folder is not git-ignored, so new stubs show as untracked files until someone moves or deletes them.
+
+**The rule baseline is deferred to WS8.** The spec has existing-codebase onboarding record a rule-violation baseline from `check_rules.py`, which WS8 creates. Until then onboarding prints `Rule baseline: arrives with WS8 (check_rules.py)` for an existing codebase and `no baseline: rules are strict from the first commit` for a greenfield one.
+
+### The design record
+
+`tools/designs/validate_design.py` is the schema's source of truth. The key names are:
+
+- **Top level:** `schemaVersion`, `storyId`, `slug`, `status` (`draft` or `confirmed`), `options`, `recommendation`, `provenance`, plus `confirmedBy` and `chosenOption` on a confirmed record.
+- **Each option:** `id` (`OPT-n`, from 1 with no gaps), `title`, `summary`, `doNothing`, `components`, `tradeOffs`, `impactSummary`.
+- **Each component:** `api`, `type`, `changeType` (`new`, `modify`, `delete`, `review`), `evidence` (`path:line`, or null), `confidence`.
+- **Each trade-off:** `criterion` (`security`, `governor-limits`, `data-volume`, `licence-fit`, `maintainability`, `reuse`) and `note`.
+- **`recommendation`:** `optionId` and `reasons`.
+- **`provenance`:** `indexStamp`, `frameworkVersion`, `model`, `assistantVersion`.
+
+Exactly one option has `doNothing: true`, and it has no components; every other option has at least one. A `new` component has null evidence and must not already be an index node (compared case-insensitively). Checked against an index, any other component is an index node of the same type, and its evidence path is the node's path (or under it, for bundles). Null evidence on a non-`new` component is allowed only at `Unverifiable`.
+
+`framework/skills/solution-design/scripts/write_design.py` fills in `schemaVersion`, `status` and `provenance`, refuses a draft that carries any of them or the promotion keys, validates against the index (`--index`, default `<checkout>/index`; a missing index is exit 2) with evidence checked, and on any error writes nothing (exit 1). It writes `design.json` and `design.md` to `ai-context/<id>-<slug>/` through `tools/impacts/safe_write.py`. `design.md` is rendered by `tools/designs/design_md.py`, which promotion also uses. `validate_design.py --all` checks every `impacts/*/design.json` as confirmed; it loads the index only when a design exists, so a checkout with no designs exits 0 without one. `tools/impacts/validate.py --all` validates a `design.json` beside an impact the same way and checks its `chosenOption` equals the impact's.
+
+solution-design is the one skill allowed to recommend. story-impact and the reviewer keep "we recommend" banned.
+
+**impact.json additions.** Optional `designOption` (the option the record assesses), `provenance.recommendedBy` (`"assistant"` when that option was the assistant's recommendation; left out when the owner named another option), and `chosenOption` (promoted records only, required there with `designOption` and equal to it). A record without a design carries none of these keys.
+
+### The option choice at promotion
+
+`promote.py <draft-dir> --confirmed-by "<name or role>" [--option OPT-n]`. When the draft folder holds `design.json`, it is validated as a draft against the index (`--index`, default `<checkout>/index`) with evidence checked, and must have the same `storyId` and slug as the impact. The chosen option is `--option`, or the design's recommendation when the flag is left out. Then:
+
+- **A mismatch is refused (exit 1):** `impact assesses OPT-a; re-run story-impact for OPT-b before promoting`. story-impact is re-run for the owner's option with `designOption` set to it and `recommendedBy` left out. The record is never hand-edited.
+- **The do-nothing rule:** when the chosen option is the design's `doNothing` option, an impact with any `new`, `modify` or `delete` component is refused (exit 1): `the chosen option is do nothing; the impact must not change components`. The message also lists the changing components. `review` components are allowed.
+- **Otherwise** it writes the impact as before, adds `chosenOption` to `impact.json`, and writes `design.json` (status `confirmed`, `confirmedBy`, `chosenOption`) and a `design.md` re-rendered by `design_md.py`. The design files get the impact's protections: no symlinked source, a data scan of the draft and of the final bytes, writes that never follow a symlink, and the cross-folder story-id check, which now also looks at `design.json`.
+
+Without `design.json`, `--option` is bad usage (exit 2), an impact that names a `designOption` is refused, and a destination that already holds `design.json` or `design.md` is refused.
+
+### Where it runs
+
+The WS10 owner patches (`ai-context/ws10/patches/`, applied by a human as `APPLY.md` there describes) are **not applied yet**. They stack on the WS11 owner patches, which are not applied either, so WS11 goes first.
+
+| Command | Today (applied `tools/guard/policy.json`) | After the WS10 guard patch |
+| --- | --- | --- |
+| `build_index.py --from-config` | `normal`, `build`, `maintain`. The guard does not know the flag and falls back to the defaults, so it already models the command as writing `index/` | Modelled explicitly as writing `<checkout>/index/`; with `--root` or `--out` alongside, blocked |
+| `write_design.py`, `write_report.py`, `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern) | Unchanged; the guard also models `write_design.py`'s `design.json` and `design.md` in `ai-context/<id>-<slug>/` |
+| `validate_design.py`, `framework_config.py` run directly | `maintain` only (or a human terminal). `write_design.py` calls the validator in-process, so the skill's path does not need it | `normal`, `build`, `maintain` |
+| `onboard.py` | `maintain` only (or a human terminal) | Unchanged |
+| `promote.py --option` | `maintain` only; a human step by working rule | Unchanged |
+| `tools/config/`, `tools/onboard/`, `tools/designs/` test scripts | `maintain` only (or a human terminal) | Unchanged |
+
+In CI today the workflow runs none of the new WS10 test scripts (the existing impact and eval test scripts it already runs hold WS10 cases). After the WS10 CI patch, `guard-and-lint` builds the index with `--from-config` before `validate.py --all`, then runs `tools/config/test_framework_config.py`, `tools/onboard/test_onboard.py`, `tools/designs/test_validate_design.py`, `tools/designs/test_write_design.py` and `validate_design.py --all`. Its `paths` filter gains `.ai-framework.json`, and the `impact-checks` job builds its index from the base branch's `sourceRoot` (through `framework_config.py source-root --root base`) instead of a hard-coded `demo/org`.
+
+### Honest limits
+
+- **No Claude Code run yet.** No model has run solution-design, or story-impact's Assess step, under Claude Code. Both are shown only by writer smoke tests: hand-built drafts fed through `write_design.py` and `write_report.py`, then scored with `run_skill.py`. That shows the writers and the assertions work, not that the skills do.
+- **The rule baseline does not exist.** It arrives with WS8's `check_rules.py`.
+- **Stubs are leads, not knowledge.** Nothing checks a stub until a human moves it up a level.
+- **The patches are untested by `git apply`.** The guard does not allowlist it; `APPLY.md` lists what was checked instead and what is Unverifiable (the new CI steps on `windows-latest` and on a GitHub runner).
 
 ## Impact record and register
 
@@ -167,7 +257,7 @@ Folders are named `<storyId>-<slug>` in both `ai-context/` and `impacts/`. `vali
 
 | | Draft | Promoted |
 | --- | --- | --- |
-| Where | `ai-context/<storyId>-<slug>/impact.json` and `impact.md` | `impacts/<storyId>-<slug>/impact.json` and a byte-for-byte copy of `impact.md` |
+| Where | `ai-context/<storyId>-<slug>/impact.json` and `impact.md` | `impacts/<storyId>-<slug>/impact.json` and a byte-for-byte copy of `impact.md`, plus the confirmed `design.json` and `design.md` when the draft holds a design (see "Day-one workflow") |
 | Written by | `framework/skills/story-impact/scripts/write_report.py` (story-impact Step 5), or `tools/demo/answer_to_draft.py`, which feeds a reviewed answer key through the same writer | `tools/impacts/promote.py <draft-dir> --confirmed-by "<name or role>"` |
 | `status` | `draft`, with no `confirmedBy` | `in-flight`, with `confirmedBy` set. A human edits it to `shipped` in a later PR |
 | Evidence files | Checked at write time; nothing is written on an error | Checked again by `promote.py` before it writes |
@@ -175,10 +265,10 @@ Folders are named `<storyId>-<slug>` in both `ai-context/` and `impacts/`. `vali
 
 `promote.py` validates the draft with its evidence files checked, then runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`. It refuses (exit 1, nothing written):
 
-- when the destination folder exists (unless `--replace`);
+- when the destination folder already holds `impact.json`, `impact.md`, `design.json` or `design.md` (unless `--replace`); a folder holding only `story.json` and `story.md` is fine;
 - when a source file, the destination or `impacts/` itself is a symlink;
 - when `impact.json` cannot be parsed, deeply nested JSON included;
-- when the same `storyId` already has an `impact.json` or `story.json` in another `impacts/` folder;
+- when the same `storyId` already has an `impact.json`, `story.json` or `design.json` in another `impacts/` folder;
 - when the data scan finds a hit in the sources, or in the exact bytes it is about to write. That final scan covers the record with `--confirmed-by` filled in, so an email-shaped or other real-data value there is refused too.
 
 A draft folder that resolves outside `<root>/ai-context/` is bad usage (exit 2). `--confirmed-by` records who confirmed the record. The script decides nothing.
@@ -213,7 +303,7 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 **Branch convention:** a code PR is linked to its story by the branch name. The first match of `[A-Z][A-Z0-9]*-[0-9]+` anywhere in the name is the story id, so `feature/DEMO-201-premium-escalation` links to `DEMO-201`.
 
-**Default severity:** both finding classes are comments, and the check exits 0. A repo opts a class into failure with an optional `.ai-framework.json` at the root: `{"impactChecks": {"noImpact": "fail", "outOfScope": "fail"}}`. An absent file or key means `comment`. Any value other than `comment` or `fail` is bad usage (exit 2). The settings and the register come from `--base-root`, the base branch checkout. So a PR cannot relax its own settings through `pr_check.py`, or add a record that covers its own code. Changed records are read from `--root`, the PR head. This holds within the check only, with two exceptions. First, the PR that first adds `pr_check.py` runs its own copy. Second, a `pull_request` workflow runs the workflow file from the PR head, so a PR that edits `.github/workflows/` can change the job itself. Only review and CODEOWNERS catch that, not this check.
+**Default severity:** both finding classes are comments, and the check exits 0. A repo opts a class into failure with the `impactChecks` key of the optional `.ai-framework.json` at the root (see "Day-one workflow"): `{"impactChecks": {"noImpact": "fail", "outOfScope": "fail"}}`. An absent file or key means `comment`. Any value other than `comment` or `fail`, or an unknown top-level key, is bad usage (exit 2). `pr_check.py` reads the file through `tools/config/framework_config.py`, the file's one reader. The settings and the register come from `--base-root`, the base branch checkout. So a PR cannot relax its own settings through `pr_check.py`, or add a record that covers its own code. Changed records are read from `--root`, the PR head. This holds within the check only, with two exceptions. First, the PR that first adds `pr_check.py` runs its own copy. Second, a `pull_request` workflow runs the workflow file from the PR head, so a PR that edits `.github/workflows/` can change the job itself. Only review and CODEOWNERS catch that, not this check.
 
 ### Where the checks run
 
@@ -232,7 +322,7 @@ The WS1 and WS2 owner patches are applied (`3fb9e73`), so the following holds to
 ### Honest limits
 
 - **Identity is the `api` string only.** Two records match only when they spell an API name the same way. Two components of different types with one name count as one. A renamed component shows no overlap with its old name.
-- **The CI index root is `demo/org` until WS10.** The `impact-checks` job indexes the demo org, not `force-app/`. WS10's `sourceRoot` replaces it. The workflow's `paths` filter also skips `pkg-*/` and `manifest/`.
+- **The CI index root is `demo/org` until the WS10 CI patch lands.** The applied `impact-checks` job hard-codes the demo org. `sourceRoot` in `.ai-framework.json` exists now (see "Day-one workflow"), and the unapplied WS10 CI patch makes the job read the base branch's `sourceRoot` instead. The workflow's `paths` filter also skips `pkg-*/` and `manifest/`.
 - **The PR comment step is Unverifiable until a remote exists.** It is unclear whether `gh pr comment --edit-last` edits the right comment (it edits the token user's last comment, which may come from another workflow). Fork PRs, the `files` field of `gh pr list` and the base checkout are also unchecked. `APPLY.md` lists each one.
 - **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks `CaseTrigger`, `CaseTriggerHandler` and `CaseTriggerHandler_Test` as `review`, so its overlaps with DEMO-202 are watches.
 - **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because the register was empty when it was drafted.
@@ -295,7 +385,7 @@ The code differs from the spec's wording on automation and on the integration us
 
 The skill saves the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`. It must account for every seed: keep it as an edge case (copying `category`, `component`, `detail`, `evidence` and `confidence` verbatim) or drop it with a one-line reason. It never adds an edge case that is not a seed. A risk the index cannot see becomes an open question. For a greenfield story the scan returns few or no seeds, and the skill says so rather than inventing any.
 
-**Greenfield seeds arrive with WS10.** Today a planned new component (an `unresolved` term) gives no seeds, so a greenfield story gets edge cases only from the existing objects it touches. Seeds from a confirmed design's declared components (the new object, its fields and its automation, before any metadata exists) arrive with WS10, which brings the design input. Until then the greenfield edge cases are open questions with owner roles.
+**Greenfield seeds from a design are not built.** A planned new component (an `unresolved` term) gives no seeds, so a greenfield story gets edge cases only from the existing objects it touches. WS10 brought the design input: `design.json` declares an option's new components. `query.py edge-seeds` does not read it (zero hits for `design` in `tools/index/query.py` outside a docstring), so seeds from a design's declared components (the new object, its fields and its automation, before any metadata exists) do not exist yet, and no plan under `docs/superpowers/plans/` assigns them. Until then the greenfield edge cases are open questions with owner roles.
 
 ### Writing the draft
 
@@ -321,7 +411,7 @@ Promotion is the confirmation, and it is a human step. The assistant never runs 
 3. `check_ac` has any finding.
 4. An open question is neither answered (non-empty `answer`) nor `deferred: true` (with `deferredBy` set; step 2 refuses a deferral without it).
 5. The data scan finds a hit in `story.json` or `story.md`.
-6. Destination checks: `impacts/`, the destination folder or a destination file is a symlink; the folder resolves outside `<root>/impacts/`; `story.json` or `story.md` already exists there (unless `--replace`); or the same `storyId` already has an `impact.json` or `story.json` in another `impacts/` folder.
+6. Destination checks: `impacts/`, the destination folder or a destination file is a symlink; the folder resolves outside `<root>/impacts/`; `story.json` or `story.md` already exists there (unless `--replace`); or the same `storyId` already has an `impact.json`, `story.json` or `design.json` in another `impacts/` folder.
 7. The confirmed record (status `confirmed`, `confirmedBy` set) fails validation.
 8. The data scan finds a hit in the exact bytes about to be written, `--confirmed-by` included.
 
@@ -329,7 +419,7 @@ Before writing, it prints every deferred question (`OQ-n`, owner role, deferred 
 
 It writes `impacts/<storyId>-<slug>/story.json` and a `story.md` re-rendered from the confirmed record by `tools/stories/story_md.py`, the renderer `write_story.py` uses. The draft `story.md` is not copied. The promoted md therefore states `Status: confirmed`, `Confirmed by: <value>` and every answer and deferral that `story.json` holds. Its Overlaps section shows the overlaps as recorded at refinement, without a register commit, because promotion does not re-read the register. Step 8's scan runs on these final bytes. Promotion never touches `impact.json` or `impact.md` in the same folder, and `--replace` applies only to the story files. (The impact path is different: it still writes a byte-for-byte copy of `impact.md`.)
 
-**One folder per story id.** Because of the cross-folder refusal, a story and its impact record must share one `<storyId>-<slug>` folder, so the refinement and the sizing need the same slug. The demo uses the slug `premium-escalation` for the DEMO-201 story and for its impact. A story confirmed as `DEMO-201-premium-escalation` would block an impact promoted as `DEMO-201-premium-escalation-key`, and the other way round. The impact path refuses a destination folder that exists at all unless `--replace` is given (`promote.py` main path); with `--replace` it rewrites only `impact.json` and `impact.md`.
+**One folder per story id.** Because of the cross-folder refusal, a story and its impact record must share one `<storyId>-<slug>` folder, so the refinement and the sizing need the same slug. The demo uses the slug `premium-escalation` for the DEMO-201 story and for its impact. A story confirmed as `DEMO-201-premium-escalation` would block an impact promoted as `DEMO-201-premium-escalation-key`, and the other way round. The impact path refuses a destination folder that already holds `impact.json`, `impact.md`, `design.json` or `design.md` unless `--replace` is given (`promote.py` main path). A folder holding only the confirmed story's `story.json` and `story.md` needs no `--replace`, and those files stay byte-identical; with `--replace` the path rewrites only the impact files, plus `design.json` and `design.md` when the draft holds a design.
 
 ### Where it runs
 
@@ -372,7 +462,7 @@ An agent is justified only when a workflow needs a posture that a single skill c
 
 | Agent | Posture | Skills | Must refuse |
 | --- | --- | --- | --- |
-| `analyst` | Read-only on the build, offline, writes only to `ai-context/` | story-impact, release-impact | Any org call, any write outside `ai-context/`, any recommendation phrased as a decision |
+| `analyst` | Read-only on the build, offline, writes only to `ai-context/`; may recommend and proceed provisionally through solution-design | solution-design, story-impact, release-impact (planned) | Any org call, any write outside `ai-context/`, any recommendation presented as confirmed or binding |
 | `reviewer` | Read-only, offline, no writes at all | pr-reference-check, test-quality judgement | Approving, voting, editing code, reformatting |
 | `discovery-lead` | Read-only on the build, offline, writes only to `ai-context/` | story-refine (which absorbs the discovery-pack backlog item), story-impact, test-case-design (planned) | Writing code, committing, pushing, deploying, estimating in points |
 
@@ -429,14 +519,18 @@ The index and control plane are built together in the first fortnight because th
 | `framework/skills/story-impact/` | SKILL.md, input checklist, seed-term method, manual checks, `write_report.py`, its eval cases | The first skill, built as the template for the rest |
 | `framework/skills/pr-reference-check/` | SKILL.md, input checklist, `extract_refs.py` (diff against the PR's target branch), three eval cases with diff fixtures | The second skill; CI does the deterministic review checks |
 | `framework/skills/story-refine/` | SKILL.md, input checklist, criteria style, edge-seed method, `write_story.py`, its eval cases | Step 0: refine a story before sizing it; see "Story refinement" |
+| `framework/skills/solution-design/` | SKILL.md, input checklist, option template, trade-off criteria, `write_design.py`, its eval cases | Design step of the day-one workflow; see "Day-one workflow" |
 | `framework/agents/` | `analyst`, `reviewer`, `discovery-lead`: posture plus skill table only; `evals/analyst.json` and a sample run log | Layer 5, kept to three |
+| `.ai-framework.json` and `tools/config/` | The repo's starting point, source root and PR-check severity; `framework_config.py` is its one reader, with a test script | One place says where the source lives; see "Day-one workflow" |
+| `tools/onboard/` | `onboard.py` (existing or greenfield onboarding, knowledge stubs) and its test script | Starting points; see "Day-one workflow" |
+| `tools/designs/` | `validate_design.py` (the design schema), `design_md.py` (the design.md renderer shared by the writer and promotion), and test scripts for the validator and `write_design.py` | The design record; see "Day-one workflow" |
 | `tools/stories/` | `validate_story.py` (the story schema), `check_ac.py` (vague criteria), `vague_words.json`, and a test script for each plus one for `write_story.py` | The story record; see "Story refinement" |
 | `tools/impacts/` | `validate.py` (the record schema), `register.py` (overlaps, scope, view), `promote.py` (the human promotion step, impacts and stories), `render_register.py` (static HTML view), `pr_check.py` (code overlap and scope drift on a PR), `safe_write.py` (shared output checks for the skill writers, covered by the writer tests), and a test script for each of the others | The impact record and register; see "Impact record and register" |
 | `impacts/` | `squads.json` and the promoted records, one `<storyId>-<slug>/` folder each | The register, in git; records enter through an ordinary PR that a reviewer checks |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |
 | `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan, lint, render check, index build, agent eval; gitleaks job | Everything above, gated on every PR |
-| `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys; see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
+| `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys, and the empty greenfield skeleton (`demo/greenfield`); see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
 | `fixtures/` | Synthetic Account fields, Apex (one at API 45 and `without sharing`), a flow, a permission set, an LWC, three diff patches | Evals and CI never see real metadata |
 
 What the skeleton does not yet include, by design: a release-impact skill, docx and pptx builders, the Copilot hook registration (a README placeholder marks the gap), and a plugin manifest. Each is a consumer of what is here and lands after Gate 2.

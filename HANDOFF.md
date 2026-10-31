@@ -43,20 +43,28 @@ python3 tools/index/test_edge_seeds.py     # edge seeds from the index
 python3 tools/stories/test_validate_story.py # story.json schema
 python3 tools/stories/test_check_ac.py     # vague-criteria check
 python3 tools/stories/test_write_story.py  # story-refine writer: story.json and overlaps
+python3 tools/config/test_framework_config.py # .ai-framework.json reader
+python3 tools/onboard/test_onboard.py      # onboarding: existing and greenfield
+python3 tools/designs/test_validate_design.py # design.json schema
+python3 tools/designs/test_write_design.py # solution-design writer
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
+python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index   # 5 consumers
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
 On Windows use `py -3`. If the guard test fails here, fix that before touching anything else.
-The impact and story test scripts each end with `<n> passed, 0 failed`; some add a skipped count
-for symlink cases. In `normal` and `build` modes the assistant cannot run the `tools/demo/`,
-`tools/impacts/` and `tools/stories/` test scripts, `tools/index/test_edge_seeds.py`, or
+The impact, story, config, onboarding and design test scripts each end with
+`<n> passed, 0 failed`; some add a skipped count for symlink cases. In `normal` and `build` modes
+the assistant cannot run the `tools/demo/`, `tools/impacts/`, `tools/stories/`, `tools/config/`,
+`tools/onboard/` and `tools/designs/` test scripts, `tools/index/test_edge_seeds.py`, or
 `tools/evals/test_run_skill.py`; run them yourself or in `maintain`. `validate.py --all` runs in
 `normal`. `validate_story.py --all` joins `normal`'s allowlist only once the owner applies the
-WS11 guard patch (`ai-context/ws11/patches/APPLY.md`); until then it needs `maintain` or your
-own terminal.
+WS11 guard patch (`ai-context/ws11/patches/APPLY.md`), and `validate_design.py --all` only once
+the owner applies the WS10 guard patch (`ai-context/ws10/patches/APPLY.md`); until then each
+needs `maintain` or your own terminal. The fixtures build above replaces `index/`; rebuild the
+demo index with `python3 tools/index/build_index.py --from-config` before using a skill.
 
 ## Working rules for this repo
 
@@ -97,6 +105,21 @@ own terminal.
   runs it to confirm a story and never supplies `--confirmed-by`.
 - No model has run story-refine under Claude Code yet. Its eval case 002 has passed only on a
   hand-built draft fed through the writer, a smoke test of the writer, not of the skill.
+- The WS10 owner patches (`ai-context/ws10/patches/`: the guard policy, its cases, the guard's
+  modelling of `build_index.py --from-config` and `write_design.py`'s output, and the CI
+  workflow) are **not applied yet**. They are cut on top of the WS11 patches, so apply WS11
+  first, then WS10 as `ai-context/ws10/patches/APPLY.md` gives. Until they land, CI runs none of
+  the new WS10 test scripts, and the assistant runs `validate_design.py` and `framework_config.py` directly
+  only in `maintain`. `write_design.py` already runs in `normal` (the skill-scripts pattern), and
+  `build_index.py --from-config` already runs there too: the guard models it as writing `index/`.
+  `onboard.py` stays `maintain`-only after the patch; run it in your own terminal.
+- The day-one workflow (refine, understand, design, assess, confirm) is in `docs/DESIGN.md`,
+  "Day-one workflow". No model has run solution-design, or story-impact on a design option,
+  under Claude Code yet; both are shown only by writer smoke tests. The owner's choice of option
+  is `promote.py --option`, a human step like every promotion.
+- The rule-violation baseline for an existing codebase is deferred to WS8, which creates
+  `check_rules.py`. Onboarding's knowledge stubs go to `framework/knowledge/stubs/`, outside lint
+  and rendering; a human fills one and moves it up a level.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
@@ -164,6 +187,12 @@ own terminal.
 - [ ] `story-refine`: run it under Claude Code on each of its eval cases and record the results;
       today only the writer smoke test exists.
 - [ ] `tools/code/check_trace.py`: deferred to WS8 (no tests to trace until implement-story).
+- [x] `solution-design` and starting points (WS10): skill, writer, eval cases 001, 002 and 003,
+      `tools/designs/`, `tools/config/`, `tools/onboard/`, `demo/greenfield/`, the option choice
+      at promotion.
+- [ ] `solution-design`: run it, and story-impact on its recommended option, under Claude Code
+      on each eval case and record the results; today only the writer smoke tests exist.
+- [ ] Rule-violation baseline in `onboard.py` for an existing codebase: WS8, with `check_rules.py`.
 
 ### Evals harness
 - [ ] `tools/evals/run_all.py`: for each skill and case, invoke `claude -p` N times (default 5)
