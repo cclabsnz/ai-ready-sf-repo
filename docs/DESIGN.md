@@ -1,7 +1,5 @@
 # AI-Ready Salesforce Repo: Design
 
-Oct 29, 2026 · @Gaurav
-
 ## Premise and principles
 
 The framework exists to make Salesforce metadata legible to an AI assistant without letting the assistant touch an org, invent a field, or leak a record. Everything a build squad wants from it (impact analysis, discovery packs, PR review, test design, wiki pages) is a consumer of that one capability. It is built and shipped as a versioned product with an owner, a changelog and regression tests, not as a folder of prompts that squads copy and edit. On org access, the stance is: the assistant gets no org access unless a programme opts in to a read-only level against named non-production orgs; the guard blocks the assistant from logging in, deploying, writing data or running code in an org (a laptop control, best effort; see "What the guard guarantees").
@@ -684,7 +682,7 @@ The index and control plane are built together in the first fortnight because th
 
 ## Example repo
 
-`ai-ready-sf-repo.zip` (delivered in the conversation) is a working skeleton of this design: 86 files, stdlib Python only, no network access needed. On the included synthetic fixtures every check passes: every guard case blocks or allows as specified (including the wrapper failing closed with no Python on PATH), the data scan is clean, the lint passes, the rendered trees match their source, the index finds all five consumers of `Account.Risk_Rating__c` across two hops (permission set, flow, two Apex classes, one LWC), the skill eval passes on a good report and fails on one with a hallucinated path and a banned phrase, and the agent trajectory eval passes on a sample log that includes a blocked `sf org login`.
+This repository is the working implementation of this design, in stdlib Python with no network access needed. The table below maps its main paths to what each is and why it exists; `README.md` gives the commands that run each check.
 
 | Path | What it is | Why it exists |
 | --- | --- | --- |

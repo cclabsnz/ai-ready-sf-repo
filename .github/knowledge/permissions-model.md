@@ -1,6 +1,6 @@
 ---
 topic: Profile, permission set and custom permission model
-owner: platform-guild@example.com
+owner: Platform guild lead
 last_verified: 2026-10-20
 verified_by: xml-parse
 ---

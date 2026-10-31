@@ -1067,8 +1067,17 @@ on their remote (see
 a plan, not a guarantee.
 
 Changes to `tools/guard/`, `.claude/settings.json`, `.github/workflows/`, `.github/hooks/` and
-CODEOWNERS are human-applied patches with a second reviewer. Edit `framework/`, never the rendered
+CODEOWNERS are human-applied patches with a second reviewer. On this public repository the
+second-reviewer rule is not enforced yet: branch protection with required reviews needs at least
+two maintainers, and until a second maintainer exists, changes here merge on one maintainer's
+review. An adopting team enforces the rule on its own remote. Edit `framework/`, never the rendered
 `.claude/` or `.github/` trees, and run `render.py` and `lint.py` before committing. Fixtures and
 demo data are synthetic; `tools/guard/scan_data.py` gates commits. Deliberately absent: seed
 memory, org facts inside agents or skills, model checks a script could do, outputs outside
 `ai-context/`, and any automation that votes, deploys or pushes.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a skill or agent, the required evals, the
+  review rules and commit messages.
+- [SECURITY.md](SECURITY.md): how to report a guard bypass privately, and what the guard does and
+  does not guarantee.
+- [CHANGELOG.md](CHANGELOG.md): what each release delivered.

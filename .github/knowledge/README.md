@@ -4,4 +4,4 @@ Facts here are leads to re-verify against the build. No counts live here; run `t
 
 | File | Topic | Owner | Last verified | Used by |
 |---|---|---|---|---|
-| [permissions-model.md](permissions-model.md) | Profile, permission set and custom permission model | platform-guild@example.com | 2026-10-20 |  |
+| [permissions-model.md](permissions-model.md) | Profile, permission set and custom permission model | Platform guild lead | 2026-10-20 |  |
