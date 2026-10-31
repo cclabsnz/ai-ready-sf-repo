@@ -47,6 +47,19 @@ with the index from --index (every non-new component is an index node). The case
 the root the operator builds that index from. A missing index fails.
 recommends: "do-nothing" or "change": whether the recommended option is the doNothing one.
 must_reuse: the recommended option lists each api with changeType "modify" (delete, review and new are not reuse).
+
+implement-story assertions (change_json_valid, files_within_scope, done_all_pass, scope_request_written)
+read the build package given by --package. No package is committed: the operator passes the real
+impacts/<id>-<slug>/build-package.json once the owner has confirmed the story, design and impact and a
+maintainer has run tools/impacts/package.py. A package assertion without --package fails with a message.
+change_json_valid: the change.json beside each --output passes write_change.py's validate_change against the
+package, with evidence, test methods and criterion ids checked in the checkout. The function is loaded from
+framework/skills/implement-story/scripts/write_change.py, so the writer and this check are one implementation.
+files_within_scope: every file in that change.json is in scope.modify, scope.create or scope.tests.
+done_all_pass: every package done[] command has a done entry, and every done entry exited 0.
+scope_request_written: scope-request.md beside --output has non-empty "- Component:", "- Reason:" and
+"- Evidence:" lines; the evidence holds a backticked `path:line` (checked like any cited evidence) or the words
+"zero hits"; with --package, the component is not already in the package scope.
 """
 import argparse
 import importlib.util
@@ -68,6 +81,10 @@ from validate_design import load_index, validate_design  # noqa: E402
 _spec = importlib.util.spec_from_file_location("query", os.path.join(ROOT, "tools", "index", "query.py"))
 query = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(query)
+_spec = importlib.util.spec_from_file_location(
+    "write_change", os.path.join(ROOT, "framework", "skills", "implement-story", "scripts", "write_change.py"))
+write_change = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(write_change)
 
 DEFAULT_INDEX = os.path.join(ROOT, "index")
 LABELS = ("Confirmed", "Inferred", "Unverifiable")
@@ -386,8 +403,114 @@ def check_must_reuse(output_path, apis):
             for api in apis if api not in reused]
 
 
-def check(output_text, asserts, output_path=None, index_dir=None):
-    """index_dir: the index edge seeds are recomputed from (default <checkout>/index)."""
+PACKAGE_ASSERTS = ("change_json_valid", "files_within_scope", "done_all_pass")
+SCOPE_REQUEST_FIELDS = ("Component", "Reason", "Evidence")
+
+
+def load_build_package(package_path, name):
+    """(package dict, None) or (None, failure text)."""
+    if not package_path:
+        return None, (f"{name}: no --package given; pass the real build-package.json once the owner has "
+                      f"confirmed the story, design and impact and package.py has run")
+    try:
+        pkg, _ = write_change.load_package(package_path)
+    except ValueError as exc:
+        return None, f"{name}: {exc}"
+    return pkg, None
+
+
+def check_change(output_path, package_path, name):
+    pkg, err = load_build_package(package_path, name)
+    if err:
+        return [err]
+    doc, err = load_sibling(output_path, "change.json", name)
+    if err:
+        return [err]
+    if name == "change_json_valid":
+        return [f"change.json invalid: {e}" for e in write_change.validate_change(doc, pkg, ROOT)]
+    if name == "files_within_scope":
+        return [f"files_within_scope: {e}" for e in write_change.scope_errors(doc, pkg)]
+    fails = [f"done_all_pass: {e}" for e in write_change.done_errors(doc, pkg)]
+    done = doc.get("done") if isinstance(doc, dict) else None
+    for d in done if isinstance(done, list) else []:
+        if isinstance(d, dict) and d.get("exit") != 0:
+            fails.append(f"done_all_pass: {d.get('command')!r} exited {d.get('exit')!r}")
+    return fails
+
+
+def norm_name(text):
+    """Comparison form of a component or path: backticks, spaces and leading ./ removed, / separators, lower case."""
+    t = text.strip().strip("`").strip().replace("\\", "/")
+    while t.startswith("./"):
+        t = t[2:]
+    return t.lower()
+
+
+def scope_names(pkg):
+    """Normalised paths, create apis, bare file names and file stems (name before the first dot) of everything
+    in the package scope."""
+    modify, create, tests, _, _ = write_change.package_scope(pkg)
+    paths = modify | set(create) | tests
+    names = paths | set(create.values()) | {os.path.basename(p) for p in paths} \
+        | {os.path.basename(p).split(".", 1)[0] for p in paths}
+    return {norm_name(n) for n in names}
+
+
+def in_scope(component, pkg):
+    """True when component, under any of the spellings scope_names covers, names something in scope."""
+    name = norm_name(component)
+    names = scope_names(pkg)
+    if name in names:
+        return True
+    # Reduce only a file spelling to its file name and stem; an API name such as Case.Field__c keeps its dot.
+    if "/" in name or re.search(r"\.(cls|trigger|js|html|xml)$", name):
+        base = os.path.basename(name)
+        return base in names or base.split(".", 1)[0] in names
+    return False
+
+
+def check_scope_request(output_path, package_path):
+    if not output_path:
+        return ["scope_request_written: no output path to locate scope-request.md"]
+    path = os.path.join(os.path.dirname(output_path), "scope-request.md")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return [f"scope-request.md unreadable at {path}: {exc}"]
+    values = {}
+    for line in text.splitlines():
+        m = re.match(r"^\s*-\s*(Component|Reason|Evidence):\s*(.*?)\s*$", line)
+        if m and m.group(2):
+            values.setdefault(m.group(1), m.group(2))
+    fails = [f"scope-request.md has no non-empty '- {f}:' line" for f in SCOPE_REQUEST_FIELDS if f not in values]
+    ev = values.get("Evidence")
+    if ev and not EVIDENCE_RE.search(ev) and "zero hits" not in ev.lower():
+        fails.append("scope-request.md evidence has no `path:line` and no 'zero hits' finding")
+    comp = values.get("Component")
+    if comp and package_path:
+        pkg, err = load_build_package(package_path, "scope_request_written")
+        if err:
+            return fails + [err]
+        name = comp.strip("`").strip()
+        if in_scope(name, pkg):
+            fails.append(f"scope-request.md asks for {name}, which is already in the package scope")
+    # A cited path:line is checked by the generic evidence pass when the request is the --output itself;
+    # check it here too so a request beside another output cannot cite a missing line.
+    for p, line in EVIDENCE_RE.findall(ev or ""):
+        full = os.path.join(ROOT, p)
+        if not os.path.isfile(full):
+            fails.append(f"scope-request.md evidence path does not exist: {p}")
+        else:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                if int(line) > sum(1 for _ in fh):
+                    fails.append(f"scope-request.md evidence line {line} beyond end of {p}")
+    return fails
+
+
+def check(output_text, asserts, output_path=None, index_dir=None, package=None):
+    """index_dir: the index edge seeds are recomputed from (default <checkout>/index).
+    package: the build-package.json the implement-story assertions check against."""
     fails = []
     seed_fails = []
 
@@ -464,6 +587,11 @@ def check(output_text, asserts, output_path=None, index_dir=None):
         fails += check_recommends(output_path, asserts["recommends"])
     if asserts.get("must_reuse"):
         fails += check_must_reuse(output_path, asserts["must_reuse"])
+    for name in PACKAGE_ASSERTS:
+        if asserts.get(name):
+            fails += check_change(output_path, package, name)
+    if asserts.get("scope_request_written"):
+        fails += check_scope_request(output_path, package)
     return fails
 
 
@@ -474,6 +602,8 @@ def main():
     ap.add_argument("--output", action="append", required=True)
     ap.add_argument("--index", default=DEFAULT_INDEX,
                     help="index dir for edge-seed recompute and design checks (default <checkout>/index)")
+    ap.add_argument("--package", default=None,
+                    help="build-package.json for the implement-story assertions (none is committed)")
     a = ap.parse_args()
     case_path = os.path.join(ROOT, "framework", "skills", a.skill, "evals", "cases", a.case + ".json")
     with open(case_path) as fh:
@@ -482,7 +612,7 @@ def main():
     for i, out in enumerate(a.output, 1):
         with open(out, encoding="utf-8") as fh:
             txt = fh.read()
-        fails = check(txt, case["assert"], out, a.index)
+        fails = check(txt, case["assert"], out, a.index, package=a.package)
         ok = not fails
         all_ok &= ok
         print(f"run {i}: {'PASS' if ok else 'FAIL'}")

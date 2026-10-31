@@ -663,6 +663,172 @@ def test_design_md_every_component_labelled():
         shutil.rmtree(tmp)
 
 
+# ---- implement-story: a temp build package, built here (none is committed) ----
+
+CHANGE_DONE = ["python3 tools/code/check_trace.py --skeletons DEMO-1",
+               "python3 tools/code/check_rules.py --from-config",
+               "python3 tools/code/check_trace.py DEMO-1"]
+
+
+def change_tree():
+    """A temp folder inside the checkout's ai-context/ holding the scoped class and test, the package and
+    the output folder. Paths in the package are checkout-relative, as run_skill checks evidence in ROOT."""
+    os.makedirs(os.path.join(run_skill.ROOT, "ai-context"), exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="run_skill_change_", dir=os.path.join(run_skill.ROOT, "ai-context"))
+    rel = os.path.relpath(tmp, run_skill.ROOT).replace(os.sep, "/")
+    cls, test = rel + "/src/WidgetService.cls", rel + "/src/WidgetService_Test.cls"
+    os.makedirs(os.path.join(tmp, "src"))
+    with open(os.path.join(run_skill.ROOT, cls), "w", encoding="utf-8") as fh:
+        fh.write("public with sharing class WidgetService {\n    void run() {}\n}\n")
+    with open(os.path.join(run_skill.ROOT, test), "w", encoding="utf-8") as fh:
+        fh.write("@IsTest\nprivate class WidgetService_Test {\n    @IsTest\n    static void assigns() {\n"
+                 "        // AC-1\n        System.assertEquals(1, 1, 'one');\n    }\n}\n")
+    pkg = {"schemaVersion": 1, "storyId": "DEMO-1", "slug": "x",
+           "criteria": [{"id": "AC-1", "given": "g", "when": "w", "then": "t", "examples": ["e"]}],
+           "scope": {"modify": [cls, cls + "-meta.xml"], "create": [], "tests": [test, test + "-meta.xml"]},
+           "rules": [], "done": list(CHANGE_DONE)}
+    pkg_path = os.path.join(tmp, "build-package.json")
+    with open(pkg_path, "w", encoding="utf-8") as fh:
+        json.dump(pkg, fh)
+    out_dir = os.path.join(tmp, "out")
+    os.makedirs(out_dir)
+    change = {"storyId": "DEMO-1", "slug": "x", "schemaVersion": 1,
+              "files": [{"path": cls, "component": "WidgetService", "changeType": "modify",
+                         "evidence": cls + ":2", "confidence": "Confirmed"},
+                        {"path": test, "component": "WidgetService_Test", "changeType": "modify",
+                         "evidence": test + ":5", "confidence": "Confirmed"}],
+              "criteriaToTests": {"AC-1": [test + "#assigns"]},
+              "done": [{"command": c, "exit": 0} for c in CHANGE_DONE]}
+    return tmp, pkg_path, os.path.join(out_dir, "change.md"), change, cls
+
+
+def write_change_json(out, change):
+    with open(os.path.join(os.path.dirname(out), "change.json"), "w", encoding="utf-8") as fh:
+        json.dump(change, fh)
+
+
+def test_change_json_valid_assertion():
+    tmp, pkg, out, change, cls = change_tree()
+    try:
+        asserts = {"change_json_valid": True}
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert fails and "change.json unreadable" in fails[0], fails
+        write_change_json(out, change)
+        assert run_skill.check("x", asserts, out, package=pkg) == [], run_skill.check("x", asserts, out, package=pkg)
+        fails = run_skill.check("x", asserts, out)
+        assert len(fails) == 1 and "no --package given" in fails[0], fails
+        bad = json.loads(json.dumps(change))
+        bad["criteriaToTests"] = {}
+        bad["files"][0]["evidence"] = cls + ":99"
+        write_change_json(out, bad)
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert any("maps to no test" in f for f in fails) and any("past the end" in f for f in fails), fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_files_within_scope_assertion():
+    tmp, pkg, out, change, cls = change_tree()
+    try:
+        asserts = {"files_within_scope": True}
+        write_change_json(out, change)
+        assert run_skill.check("x", asserts, out, package=pkg) == []
+        change["files"].append({"path": DEMO_CLS, "component": "CaseEscalationService", "changeType": "modify",
+                                "evidence": DEMO_CLS + ":1", "confidence": "Confirmed"})
+        write_change_json(out, change)
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert len(fails) == 1 and DEMO_CLS in fails[0] and "outside the package scope" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_done_all_pass_assertion():
+    tmp, pkg, out, change, cls = change_tree()
+    try:
+        asserts = {"done_all_pass": True}
+        write_change_json(out, change)
+        assert run_skill.check("x", asserts, out, package=pkg) == []
+        change["done"][2]["exit"] = 1
+        write_change_json(out, change)
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert fails == ["done_all_pass: %r exited 1" % CHANGE_DONE[2]], fails
+        del change["done"][2]
+        write_change_json(out, change)
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert len(fails) == 1 and "was not run" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def write_request(out, text):
+    with open(os.path.join(os.path.dirname(out), "scope-request.md"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def test_scope_request_written_assertion():
+    tmp, pkg, out, change, cls = change_tree()
+    try:
+        asserts = {"scope_request_written": True}
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert fails and "scope-request.md unreadable" in fails[0], fails
+        good = ("# Scope request: DEMO-1 x\n\n- Component: `CaseTrigger`\n"
+                "- Reason: the trigger has to call the new service\n"
+                "- Evidence: `%s:1`\n" % DEMO_TRIGGER)
+        write_request(out, good)
+        assert run_skill.check("x", asserts, out, package=pkg) == [], run_skill.check("x", asserts, out, package=pkg)
+        assert run_skill.check("x", asserts, out) == []
+        write_request(out, good.replace("- Reason: the trigger has to call the new service\n", "- Reason:\n"))
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert fails == ["scope-request.md has no non-empty '- Reason:' line"], fails
+        write_request(out, good.replace("`%s:1`" % DEMO_TRIGGER, "trust me"))
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert len(fails) == 1 and "no `path:line`" in fails[0], fails
+        write_request(out, good.replace("`%s:1`" % DEMO_TRIGGER, "zero hits for Widget_Log__c in the index"))
+        assert run_skill.check("x", asserts, out, package=pkg) == []
+        write_request(out, good.replace(":1`", ":99999`"))
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert len(fails) == 1 and "beyond end" in fails[0], fails
+        write_request(out, good.replace("`CaseTrigger`", "`WidgetService`"))
+        fails = run_skill.check("x", asserts, out, package=pkg)
+        assert len(fails) == 1 and "already in the package scope" in fails[0], fails
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_scope_request_other_spellings_in_scope():
+    """An in-scope component under another spelling is still in scope; a real outsider is not."""
+    tmp, pkg, out, change, cls = change_tree()
+    try:
+        asserts = {"scope_request_written": True}
+        base = ("- Component: %s\n- Reason: r\n- Evidence: `%s:1`\n")
+        for spelling in ("`WidgetService.cls`", "WidgetService.cls-meta.xml", "`./%s`" % cls, "`%s`" % cls.upper(),
+                         "widgetservice", "`WIDGETSERVICE_TEST`", "`src/WidgetService.cls`"):
+            write_request(out, base % (spelling, DEMO_TRIGGER))
+            fails = run_skill.check("x", asserts, out, package=pkg)
+            assert len(fails) == 1 and "already in the package scope" in fails[0], (spelling, fails)
+        for outsider in ("`CaseTrigger`", "`Case.WidgetService__c`", "`WidgetServiceHelper`"):
+            write_request(out, base % (outsider, DEMO_TRIGGER))
+            assert run_skill.check("x", asserts, out, package=pkg) == [], outsider
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_implement_story_cases_parse():
+    """The three committed cases name only known assertions, and no case carries a package."""
+    known = {"change_json_valid", "files_within_scope", "done_all_pass", "scope_request_written",
+             "must_label_every_claim", "banned_phrases", "must_reference"}
+    d = os.path.join(run_skill.ROOT, "framework", "skills", "implement-story", "evals", "cases")
+    names = sorted(n for n in os.listdir(d) if n.endswith(".json"))
+    assert names == ["001-assignment-on-insert.json", "002-out-of-scope-needed.json",
+                     "003-greenfield-object.json"], names
+    for n in names:
+        with open(os.path.join(d, n), encoding="utf-8") as fh:
+            case = json.load(fh)
+        assert case["input"] and case["assert"] and set(case["assert"]) <= known, (n, case)
+        assert "package" not in case and "confirmedBy" not in json.dumps(case), n
+        assert "OWNER-QUEUE" in case["operatorNote"], n
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0
