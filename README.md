@@ -37,7 +37,9 @@ Six principles, in order of precedence:
   `story-impact` (the evidenced impact of one story, or of one design option, written as
   `impact.md` plus a draft record, `impact.json`) and `pr-reference-check` (invented or mistyped
   API names in a diff). story-refine, solution-design and story-impact make up the
-  [day-one workflow](#the-day-one-workflow).
+  [day-one workflow](#the-day-one-workflow) up to confirmation; `implement-story` (tests first,
+  then code, inside a story's committed build package, run by the `builder` agent) continues it
+  into code once the WS8 guard patch is applied (see [Scoped code writing](#scoped-code-writing)).
 - **Starting points** (`tools/onboard/`, `tools/config/`, WS10): `.ai-framework.json` names the
   repo's starting point (`existing` or `greenfield`) and its source root, read by one module,
   `tools/config/framework_config.py`. `build_index.py --from-config` indexes that source root.
@@ -50,8 +52,8 @@ Six principles, in order of precedence:
   under Claude Code yet: they are shown only by writer smoke tests (see
   [Day-one workflow](docs/DESIGN.md#day-one-workflow)). The WS10 guard and CI patches are not
   applied yet: until they are, the assistant runs `validate_design.py` and
-  `framework_config.py` directly only in `maintain`, and CI runs none of the new WS10 test scripts. The rule
-  baseline for an existing codebase is deferred to WS8, which creates `check_rules.py`.
+  `framework_config.py` directly only in `maintain`, and CI runs none of the new WS10 test scripts.
+  Onboarding an existing codebase now also writes its rule baseline, `tools/code/baseline.json`.
 - **Story refinement** (`tools/stories/`, WS11): the `story.json` schema
   (`validate_story.py`), a vague-criteria check (`check_ac.py`), and confirmation by the product
   owner, who promotes the story into `impacts/` (`promote.py --story`). No model has run
@@ -68,17 +70,28 @@ Six principles, in order of precedence:
   `noImpact`) as comments, unless `impactChecks` in `.ai-framework.json` sets a finding class
   to `fail`. The PR
   check runs in CI (see [Running the checks](#running-the-checks)).
+- **Scoped code writing** (`tools/code/`, `tools/impacts/package.py` and `start.py`,
+  `framework/skills/implement-story/`, `framework/agents/builder.md`, WS8). What works today:
+  `check_rules.py`, the deterministic Apex rule check, runs on the demo with its committed
+  baseline and exits 0 (see [Scoped code writing](#scoped-code-writing) for the real output).
+  `package.py` and `start.py` exist, but there is no build package yet: one needs the owner to
+  confirm the DEMO-202 story, design and impact first. `check_trace.py` exits 2 until the WS8
+  guard patch lands. The scope lock and tests-first in `build` mode exist only in that unapplied
+  patch (`ai-context/ws8/patches/APPLY.md`), so today `build` still cannot write source.
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
 - **Evals**: `run_agent.py` (trajectory assertions over a tool-call log) and `run_skill.py`
   (deterministic assertions on a skill's output).
 
 **Planned, not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)): scoped code writing in `build` mode, the rule-violation
-baseline for an existing codebase (`check_rules.py`) and `check_trace.py`, which traces each
-confirmed criterion to its tests (WS8; until then `build` cannot write source), consistency evals that
-score repeated runs against the answer keys (WS3), versioned packaging and pinning (WS7), and the
-Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
+and [docs/DESIGN.md](docs/DESIGN.md)): consistency evals that score repeated runs against the
+answer keys (WS3), versioned packaging and pinning (WS7), and the Copilot hook (WS6;
+`.github/hooks/README.md` is a placeholder).
+
+**Waits on the owner** (`ai-context/OWNER-QUEUE.md`): applying the WS11, WS10 and WS8 owner
+patches, in that order; and the confirmations the code walkthroughs need (items 10 and 11:
+confirm the DEMO-202 story, design and impact, run `package.py` and commit the package, then run
+`start.py` in a terminal; the greenfield walkthrough needs the same for DEMO-301).
 
 ## The day-one workflow
 
@@ -106,8 +119,24 @@ result by promoting it; the assistant never does.
    Leaving out `--option` chooses the recommendation. If the impact assessed a different option,
    promotion refuses and asks for story-impact to be re-run for the chosen one (see
    [Choosing a design option](#choosing-a-design-option)).
+6. **Build the package**, a maintainer step in `maintain` or your terminal:
+   `python3 tools/impacts/package.py <storyId>`. It writes `build-package.json` and
+   `build-package.md` beside the confirmed records. Commit them with the impact PR.
+7. **Start the build session**, a human step in a real terminal:
+   `python3 tools/impacts/start.py <storyId>`. Add the env lines it prints to
+   `.claude/settings.local.json` and restart Claude Code.
+8. **Implement** with `implement-story`, through the `builder` agent: tests first, then code,
+   only inside the package scope.
+9. **Run the done commands.** The builder runs the package's `done[]` commands (the trace
+   checks and `check_rules.py --from-config`) and records each exit code.
+10. **Write the change summary.** `write_change.py` writes `change.json` and `change.md`, mapping
+    every file, every criterion to its tests, and every done command to its exit.
+11. **Open a PR.** A named reviewer reviews it, and CI re-runs the checks. The builder never
+    approves its own work.
 
-All of these write to `ai-context/<storyId>-<slug>/`, and the promotions copy the confirmed
+Steps 7 to 10 need the WS8 guard patch (see [Scoped code writing](#scoped-code-writing)).
+
+Steps 1 to 5 write to `ai-context/<storyId>-<slug>/`, and the promotions copy the confirmed
 records into `impacts/<storyId>-<slug>/`. The skills run in Claude Code (`/story-refine`,
 `/solution-design`, `/story-impact`, or through the `discovery-lead` and `analyst` agents). The
 promotions run in your own terminal.
@@ -542,7 +571,7 @@ Owner role: Salesforce Architect. Topics: the objects with the most inbound edge
 - `framework/knowledge/stubs/contact.md`: Contact
 - `framework/knowledge/stubs/case.md`: Case
 
-Rule baseline: arrives with WS8 (check_rules.py)
+Rule baseline: `tools/code/baseline.json` holds the check_rules.py findings already in the source root; later runs report only new ones
 ```
 
 - **The inventory** is read from `index/inventory.json`, not counted by the model.
@@ -552,8 +581,13 @@ Rule baseline: arrives with WS8 (check_rules.py)
   skip `stubs/`; they apply once the file is moved.
 - **Running it again** changes no stub or config. A stub you have edited is kept and reported; `--replace`
   overwrites it.
-- **The rule baseline** (which existing rule violations to accept as debt) arrives with WS8,
-  which creates `check_rules.py`. Until then there is none.
+- **The rule baseline** records which existing rule violations are accepted as debt:
+  `tools/code/baseline.json`, written from `check_rules.py`. The last line above is taken from
+  `tools/onboard/onboard.py:384-385` for an unchanged baseline, not from a re-run. When the file
+  on disk differs from what onboarding would write, the line ends with
+  `(kept: the file on disk differs; --replace overwrites it)`. A finding outside the baseline makes
+  `check_rules.py` exit 1, and the baseline only shrinks (see
+  [Scoped code writing](#scoped-code-writing)).
 
 **Greenfield.** This repo keeps its greenfield skeleton in `demo/greenfield/`, so pass that as
 the source root. Without `--write-config` the repo's `.ai-framework.json` stays as it is.
@@ -713,13 +747,16 @@ switch are described under
 | --- | --- | --- | --- |
 | `advise` | Everyone, when the kill switch is pulled | Nothing; read-only commands only | Committed `.claude/settings.json` |
 | `normal` | Every squad member (default) | `ai-context/`, `index/` | Committed `.claude/settings.json` |
-| `build` | A developer | Same as `normal` until WS8 adds story scope; adds local `git add`/`commit` and `pnpm` lint, format and test | Your local override |
+| `build` | A developer | Same as `normal`, plus the active story's package scope once the WS8 guard patch is applied (none before it); adds local `git add`/`commit` and `pnpm` lint, format and test | Your local override (after the WS8 guard patch, with the lines `start.py` prints) |
 | `maintain` | A framework maintainer | Framework paths (`framework/`, `tools/` except `tools/guard/`, `demo/`, `docs/`, rendered trees, ...) | Your local override |
 
 - **Switch locally:** create `.claude/settings.local.json` (git-ignored, never committed)
   containing `{"env": {"AI_FRAMEWORK_MODE": "build"}}` or `"maintain"`, then restart the Claude
   Code session. Make this edit yourself: the guard blocks the assistant from writing that file.
-  Delete the file to go back to `normal`.
+  Delete the file to go back to `normal`. For `build`, run `python3 tools/impacts/start.py <storyId>`
+  first: it writes `ai-context/.active-story` and prints the entries to add,
+  `"AI_FRAMEWORK_MODE": "build"` and `"AI_FRAMEWORK_STORY": "<id>-<slug>"`. Once the WS8 guard patch
+  is applied, the guard needs the story value to equal `.active-story`.
 - **Kill switch:** set `"AI_FRAMEWORK_MODE": "advise"` in the committed `.claude/settings.json`.
   A committed `advise` always wins over any local override. A local mode applies only over a
   committed `normal`, and a committed `build` or `maintain` is treated as `advise`.
@@ -764,6 +801,10 @@ Common reasons:
 | `promote.py` refuses with `story <id> already has a record in ...` | That story id is on record in another `impacts/` folder | Use the existing folder's slug (see [Confirming a refined story](#confirming-a-refined-story)) |
 | `query.py edge-seeds` gives no `picklist-value` seeds for a picklist field | The index predates version `0.5.0`, or the field uses a global value set (one `Unverifiable` seed) | Rebuild the index (quick start step 4) |
 | `promote.py` refuses with `impact assesses OPT-a; re-run story-impact for OPT-b before promoting` | The owner chose an option the draft impact did not assess | Re-run story-impact for the chosen option (see [Choosing a design option](#choosing-a-design-option)) |
+| `check_trace.py` exits 2 with `trace core not found at .../tools/guard/trace_core.py; apply the WS8 guard patch (ai-context/ws8/patches)` | The trace matching lives in the guard-owned core, which ships in the unapplied WS8 guard patch | Apply `ai-context/ws8/patches/` as `APPLY.md` there describes. Until then the trace check cannot run anywhere |
+| `start.py` exits 2 with `run start.py yourself in a terminal; the assistant cannot start a build session`, or with `scope core not found ...` | start.py needs a real terminal, and the guard-owned `tools/guard/scope_core.py` from the WS8 guard patch | Run it yourself in a terminal, after the WS8 patch is applied |
+| `package.py` refuses with `story.json is missing; nothing written` (or the design or impact is not confirmed) | A build package is made only from a confirmed story, design and impact in one `impacts/<storyId>-<slug>/` folder. DEMO-202's folder holds only its impact today | The owner confirms the missing records first (`ai-context/OWNER-QUEUE.md` item 10) |
+| In `build`, a source write is blocked with `no active story scope; run tools/impacts/start.py <storyId> (WS8)` | The applied guard has no scope lock yet, so `build` allows no source write | Apply the WS8 guard patch, then start a session with `start.py` |
 | `build_index.py --from-config` exits 2 | `.ai-framework.json` is invalid (an unknown key, a bad value, or a `sourceRoot` outside the repo or not a folder), or `--root` or `--out` was given too | Fix the config; `python3 tools/config/framework_config.py source-root` prints the error. Drop `--root` and `--out` |
 | The guard blocks `tools/onboard/onboard.py` | Onboarding is on no `normal` allowlist, before or after the WS10 guard patch | Run it in your own terminal (see [Two starting points](#two-starting-points)) |
 | The guard blocks `validate_design.py` or `framework_config.py` in `normal` | The WS10 guard patch is not applied yet | Run them from your own terminal, or apply `ai-context/ws10/patches/` as `APPLY.md` there describes. `write_design.py` is on `normal`'s allowlist either way and runs the validator in-process |
@@ -797,6 +838,12 @@ python3 tools/config/test_framework_config.py # .ai-framework.json reader
 python3 tools/onboard/test_onboard.py      # onboarding: existing and greenfield
 python3 tools/designs/test_validate_design.py # design.json schema
 python3 tools/designs/test_write_design.py # solution-design writer
+python3 tools/code/test_check_rules.py     # Apex rule checks and the baseline
+python3 tools/code/test_check_trace.py     # trace check CLI (stub core; real core once patched)
+python3 tools/impacts/test_package.py      # build package from confirmed records
+python3 tools/impacts/test_start.py        # start.py (stub core; real core once patched)
+python3 tools/code/test_write_change.py    # implement-story writer: change.json
+python3 tools/code/check_rules.py --from-config # exit 0: every demo finding is baselined
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
 python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
@@ -804,9 +851,10 @@ python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index i
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
-The impact, story, config, onboarding and design test scripts each end with a
+The impact, story, config, onboarding, design and code test scripts each end with a
 `<n> passed, 0 failed` line; some add a skipped count, which covers symlink cases on machines
-without symlinks.
+without symlinks. `test_check_trace.py` and `test_start.py` also skip their real-core test until
+the WS8 guard patch puts the cores in `tools/guard/`.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
@@ -859,6 +907,88 @@ of the WS11 patches, so a human applies WS11 first, then WS10 as
   (`framework_config.py source-root --root base`) instead of a hard-coded `demo/org`, falling
   back to `demo/org` when the base branch has no `framework_config.py`.
 
+**CI after the WS8 owner patch lands.** `ai-context/ws8/patches/ci-ws8.patch` is cut on top of
+the WS11 and WS10 patches, so a human applies WS11, then WS10, then WS8 as
+`ai-context/ws8/patches/APPLY.md` describes. Its changes to the workflow:
+
+- **`guard-and-lint`:** `tools/code/test_check_trace.py`, `tools/code/test_check_rules.py` and
+  `tools/code/test_write_change.py` as their own steps, then `check_rules.py --from-config`,
+  which fails the job on a finding the committed baseline lacks.
+- **`impact-checks`:** the base branch's `check_rules.py` checks the PR's source root and fails
+  the job on a new finding or a baseline that grew against the base copy. The base branch's
+  `check_trace.py` runs for each build package the PR adds or changes, report-only.
+
+Neither the applied workflow nor the WS8 patch runs `tools/impacts/test_package.py` or
+`tools/impacts/test_start.py`; run them yourself.
+
+## Scoped code writing
+
+WS8 lets the assistant write Salesforce code only inside one story's confirmed scope, in `build`
+mode, tests first. The full design is
+[Scoped code writing](docs/DESIGN.md#scoped-code-writing) in `docs/DESIGN.md`.
+
+**What works today: the rule check on the demo.** Run it in your terminal (in Claude Code it runs
+only in `maintain` until the WS8 guard patch adds it to `normal` and `build`):
+
+```sh
+python3 tools/code/check_rules.py --from-config
+```
+
+Expected: exit 0, because every finding in `demo/org` is in `tools/code/baseline.json`. Trimmed
+output from a real run (the `baselined` and `findings` lists hold one entry per finding; one is
+shown):
+
+```
+{
+ "baselined": [
+  {
+   "line": 32,
+   "path": "demo/org/force-app/main/default/classes/CaseAccountSummaryController.cls",
+   "rule": "apex-sharing",
+   "text": "public class AccountSummary {"
+  },
+  ...
+ ],
+ "findings": [ ... ],
+ "new": [],
+ "notes": [
+  "Scanned demo/org against tools/code/baseline.json.",
+  "SOQL/DML-in-loop detection is narrow and may miss cases: it sees only [SELECT ...], DML statements and Database DML calls written inside a braced for, while or do body. Loops without braces, calls into other methods and dynamic SOQL are not followed.",
+  "Comments and '...' strings are ignored. Each finding is one rule on one line."
+ ]
+}
+```
+
+A finding outside the baseline lands in `new` and the exit is 1. Which demo classes the
+baselined findings are in, and why, is in [demo/README.md](demo/README.md#signs-of-age).
+
+**What exists but cannot run end to end yet:**
+
+- `tools/impacts/package.py <storyId>` builds the package from a confirmed story, design and
+  impact. There is no package in this repo: `python3 tools/impacts/package.py DEMO-202` refuses
+  with `story.json is missing; nothing written`, because `impacts/DEMO-202-round-robin-assignment/`
+  holds only its impact.
+- `tools/impacts/start.py <storyId>` exits 2 until the WS8 guard patch adds
+  `tools/guard/scope_core.py`, and always without a terminal.
+- `tools/code/check_trace.py [--skeletons] <storyId>` exits 2 until the WS8 guard patch adds
+  `tools/guard/trace_core.py`.
+- `implement-story` and the `builder` agent have not run under Claude Code: they need a package.
+
+**What waits on the owner:**
+
+- the WS8 guard and CI patch (`ai-context/ws8/patches/APPLY.md`), after WS11 and WS10. It brings
+  the scope lock (a build-mode write must match a package scope path exactly), tests-first (code
+  stays blocked until every criterion id is named in a test file), `.active-story` and the
+  `AI_FRAMEWORK_STORY` match, and the owner decisions listed there;
+- the confirmations for the code walkthrough (`ai-context/OWNER-QUEUE.md` items 10 and 11).
+
+**Honest limits.** Apex compiles and runs only in your org-connected CI; nothing here compiles
+it. The scope lock binds `build` mode only (`maintain` can already write `demo/`). Tests-first is
+structural: a comment such as `// AC-1` satisfies it. Committed at `HEAD` is not reviewed, so PR
+review is the guarantee. The done exits in `change.json` are the session's own report. MCP tool
+path arguments and `pnpm run format`/`lint` are not scope-checked. `check_rules.py` detection is
+narrow.
+
 ## Layout
 
 ```
@@ -867,8 +997,9 @@ framework/            the ONE source tree squads edit (guild-owned via CODEOWNER
   knowledge/          owned, dated facts; no counts allowed (lint enforces)
   knowledge/stubs/    onboarding's knowledge stubs (leads only); outside lint and rendering
   skills/<name>/      SKILL.md + references/ + scripts/ + evals/ (story-refine, solution-design,
-                      story-impact, pr-reference-check)
-  agents/             posture + skill table, nothing else; evals/ holds trajectory specs
+                      story-impact, pr-reference-check, implement-story)
+  agents/             posture + skill table, nothing else (analyst, reviewer, discovery-lead,
+                      builder); evals/ holds trajectory specs
 tools/
   index/              build_index.py (the index), query.py (what skills call instead of grep),
                       test_index.py, test_parsers.py, test_edge_seeds.py
@@ -880,7 +1011,10 @@ tools/
                       answer_to_draft.py (draft impact from a reviewed key), tests
   impacts/            validate.py (record schema), register.py (overlaps, scope, view),
                       promote.py (human step, impacts and stories), render_register.py,
-                      pr_check.py, safe_write.py (shared writer checks), tests
+                      pr_check.py, package.py (build package), start.py (human starts a build
+                      session), safe_write.py (shared writer checks), tests
+  code/               check_rules.py (Apex rule checks) + baseline.json, check_trace.py
+                      (criteria to tests), tests (including write_change.py's)
   stories/            validate_story.py (story schema), check_ac.py + vague_words.json (vague
                       criteria), tests
   designs/            validate_design.py (design schema), design_md.py (design.md renderer), tests
@@ -911,7 +1045,7 @@ VERSION               framework version (no install or pinning mechanism yet; WS
   the answer keys work.
 - [docs/DESIGN.md](docs/DESIGN.md): the layers, the modes, the day-one workflow (config,
   onboarding, the design record and the option choice), the impact record and register, story
-  refinement, and what the guard does and does not guarantee.
+  refinement, scoped code writing, and what the guard does and does not guarantee.
 - [HANDOFF.md](HANDOFF.md): working rules for contributors, the smoke test and the backlog.
 - [The spec](docs/superpowers/specs/2026-10-29-published-framework-design.md): intent, owner
   decisions and the workstream order.

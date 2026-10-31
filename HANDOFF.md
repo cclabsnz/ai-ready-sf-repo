@@ -47,6 +47,12 @@ python3 tools/config/test_framework_config.py # .ai-framework.json reader
 python3 tools/onboard/test_onboard.py      # onboarding: existing and greenfield
 python3 tools/designs/test_validate_design.py # design.json schema
 python3 tools/designs/test_write_design.py # solution-design writer
+python3 tools/code/test_check_rules.py     # Apex rule checks and the baseline
+python3 tools/code/test_check_trace.py     # trace check CLI (stub core; real core once patched)
+python3 tools/impacts/test_package.py      # build package from confirmed records
+python3 tools/impacts/test_start.py        # start.py (stub core; real core once patched)
+python3 tools/code/test_write_change.py    # implement-story writer: change.json
+python3 tools/code/check_rules.py --from-config # exit 0: every demo finding is baselined
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
 python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
 python3 tools/designs/validate_design.py --all # every confirmed design validates; "ok": true
@@ -55,11 +61,14 @@ python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl -
 ```
 
 On Windows use `py -3`. If the guard test fails here, fix that before touching anything else.
-The impact, story, config, onboarding and design test scripts each end with
-`<n> passed, 0 failed`; some add a skipped count for symlink cases. In `normal` and `build` modes
+The impact, story, config, onboarding, design and code test scripts each end with
+`<n> passed, 0 failed`; some add a skipped count for symlink cases. `test_check_trace.py` and
+`test_start.py` also skip their real-core test until the WS8 guard patch puts
+`tools/guard/trace_core.py` and `scope_core.py` in place. In `normal` and `build` modes
 the assistant cannot run the `tools/demo/`, `tools/impacts/`, `tools/stories/`, `tools/config/`,
-`tools/onboard/` and `tools/designs/` test scripts, `tools/index/test_edge_seeds.py`, or
-`tools/evals/test_run_skill.py`; run them yourself or in `maintain`. `validate.py --all` runs in
+`tools/onboard/`, `tools/designs/` and `tools/code/` test scripts, `tools/index/test_edge_seeds.py`, or
+`tools/evals/test_run_skill.py`; run them yourself or in `maintain`. `check_rules.py --from-config`
+also needs `maintain` or your terminal until the WS8 guard patch adds it to `normal` and `build`. `validate.py --all` runs in
 `normal`. `validate_story.py --all` joins `normal`'s allowlist only once the owner applies the
 WS11 guard patch (`ai-context/ws11/patches/APPLY.md`), and `validate_design.py --all` only once
 the owner applies the WS10 guard patch (`ai-context/ws10/patches/APPLY.md`); until then each
@@ -117,9 +126,22 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
   "Day-one workflow". No model has run solution-design, or story-impact on a design option,
   under Claude Code yet; both are shown only by writer smoke tests. The owner's choice of option
   is `promote.py --option`, a human step like every promotion.
-- The rule-violation baseline for an existing codebase is deferred to WS8, which creates
-  `check_rules.py`. Onboarding's knowledge stubs go to `framework/knowledge/stubs/`, outside lint
-  and rendering; a human fills one and moves it up a level.
+- Onboarding an existing codebase writes the rule baseline, `tools/code/baseline.json`, from
+  `check_rules.py`; the baseline only shrinks. Onboarding's knowledge stubs go to
+  `framework/knowledge/stubs/`, outside lint and rendering; a human fills one and moves it up a level.
+- The WS8 owner patches (`ai-context/ws8/patches/`: the build-mode scope lock and tests-first,
+  the guard-owned cores `tools/guard/trace_core.py` and `scope_core.py`, `.active-story` always
+  blocked, the modelling of `start.py` and `write_change.py`, the `check_rules`/`check_trace`
+  allowlist patterns, their cases, and the CI steps) are **not applied yet**. They are cut on top
+  of WS11 and WS10, so the order is WS11, then WS10, then WS8, as
+  `ai-context/ws8/patches/APPLY.md` gives, which also lists the owner decisions. Until WS8 lands,
+  `check_trace.py` and `start.py` exit 2 (no core) and `build` allows no source write.
+- `tools/impacts/package.py` and `start.py` are human steps: a maintainer builds the package
+  from a confirmed story, design and impact and commits it; a human runs `start.py` in a real
+  terminal and pastes the env lines. No package exists until the owner confirms DEMO-202's story,
+  design and impact (`ai-context/OWNER-QUEUE.md` items 10 and 11). The builder never runs either.
+- No model has run implement-story or the `builder` agent under Claude Code yet; they need a
+  committed package. See "Scoped code writing" in `docs/DESIGN.md` for the honest limits.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
@@ -186,13 +208,18 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
       product-owner confirmation through `promote.py --story`.
 - [ ] `story-refine`: run it under Claude Code on each of its eval cases and record the results;
       today only the writer smoke test exists.
-- [ ] `tools/code/check_trace.py`: deferred to WS8 (no tests to trace until implement-story).
+- [x] `tools/code/check_trace.py` (WS8): built; it runs only after the WS8 guard patch, which
+      ships its core, `tools/guard/trace_core.py`.
+- [x] `implement-story` and the `builder` agent (WS8): skill, `write_change.py`, eval cases 001,
+      002 and 003, `framework/agents/evals/builder.json`.
+- [ ] `implement-story`: run it through the builder under Claude Code on each eval case once the
+      owner's confirmations and a committed package exist, and record the results.
 - [x] `solution-design` and starting points (WS10): skill, writer, eval cases 001, 002 and 003,
       `tools/designs/`, `tools/config/`, `tools/onboard/`, `demo/greenfield/`, the option choice
       at promotion.
 - [ ] `solution-design`: run it, and story-impact on its recommended option, under Claude Code
       on each eval case and record the results; today only the writer smoke tests exist.
-- [ ] Rule-violation baseline in `onboard.py` for an existing codebase: WS8, with `check_rules.py`.
+- [x] Rule-violation baseline in `onboard.py` for an existing codebase (WS8, from `check_rules.py`).
 
 ### Evals harness
 - [ ] `tools/evals/run_all.py`: for each skill and case, invoke `claude -p` N times (default 5)

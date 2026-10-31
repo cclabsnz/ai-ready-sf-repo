@@ -131,8 +131,28 @@ Python 3.12.
 
 These classes are deliberately aged, and each says so in a header comment: `LegacyCaseMerge` (old
 API, `without sharing`), and the filler `RenewalOutlookService` and `ContractTermService` (old API).
-Each uses plain SOQL and DML with no user-mode enforcement, as code from before user mode would;
-the WS8 rule baseline records that debt. Their tests stay on the current API and match them.
+Each uses plain SOQL and DML with no user-mode enforcement, as code from before user mode would.
+Their tests stay on the current API and match them.
+
+**The rule baseline.** `tools/code/baseline.json` records the findings `tools/code/check_rules.py`
+reports on `demo/org`, so `python3 tools/code/check_rules.py --from-config` exits 0 with nothing
+new. The demo files are not edited to clear them: committed records and pasted output cite their
+lines. A run lists, by rule and class:
+
+- **`apex-user-mode`** in the sign-of-age classes above: SOQL without `WITH USER_MODE` and DML
+  without `as user` in `RenewalOutlookService` and `ContractTermService`, and the plain DML in
+  `LegacyCaseMerge`. This is the debt the header comments describe.
+- **`apex-sharing`** on inner wrapper classes that declare no sharing keyword, in classes that are
+  not legacy: `CaseAccountSummaryController.AccountSummary`, `CaseEscalationService.EscalationState`,
+  and `EscalationNotifier.Request` and `EscalationNotifier.Result`. Apex inner classes do not inherit
+  the outer class's sharing, so the rule applies to them as written. Limiting `apex-sharing` to
+  top-level classes would be an owner choice; it is not made.
+
+`LegacyCaseMerge` declares `without sharing` with a comment on the lines above it saying why
+(`demo/org/force-app/main/default/classes/LegacyCaseMerge.cls:3-6`), so `apex-sharing` does not flag
+it. Test classes get no `apex-user-mode` finding: the rule is not applied inside an `@IsTest`
+class, because test data setup runs in system mode. To see the current list, run the command above
+and read `baselined`.
 
 `Account.Service_Level__c` keeps a retired picklist value, `Legacy Bronze`, marked
 `<isActive>false</isActive>` (`demo/org/force-app/main/default/objects/Account/fields/Service_Level__c.field-meta.xml:27-29`).
@@ -181,4 +201,5 @@ the CI patch adds the `--check` step to the Windows job, which fails without the
 - The assignment test counts the members of the shared `Escalation_Agents` queue, so members
   already in the target org's queue change what it sees.
 - A test adds an inactive user as a queue member.
-- Demo class names carry no project prefix; the prefix becomes a per-project setting in WS8.
+- Demo class names carry no project prefix. `check_rules.py`'s naming rule (`apex-test-naming`)
+  checks only that a test class ends in `_Test`; no project-prefix setting or check exists.
