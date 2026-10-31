@@ -10,6 +10,12 @@ The register is every <root>/impacts/*/impact.json that is a valid promoted reco
 whose status is not shipped. Files that fail JSON parsing or validation are listed
 under "invalid" and never stop the run. Evidence files are not checked here.
 
+scope prefers the story's build package: when impacts/<storyId>-*/build-package.json exists in
+--root and passes the guard's scope rules (tools/impacts/package.py validate_package), the output
+adds "source": "build-package" and "paths" (every scope.modify, scope.create path and scope.tests
+entry, sorted). Otherwise it keeps the impact's components with "source": "impact", and a package
+that fails the rules is listed under "packageErrors". The work tree is read, not HEAD.
+
 Prints JSON on stdout (indent 2, sorted keys).
 Exit codes: 0 ok, 2 bad usage, 4 nothing on record (scope only).
 Stdlib only. Data comes from --root; code never does.
@@ -25,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
-from validate import validate  # noqa: E402
+from validate import STORY_RE, validate  # noqa: E402
 
 CONFLICT_TYPES = ("new", "modify", "delete")
 
@@ -43,9 +49,14 @@ GIT_SAFE = ["--no-pager",
 
 
 def _git_env():
-    env = dict(os.environ)
+    """The caller's environment without any GIT_* variable, plus the hardening variables.
+
+    GIT_DIR, GIT_WORK_TREE, GIT_LITERAL_PATHSPECS and the like would redirect git or change what a
+    pathspec means (package.py's stale check uses :(exclude) magic). Shared by package.py."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_NO_LAZY_FETCH"] = "1"
     return env
 
 
@@ -144,14 +155,61 @@ def overlaps(impact, impacts):
     return found
 
 
-def scope(story_id, impacts):
-    """{storyId, squad, status, components: [api...]} or None when not on record."""
+def _package_paths(story_id, root):
+    """(paths, problems) from the single impacts/<storyId>-*/build-package.json in root's work tree.
+
+    (None, None) when there is no package; (None, [problem...]) when it fails the guard's scope rules
+    (tools/impacts/package.py validate_package, imported here lazily: package.py imports this module)."""
+    if not (isinstance(story_id, str) and STORY_RE.fullmatch(story_id)):
+        return None, None
+    imp = os.path.join(root, "impacts")
+    folders = [f for f in glob.glob(os.path.join(glob.escape(imp), glob.escape(story_id) + "-*"))
+               if os.path.isdir(f) and not os.path.islink(f)]
+    if len(folders) != 1:
+        return None, None
+    path = os.path.join(folders[0], "build-package.json")
+    if not os.path.lexists(path):
+        return None, None
+    if os.path.islink(path) or not os.path.isfile(path):
+        return None, ["%s is a symlink or not a file" % os.path.relpath(path, root).replace(os.sep, "/")]
+    try:
+        with open(path, encoding="utf-8") as fh:
+            pkg = json.load(fh)
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
+        return None, ["cannot read build-package.json: %s" % type(exc).__name__]
+    import package  # noqa: E402  (tools/impacts/package.py, this checkout)
+    src, problem = package.source_root_rel(root)
+    if problem:
+        return None, [problem]
+    errors = package.validate_package(pkg, src, root=root)
+    if not errors and pkg.get("storyId") != story_id:
+        errors = ["build-package.json is for %s" % pkg.get("storyId")]
+    if errors:
+        return None, errors
+    s = pkg["scope"]
+    return sorted(set(s["modify"]) | {e["path"] for e in s["create"]} | set(s["tests"])), None
+
+
+def scope(story_id, impacts, root=None):
+    """{storyId, squad, status, components: [api...], source} or None when not on record.
+
+    With root, a valid build-package.json for the story is preferred: source is "build-package" and
+    paths lists every scope.modify, scope.create path and scope.tests entry. Otherwise source is
+    "impact" (today's behaviour); a package that fails the scope rules is listed under packageErrors."""
+    found = None
     for doc in impacts:
         if doc.get("storyId") == story_id:
-            return {"storyId": story_id, "squad": doc.get("squad"),
-                    "status": doc.get("status"),
-                    "components": [c["api"] for c in _components(doc)]}
-    return None
+            found = {"storyId": story_id, "squad": doc.get("squad"),
+                     "status": doc.get("status"),
+                     "components": [c["api"] for c in _components(doc)], "source": "impact"}
+            break
+    paths, problems = _package_paths(story_id, root) if root is not None else (None, None)
+    if paths is not None:
+        found = found or {"storyId": story_id, "squad": None, "status": None, "components": []}
+        found.update(source="build-package", paths=paths)
+    elif problems and found is not None:
+        found["packageErrors"] = problems
+    return found
 
 
 def _out(obj):
@@ -193,7 +251,7 @@ def main(argv=None):
 
     reg = load_register(args.root)
     if args.cmd == "scope":
-        found = scope(args.story_id, reg["impacts"])
+        found = scope(args.story_id, reg["impacts"], args.root)
         if found is None:
             _out({"storyId": args.story_id, "found": False, "invalid": reg["invalid"]})
             return 4

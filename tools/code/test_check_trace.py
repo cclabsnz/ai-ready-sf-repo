@@ -175,6 +175,35 @@ def case_skeletons_vs_full():
     assert doc["unknownRefs"] == ["AC-9"] and doc["testsWithoutRefs"] == [TEST_B], doc
 
 
+def case_meta_companion_skipped_by_no_refs_rule():
+    # A *-meta.xml in scope.tests cannot carry ids: the full check does not list it as a test without refs.
+    # A non-meta file with no id still fails, so the skip is by suffix only.
+    meta = TEST_A + "-meta.xml"
+    pkg = {"schemaVersion": 1, "storyId": STORY, "slug": "sample-change",
+           "criteria": [{"id": "AC-1"}, {"id": "AC-2"}],
+           "scope": {"modify": [], "create": [], "tests": [TEST_A, meta]}}
+    root = make_root({TEST_A: "// AC-1 AC-2\n", meta: "<ApexClass/>\n"}, pkg=pkg)
+    for extra in (["--skeletons"], []):
+        code, doc = run_json(extra + [STORY, "--root", root])
+        assert code == 0 and doc["ok"] is True and doc["testsWithoutRefs"] == [], doc
+    pkg["scope"]["tests"] = [TEST_A, meta, TEST_B]
+    root = make_root({TEST_A: "// AC-1 AC-2\n", meta: "<ApexClass/>\n", TEST_B: "// none\n"}, pkg=pkg)
+    code, doc = run_json([STORY, "--root", root])
+    assert code == 1 and doc["testsWithoutRefs"] == [TEST_B], doc
+
+
+def case_id_only_in_meta_does_not_cover():
+    # An id that appears only in a *-meta.xml covers no criterion, in either mode.
+    meta = TEST_A + "-meta.xml"
+    pkg = {"schemaVersion": 1, "storyId": STORY, "slug": "sample-change",
+           "criteria": [{"id": "AC-1"}, {"id": "AC-2"}],
+           "scope": {"modify": [], "create": [], "tests": [TEST_A, meta]}}
+    root = make_root({TEST_A: "// AC-1\n", meta: "<!-- AC-2 -->\n"}, pkg=pkg)
+    for extra in (["--skeletons"], []):
+        code, doc = run_json(extra + [STORY, "--root", root])
+        assert code == 1 and doc["missingCriteria"] == ["AC-2"], doc
+
+
 def case_unknown_ref_fails():
     root = make_root({TEST_A: "// AC-1\n", TEST_B: "// AC-2 EC-4\n"})
     code, doc = run_json([STORY, "--root", root])

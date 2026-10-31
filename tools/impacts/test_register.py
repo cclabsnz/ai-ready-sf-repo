@@ -123,8 +123,51 @@ def test_scope_found_and_missing():
         assert code == 0, code
         data = json.loads(out)
         assert data["components"] == ["X", "Y"] and data["squad"] == "Alpha", data
+        assert data["source"] == "impact" and "paths" not in data, data
         code, _, _ = run("scope", "DEMO-999", "--root", root)
         assert code == 4, code
+    finally:
+        shutil.rmtree(root)
+
+
+def _write_package(root, scope_obj, story="DEMO-2"):
+    with open(os.path.join(root, ".ai-framework.json"), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"sourceRoot": "src"}, fh)
+    os.makedirs(os.path.join(root, "src"), exist_ok=True)
+    pkg = {"schemaVersion": 1, "storyId": story, "slug": "demo", "criteria": [{"id": "AC-1"}],
+           "scope": scope_obj}
+    with open(os.path.join(root, "impacts", "DEMO-2-demo", "build-package.json"), "w",
+              encoding="utf-8", newline="\n") as fh:
+        json.dump(pkg, fh)
+
+
+def test_scope_prefers_package():
+    b = doc("DEMO-2", [comp("X", "modify"), comp("Y", "new")])
+    root = make_root(b)
+    try:
+        _write_package(root, {"modify": ["src/b.cls", "src/a.cls"],
+                              "create": [{"api": "Y", "type": "ApexClass", "path": "src/y.cls"}],
+                              "tests": ["src/a_Test.cls"]})
+        found = register.scope("DEMO-2", register.load_register(root)["impacts"], root)
+        assert found["source"] == "build-package", found
+        assert found["paths"] == ["src/a.cls", "src/a_Test.cls", "src/b.cls", "src/y.cls"], found
+        assert found["components"] == ["X", "Y"] and found["squad"] == "Alpha", found
+        # Without root the function keeps today's behaviour.
+        assert register.scope("DEMO-2", register.load_register(root)["impacts"])["source"] == "impact"
+        code, out, _ = run("scope", "DEMO-2", "--root", root)
+        assert code == 0 and json.loads(out)["source"] == "build-package", out
+    finally:
+        shutil.rmtree(root)
+
+
+def test_scope_invalid_package_falls_back():
+    b = doc("DEMO-2", [comp("X", "modify")])
+    root = make_root(b)
+    try:
+        _write_package(root, {"modify": ["tools/evil.py"], "create": [], "tests": []})
+        found = register.scope("DEMO-2", register.load_register(root)["impacts"], root)
+        assert found["source"] == "impact" and "paths" not in found, found
+        assert any("outside sourceRoot" in e or "reserved" in e for e in found["packageErrors"]), found
     finally:
         shutil.rmtree(root)
 
@@ -211,6 +254,36 @@ def test_planted_git_config_does_not_run():
         assert register.register_commit(repo) != "unknown"
         assert not os.path.exists(marker), "planted core.fsmonitor ran"
     finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
+
+def test_git_env_vars_ignored():
+    """GIT_DIR, GIT_WORK_TREE and GIT_LITERAL_PATHSPECS in the caller's environment do not redirect git."""
+    if shutil.which("git") is None:
+        raise SkipTest("git unavailable")
+    repo = tempfile.mkdtemp()
+    saved = {k: os.environ.get(k) for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_LITERAL_PATHSPECS")}
+    try:
+        write_doc(repo, doc("DEMO-1", [comp("X", "modify")]))
+        if _plain_git(repo, "init", "-q").returncode != 0:
+            raise SkipTest("git init failed")
+        _plain_git(repo, "add", "-A")
+        assert _plain_git(repo, "commit", "-q", "-m", "seed").returncode == 0
+        head = _plain_git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+        bogus = os.path.join(repo, "no-such-git-dir")
+        os.environ.update(GIT_DIR=bogus, GIT_WORK_TREE=bogus, GIT_LITERAL_PATHSPECS="1")
+        env = register._git_env()
+        assert not any(k.startswith("GIT_") and k not in ("GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT",
+                                                          "GIT_NO_LAZY_FETCH") for k in env), sorted(env)
+        assert register.register_commit(repo) == head, register.register_commit(repo)
+        reg = register.load_register(repo)
+        assert reg["impacts"][0]["_commit"] == head, reg["impacts"][0]
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         shutil.rmtree(repo, ignore_errors=True)
 
 
