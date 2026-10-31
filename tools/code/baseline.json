@@ -1,0 +1,60 @@
+{
+ "entries": [
+  {
+   "hash": "bde88597f8f358c0cf2941749bc72ec6f17f2c17#0",
+   "path": "demo/org/force-app/main/default/classes/CaseAccountSummaryController.cls",
+   "rule": "apex-sharing"
+  },
+  {
+   "hash": "b0b037e2c216eee620f313927192d137ddeeb37c#0",
+   "path": "demo/org/force-app/main/default/classes/CaseEscalationService.cls",
+   "rule": "apex-sharing"
+  },
+  {
+   "hash": "4cc599fe575402cad787db63a45dc935db3a8e9d#0",
+   "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "4cc599fe575402cad787db63a45dc935db3a8e9d#1",
+   "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "f2e232206ab91bd6b64e3582c8adb8bcd039457b#0",
+   "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "162637ae91f6726e37331fce9a31be868d69f152#0",
+   "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+   "rule": "apex-sharing"
+  },
+  {
+   "hash": "c94268caae87e72a7746d6ca786a8c902fdc6e70#0",
+   "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+   "rule": "apex-sharing"
+  },
+  {
+   "hash": "a69c82eab90070dd7e8d7b1c25550c5c373aa1c3#0",
+   "path": "demo/org/force-app/main/default/classes/LegacyCaseMerge.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "248787172508453260599b221728f3851296339a#0",
+   "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "248787172508453260599b221728f3851296339a#1",
+   "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+   "rule": "apex-user-mode"
+  },
+  {
+   "hash": "f2e232206ab91bd6b64e3582c8adb8bcd039457b#0",
+   "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+   "rule": "apex-user-mode"
+  }
+ ],
+ "version": 1
+}

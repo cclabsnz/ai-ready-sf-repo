@@ -8,8 +8,11 @@ Usage:
              [--root <repo>]
 
 existing    Builds the index of the source root into <root>/index, prints the inventory as
-            markdown (read from index/inventory.json), and writes knowledge stubs to
-            <root>/framework/knowledge/stubs/ with owner set to --owner-role (required).
+            markdown (read from index/inventory.json), writes knowledge stubs to
+            <root>/framework/knowledge/stubs/ with owner set to --owner-role (required), and
+            writes the rule baseline <root>/tools/code/baseline.json: every finding
+            check_rules.py (imported from this checkout) reports on the source root today, so
+            later runs report only new findings. Greenfield writes no baseline.
 greenfield  Creates the SFDX layout under the source root where it is absent (sfdx-project.json
             and force-app/main/default/<folder>/.gitkeep), then builds the empty index, which
             replaces <root>/index. It exits 1 with nothing written when the source root already
@@ -22,17 +25,18 @@ this file's own checkout, never from --root or the cwd.
 to --root. It must resolve inside --root.
 --write-config writes <root>/.ai-framework.json with startingPoint and sourceRoot, keeping any
 impactChecks already there.
---replace overwrites a stub or skeleton file whose content differs from what onboarding
+--replace overwrites a stub, skeleton or baseline file whose content differs from what onboarding
 generates. Without it such a file is kept as it is and reported; an identical file is left
 untouched either way, so a second run changes nothing.
 
-Writes only <root>/index, <root>/framework/knowledge/stubs/, the skeleton under the source root
-and (with --write-config) <root>/.ai-framework.json. A target that resolves outside --root, or
-that passes through a symlink, exits 2 before anything is written.
+Writes only <root>/index, <root>/framework/knowledge/stubs/, <root>/tools/code/baseline.json, the
+skeleton under the source root and (with --write-config) <root>/.ai-framework.json. A target that
+resolves outside --root, or that passes through a symlink, exits 2 before anything is written.
 Exit codes: 0 ok, 1 an existing codebase under a greenfield source root or a failed index build,
 2 bad usage. Stdlib only. Offline.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -41,6 +45,8 @@ import sys
 
 CHECKOUT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD = os.path.join(CHECKOUT, "tools", "index", "build_index.py")
+CHECK_RULES = os.path.join(CHECKOUT, "tools", "code", "check_rules.py")
+BASELINE_REL = "tools/code/baseline.json"
 sys.path.insert(0, os.path.join(CHECKOUT, "tools", "config"))
 import framework_config  # noqa: E402
 
@@ -136,6 +142,16 @@ def build_index(source, index_dir):
 def read_json(path):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def baseline_content(top, source):
+    """The rule baseline for the source root, from the checkout's check_rules.py (loaded by a path
+    computed from this file, never from --root)."""
+    spec = importlib.util.spec_from_file_location("check_rules", CHECK_RULES)
+    check_rules = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check_rules)
+    findings = check_rules.scan(top, source)
+    return check_rules.baseline_text(check_rules.baseline_entries(top, findings))
 
 
 # ---- greenfield --------------------------------------------------------------------------------
@@ -302,6 +318,9 @@ def run(args):
         if os.path.lexists(target) and not os.path.isfile(target):
             raise Refused("%s exists and is not a regular file" % show(top, target))
     stubs_dir = checked(top, STUBS_DIR) if existing else None
+    baseline_path = checked(top, BASELINE_REL) if existing else None
+    if baseline_path and os.path.lexists(baseline_path) and not os.path.isfile(baseline_path):
+        raise Refused("%s exists and is not a regular file" % BASELINE_REL)
     config_path = checked(top, framework_config.FILENAME) if args.write_config else None
     source_rel = show(top, source)
 
@@ -361,7 +380,9 @@ def run(args):
         out += ["Config: `%s` %s" % (framework_config.FILENAME, status), ""]
 
     if existing:
-        out.append("Rule baseline: arrives with WS8 (check_rules.py)")
+        status = write_text(top, baseline_path, baseline_content(top, source), args.replace)
+        out.append("Rule baseline: `%s` holds the check_rules.py findings already in the source "
+                   "root; later runs report only new ones%s" % (BASELINE_REL, NOTE[status]))
     else:
         out.append("no baseline: rules are strict from the first commit")
     print("\n".join(out))

@@ -20,7 +20,10 @@ DEMO_ORG = os.path.join(REPO, "demo", "org")
 STUBS = os.path.join("framework", "knowledge", "stubs")
 ROLE = "Platform lead"
 BANNED = ("we recommend", "should", "approve", "block")
-BASELINE_EXISTING = "Rule baseline: arrives with WS8 (check_rules.py)"
+BASELINE_EXISTING = ("Rule baseline: `tools/code/baseline.json` holds the check_rules.py findings "
+                     "already in the source root; later runs report only new ones")
+BASELINE = os.path.join("tools", "code", "baseline.json")
+CHECK_RULES = os.path.join(REPO, "tools", "code", "check_rules.py")
 BASELINE_GREENFIELD = "no baseline: rules are strict from the first commit"
 
 TMP = tempfile.mkdtemp(prefix="onboard_")
@@ -268,6 +271,48 @@ def case_edited_stub_kept_unless_replace():
         assert fh.read() == original
 
 
+def case_existing_writes_rule_baseline():
+    root = new_root(with_org=True)
+    code, out, err = existing(root)
+    assert code == 0, err
+    path = os.path.join(root, BASELINE)
+    data = load(path)
+    assert data["version"] == 1 and data["entries"], data
+    assert all(e["path"].startswith("org/force-app/") for e in data["entries"]), data["entries"][:3]
+    p = subprocess.run([sys.executable, CHECK_RULES, "--root", root, "--source-root", "org"],
+                       capture_output=True, text=True)
+    assert p.returncode == 0 and json.loads(p.stdout)["new"] == [], p.stdout[:400] + p.stderr
+    # A shrunk baseline survives a re-run unless --replace.
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump({"version": 1, "entries": data["entries"][1:]}, fh)
+    code, out, _ = existing(root)
+    assert code == 0 and "kept: the file on disk differs" in out.splitlines()[-1], out
+    assert len(load(path)["entries"]) == len(data["entries"]) - 1
+    code, out, _ = existing(root, "--replace")
+    assert code == 0 and load(path) == data, out
+
+
+def case_baseline_symlink_refused():
+    root = new_root(with_org=True)
+    target = tempfile.mkdtemp(dir=TMP)
+    os.makedirs(os.path.join(root, "tools"))
+    os.symlink(target, os.path.join(root, "tools", "code"))
+    code, _, err = existing(root)
+    assert code == 2 and "symlink" in err, err
+    assert os.listdir(target) == [] and not os.path.exists(os.path.join(root, "index"))
+    assert not os.path.exists(os.path.join(root, STUBS))
+    file_link = new_root(with_org=True)
+    outside = os.path.join(target, "outside.json")
+    with open(outside, "w", encoding="utf-8") as fh:
+        fh.write("untouched\n")
+    os.makedirs(os.path.join(file_link, "tools", "code"))
+    os.symlink(outside, os.path.join(file_link, BASELINE))
+    code, _, err = existing(file_link)
+    assert code == 2 and "symlink" in err, err
+    with open(outside, encoding="utf-8") as fh:
+        assert fh.read() == "untouched\n"
+
+
 def case_greenfield_creates_layout():
     ob = import_onboard()
     root = new_root()
@@ -286,6 +331,7 @@ def case_greenfield_creates_layout():
     idx = load(os.path.join(root, "index", "metadata.json"))
     assert idx["nodes"] == {} and idx["edges"] == [], idx
     assert out.rstrip().endswith(BASELINE_GREENFIELD), out
+    assert not os.path.exists(os.path.join(root, "tools")), os.listdir(root)
     assert not os.path.exists(os.path.join(root, ".ai-framework.json"))
     assert not os.path.exists(os.path.join(root, "framework"))
     before = snapshot(os.path.join(root, "app"))
