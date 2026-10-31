@@ -44,7 +44,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools", "index"))
+sys.path.insert(0, os.path.join(ROOT, "tools", "config"))
 
+from framework_config import SETTING_KEYS, impact_checks  # noqa: E402
 from register import (CONFLICT_TYPES, component_map, load_register, overlaps,  # noqa: E402
                       register_commit, scope)
 from validate import STORY_RE, validate  # noqa: E402
@@ -53,8 +55,6 @@ from query import load  # noqa: E402
 # Matches only [A-Z][A-Z0-9]*-[0-9]+, so a story id found this way is safe to print as is.
 STORY_SEARCH = re.compile(STORY_RE.pattern.lstrip("^").rstrip("$"))
 IMPACT_PATH_RE = re.compile(r"^impacts/(?!\.\.?/)[^/]+/impact\.json$")
-SETTING_KEYS = ("noImpact", "outOfScope")
-SETTING_VALUES = ("comment", "fail")
 BUNDLE_TYPES = {"lwc": "LightningComponentBundle", "aura": "AuraDefinitionBundle"}
 MAX_VALUE = 200
 # C0/C1 controls, DEL, and Unicode line/paragraph separators.
@@ -138,30 +138,9 @@ def story_from_branch(branch):
 
 
 def load_settings(root):
-    """{"noImpact": ..., "outOfScope": ...}, each comment or fail; ValueError otherwise."""
-    settings = {k: "comment" for k in SETTING_KEYS}
-    path = os.path.join(root, ".ai-framework.json")
-    if not os.path.isfile(path):
-        return settings
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (RecursionError, MemoryError) as exc:
-        raise ValueError(".ai-framework.json cannot be read: %s" % type(exc).__name__)
-    if not isinstance(data, dict):
-        raise ValueError(".ai-framework.json is not a JSON object")
-    checks = data.get("impactChecks")
-    if checks is None:
-        return settings
-    if not isinstance(checks, dict):
-        raise ValueError(".ai-framework.json: impactChecks is not an object")
-    for k in SETTING_KEYS:
-        if k in checks:
-            if checks[k] not in SETTING_VALUES:
-                raise ValueError(".ai-framework.json: impactChecks.%s %s is not one of %s"
-                                 % (k, code_span(checks[k]), ", ".join(SETTING_VALUES)))
-            settings[k] = checks[k]
-    return settings
+    """{"noImpact": ..., "outOfScope": ...}, each comment or fail; ValueError otherwise.
+    Read through framework_config, the one reader of .ai-framework.json."""
+    return impact_checks(root)
 
 
 def _apis(apis):

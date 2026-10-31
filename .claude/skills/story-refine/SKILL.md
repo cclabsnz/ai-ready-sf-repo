@@ -10,7 +10,7 @@ Audience: product owners, BAs, developers, testers. Output: a draft `story.json`
 Project rules apply (`00-precedence`, `20-no-real-data`). The guard in `.claude/settings.json` blocks org calls, writes outside `ai-context/`, and fetches off the allowlist; do not try to work around a block, report it. The assistant never confirms a story. The product owner confirms it by promoting it (`tools/impacts/promote.py --story`); until then it is a draft.
 
 ## Step 0: freshness
-Run `python3 tools/index/query.py check-stale`. If exit code is 3, run `python3 tools/index/build_index.py` first.
+Run `python3 tools/index/query.py check-stale`. If exit code is 3, run `python3 tools/index/build_index.py --from-config` first.
 
 ## Step 1: inputs
 Build the table from `references/input-checklist.md` and show it. Ask **once** for missing required inputs. Missing optional inputs become open questions. Copy (never move) any attached files to `ai-context/<id>-<slug>/inputs/`.

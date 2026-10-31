@@ -15,7 +15,7 @@ Six principles, in order of precedence:
 3. Enforcement lives in project settings, so every agent, skill and direct call inherits it.
 4. Nothing from an org enters git.
 5. Every claim carries `path:line` evidence and a label (Confirmed / Inferred / Unverifiable).
-6. The assistant never approves, deploys, pushes or decides.
+6. The assistant may recommend and proceed provisionally; it never approves, deploys, pushes or makes a binding decision. Every recommendation is confirmed by a named owner before it becomes a committed impact or a code scope.
 
 ## Status
 

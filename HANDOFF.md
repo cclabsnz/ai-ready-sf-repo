@@ -18,7 +18,7 @@ without a written reason in the PR.
 3. Enforcement in `.claude/settings.json`, not in prose. Every new tool the agent can use goes through the guard.
 4. Nothing from an org enters git. Fixtures are synthetic. `tools/guard/scan_data.py` gates commits.
 5. Every claim: `path:line` evidence + Confirmed / Inferred / Unverifiable.
-6. The assistant never approves, deploys, pushes or decides.
+6. The assistant may recommend and proceed provisionally; it never approves, deploys, pushes or makes a binding decision. Every recommendation is confirmed by a named owner before it becomes a committed impact or a code scope.
 
 ## Smoke test (run before anything else)
 

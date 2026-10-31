@@ -9,6 +9,12 @@ Nothing here reads an org. The index is a projection of the checkout.
 
 Usage:
   python3 tools/index/build_index.py --root . --out index
+  python3 tools/index/build_index.py --from-config
+
+--root defaults to . and --out to index; a relative --out is joined to --root.
+--from-config indexes the sourceRoot of the checkout's .ai-framework.json (read through
+tools/config/framework_config.py) into <checkout>/index, the checkout being this file's own.
+It exits 2 when combined with --root or --out, or when the config is invalid.
 """
 import argparse
 import json
@@ -467,15 +473,39 @@ def inventory(nodes):
     }
 
 
+def from_config():
+    """(source root, <checkout>/index) from the checkout's .ai-framework.json. The checkout is
+    this file's own, never the cwd. Raises ValueError for an invalid config."""
+    checkout = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    sys.path.insert(0, os.path.join(checkout, "tools", "config"))
+    import framework_config
+    return framework_config.source_root(checkout), os.path.join(checkout, "index")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=".")
-    ap.add_argument("--out", default="index")
+    # None means "not given", so --from-config can tell an explicit --root . from the default.
+    ap.add_argument("--root", default=None, help="default: .")
+    ap.add_argument("--out", default=None, help="default: index, joined to --root")
+    ap.add_argument("--from-config", action="store_true",
+                    help="index the sourceRoot of .ai-framework.json into <checkout>/index")
     ap.add_argument("--version", action="store_true")
     args = ap.parse_args()
     if args.version:
         print(INDEX_VERSION)
         return 0
+    if args.from_config:
+        if args.root is not None or args.out is not None:
+            print("--from-config cannot be combined with --root or --out", file=sys.stderr)
+            return 2
+        try:
+            args.root, args.out = from_config()
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    else:
+        args.root = "." if args.root is None else args.root
+        args.out = "index" if args.out is None else args.out
     root = os.path.realpath(args.root)  # realpath, to match git's top level (e.g. macOS /var -> /private/var)
     ns_file = os.path.join(root, "namespaces.json")
     namespaces = []

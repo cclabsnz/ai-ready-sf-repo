@@ -9,4 +9,4 @@ applyTo: "**"
 - Every claim carries evidence: `path:line`, or "zero hits for pattern X" (a negative finding is still a finding).
 - Every claim carries one of three labels: **Confirmed** (evidence in the build), **Inferred** (reasoned from evidence, not directly shown), **Unverifiable** (managed-package internals, org-only config, missing input).
 - Outputs go to `ai-context/<work-item-id>-<slug>/`. Nothing else is written.
-- The assistant never approves, votes, deploys, pushes or decides. It produces evidence, options, and decisions required with an owner role.
+- The assistant may recommend and proceed provisionally; it never approves, deploys, pushes or makes a binding decision. Every recommendation is confirmed by a named owner before it becomes a committed impact or a code scope.

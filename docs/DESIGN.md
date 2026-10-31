@@ -13,7 +13,7 @@ Six rules it never breaks:
 3. **Enforcement lives in the layer that runs everywhere.** Hooks and deny rules sit in project settings so every agent, skill and direct invocation inherits them. A rule written only in prose is a request.
 4. **Nothing from an org enters git.** Exports, inputs and generated reports are git-ignored by path (`data/` and the whole `/ai-context/` workspace; see "Data boundary") and scanned pre-commit. Impact records and refined stories a human promotes into `impacts/` are the only assistant output meant for git. Fixtures are synthetic.
 5. **Every claim carries evidence and a label.** `path:line` or "zero hits for pattern X", labelled Confirmed, Inferred or Unverifiable under one taxonomy for all squads.
-6. **The assistant never approves, deploys, pushes or decides.** It produces evidence, options and open decisions with an owner role. Humans act.
+6. **The assistant may recommend and proceed provisionally; it never approves, deploys, pushes or makes a binding decision. Every recommendation is confirmed by a named owner before it becomes a committed impact or a code scope.** It produces evidence, options and open decisions with an owner role. Humans confirm and act.
 
 The design assumes two AI tools (Claude Code and GitHub Copilot), Windows and macOS laptops, 6–10 squads of about six people, and a single Salesforce repo per programme with managed packages (nCino, FSC or similar) alongside custom metadata.
 
