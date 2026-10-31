@@ -1,0 +1,147 @@
+step: check-rules
+command: python3 tools/code/check_rules.py --from-config
+exit: 0
+{
+  "baselined": [
+    {
+      "line": 32,
+      "path": "demo/org/force-app/main/default/classes/CaseAccountSummaryController.cls",
+      "rule": "apex-sharing",
+      "text": "public class AccountSummary {"
+    },
+    {
+      "line": 156,
+      "path": "demo/org/force-app/main/default/classes/CaseEscalationService.cls",
+      "rule": "apex-sharing",
+      "text": "public class EscalationState {"
+    },
+    {
+      "line": 40,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Opportunity> rows = ["
+    },
+    {
+      "line": 61,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "update changed;"
+    },
+    {
+      "line": 71,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Opportunity> rows = ["
+    },
+    {
+      "line": 11,
+      "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+      "rule": "apex-sharing",
+      "text": "public class Request {"
+    },
+    {
+      "line": 16,
+      "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+      "rule": "apex-sharing",
+      "text": "public class Result {"
+    },
+    {
+      "line": 51,
+      "path": "demo/org/force-app/main/default/classes/LegacyCaseMerge.cls",
+      "rule": "apex-user-mode",
+      "text": "update duplicates;"
+    },
+    {
+      "line": 40,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Account> rows = ["
+    },
+    {
+      "line": 61,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "update changed;"
+    },
+    {
+      "line": 71,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Account> rows = ["
+    }
+  ],
+  "findings": [
+    {
+      "line": 32,
+      "path": "demo/org/force-app/main/default/classes/CaseAccountSummaryController.cls",
+      "rule": "apex-sharing",
+      "text": "public class AccountSummary {"
+    },
+    {
+      "line": 156,
+      "path": "demo/org/force-app/main/default/classes/CaseEscalationService.cls",
+      "rule": "apex-sharing",
+      "text": "public class EscalationState {"
+    },
+    {
+      "line": 40,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Opportunity> rows = ["
+    },
+    {
+      "line": 61,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "update changed;"
+    },
+    {
+      "line": 71,
+      "path": "demo/org/force-app/main/default/classes/ContractTermService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Opportunity> rows = ["
+    },
+    {
+      "line": 11,
+      "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+      "rule": "apex-sharing",
+      "text": "public class Request {"
+    },
+    {
+      "line": 16,
+      "path": "demo/org/force-app/main/default/classes/EscalationNotifier.cls",
+      "rule": "apex-sharing",
+      "text": "public class Result {"
+    },
+    {
+      "line": 51,
+      "path": "demo/org/force-app/main/default/classes/LegacyCaseMerge.cls",
+      "rule": "apex-user-mode",
+      "text": "update duplicates;"
+    },
+    {
+      "line": 40,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Account> rows = ["
+    },
+    {
+      "line": 61,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "update changed;"
+    },
+    {
+      "line": 71,
+      "path": "demo/org/force-app/main/default/classes/RenewalOutlookService.cls",
+      "rule": "apex-user-mode",
+      "text": "List<Account> rows = ["
+    }
+  ],
+  "new": [],
+  "notes": [
+    "Scanned demo/org against tools/code/baseline.json.",
+    "SOQL/DML-in-loop detection is narrow and may miss cases: it sees only [SELECT ...], DML statements and Database DML calls written inside a braced for, while or do body. Loops without braces, calls into other methods and dynamic SOQL are not followed.",
+    "Comments and '...' strings are ignored. Each finding is one rule on one line."
+  ]
+}

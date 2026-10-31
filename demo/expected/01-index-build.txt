@@ -1,0 +1,4 @@
+step: index-build
+command: python3 tools/index/build_index.py --root demo/org --out <tmp>/index
+exit: 0
+indexed 256 nodes, 921 edges at <commit>

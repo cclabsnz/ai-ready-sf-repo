@@ -1,0 +1,218 @@
+step: consistency
+command: python3 tools/evals/consistency.py demo/expected/consistency-fixture/run-1 demo/expected/consistency-fixture/run-2 demo/expected/consistency-fixture/run-3 --text
+exit: 0
+{
+  "fields": {
+    "componentRatings": {
+      "agree": false,
+      "invalidRuns": [],
+      "values": [
+        [
+          [
+            "CaseAssignmentService",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseAssignmentService_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTrigger",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "Escalation_Agents",
+            "Low",
+            "Inferred"
+          ]
+        ],
+        [
+          [
+            "CaseAssignmentService",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseAssignmentService_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTrigger",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "Escalation_Agents",
+            "Low",
+            "Inferred"
+          ]
+        ],
+        [
+          [
+            "CaseAssignmentService",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseAssignmentService_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTrigger",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "CaseTriggerHandler_Test",
+            "Medium",
+            "Confirmed"
+          ],
+          [
+            "Escalation_Agents",
+            "Low",
+            "Confirmed"
+          ]
+        ]
+      ]
+    },
+    "components": {
+      "agree": true,
+      "invalidRuns": [],
+      "values": [
+        [
+          "CaseAssignmentService",
+          "CaseAssignmentService_Test",
+          "CaseTrigger",
+          "CaseTriggerHandler",
+          "CaseTriggerHandler_Test",
+          "Escalation_Agents"
+        ],
+        [
+          "CaseAssignmentService",
+          "CaseAssignmentService_Test",
+          "CaseTrigger",
+          "CaseTriggerHandler",
+          "CaseTriggerHandler_Test",
+          "Escalation_Agents"
+        ],
+        [
+          "CaseAssignmentService",
+          "CaseAssignmentService_Test",
+          "CaseTrigger",
+          "CaseTriggerHandler",
+          "CaseTriggerHandler_Test",
+          "Escalation_Agents"
+        ]
+      ]
+    },
+    "decisions": {
+      "agree": true,
+      "invalidRuns": [],
+      "values": [
+        [
+          [
+            "Service Ops lead",
+            "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."
+          ]
+        ],
+        [
+          [
+            "Service Ops lead",
+            "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."
+          ]
+        ],
+        [
+          [
+            "Service Ops lead",
+            "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."
+          ]
+        ]
+      ]
+    },
+    "evidence": {
+      "agree": true,
+      "invalidRuns": [],
+      "values": [
+        [
+          "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1",
+          "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls:27",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:61",
+          "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1",
+          "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2"
+        ],
+        [
+          "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1",
+          "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls:27",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:61",
+          "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1",
+          "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2"
+        ],
+        [
+          "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1",
+          "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls:27",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16",
+          "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:61",
+          "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1",
+          "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2"
+        ]
+      ]
+    }
+  },
+  "identical": 2,
+  "invalidRuns": [],
+  "kind": "impact",
+  "runs": 3
+}
+
+Kind: impact
+
+run-1 = demo/expected/consistency-fixture/run-1
+run-2 = demo/expected/consistency-fixture/run-2
+run-3 = demo/expected/consistency-fixture/run-3
+
+field             run-1  run-2  run-3  agree
+components        =      =      =      yes
+componentRatings  =      =      x      no
+evidence          =      =      =      yes
+decisions         =      =      =      yes
+(= matches the most common valid value, x differs, inv is invalid: no usable value)
+
+Disagreements:
+  componentRatings
+    run-1: [["CaseAssignmentService", "Medium", "Confirmed"], ["CaseAssignmentService_Test", "Medium", "Confirmed"], ["CaseTrigger", "Medium", "Confirmed"], ["CaseTriggerHandler", "Medium", "Confirmed"], ["CaseTriggerHandler_Test", "Medium", "Confirmed"], ["Escalation_Agents", "Low", "Inferred"]]
+    run-2: [["CaseAssignmentService", "Medium", "Confirmed"], ["CaseAssignmentService_Test", "Medium", "Confirmed"], ["CaseTrigger", "Medium", "Confirmed"], ["CaseTriggerHandler", "Medium", "Confirmed"], ["CaseTriggerHandler_Test", "Medium", "Confirmed"], ["Escalation_Agents", "Low", "Inferred"]]
+    run-3: [["CaseAssignmentService", "Medium", "Confirmed"], ["CaseAssignmentService_Test", "Medium", "Confirmed"], ["CaseTrigger", "Medium", "Confirmed"], ["CaseTriggerHandler", "Medium", "Confirmed"], ["CaseTriggerHandler_Test", "Medium", "Confirmed"], ["Escalation_Agents", "Low", "Confirmed"]]
+
+2/3 identical

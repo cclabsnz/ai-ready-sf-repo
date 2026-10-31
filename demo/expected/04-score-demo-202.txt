@@ -1,0 +1,17 @@
+step: score-demo-202
+command: python3 demo/measure/score.py impacts/DEMO-202-round-robin-assignment/impact.json --key demo/stories/DEMO-202.answer.json
+exit: 0
+{
+  "found": [
+    "CaseAssignmentService",
+    "CaseAssignmentService_Test",
+    "CaseTriggerHandler",
+    "CaseTriggerHandler_Test",
+    "CaseTrigger",
+    "Escalation_Agents"
+  ],
+  "missed": [],
+  "extra": [],
+  "recall": 1.0,
+  "precision": 1.0
+}

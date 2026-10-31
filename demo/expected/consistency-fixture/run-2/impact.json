@@ -1,0 +1,15 @@
+{
+  "fixture": "Hand-built to show the comparer's format. Not a model run and not a consistency result.",
+  "storyId": "DEMO-202",
+  "components": [
+    {"api": "CaseTrigger", "impact": "Medium", "confidence": "Confirmed", "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2"},
+    {"api": "CaseTriggerHandler", "impact": "Medium", "confidence": "Confirmed", "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16"},
+    {"api": "CaseTriggerHandler_Test", "impact": "Medium", "confidence": "Confirmed", "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:61"},
+    {"api": "CaseAssignmentService", "impact": "Medium", "confidence": "Confirmed", "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1"},
+    {"api": "CaseAssignmentService_Test", "impact": "Medium", "confidence": "Confirmed", "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls:27"},
+    {"api": "Escalation_Agents", "impact": "Low", "confidence": "Inferred", "evidence": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1"}
+  ],
+  "decisions": [
+    {"ownerRole": "Service Ops lead", "text": "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."}
+  ]
+}

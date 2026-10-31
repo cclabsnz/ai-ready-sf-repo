@@ -1,0 +1,115 @@
+step: hop3-consumers
+command: python3 tools/index/query.py consumers Account.Service_Level__c --hops 3 --index <tmp>/index
+exit: 0
+{
+  "api": "Account.Service_Level__c",
+  "hops": 3,
+  "count": 13,
+  "consumers": [
+    {
+      "api": "CaseEscalationService",
+      "type": "ApexClass",
+      "via": "apexFieldRef",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/classes/CaseEscalationService.cls:48"
+    },
+    {
+      "api": "CaseEscalationService_Test",
+      "type": "ApexClass",
+      "via": "apexFieldRef",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/classes/CaseEscalationService_Test.cls:29"
+    },
+    {
+      "api": "EscalationNotifier_Test",
+      "type": "ApexClass",
+      "via": "apexFieldRef",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/classes/EscalationNotifier_Test.cls:29"
+    },
+    {
+      "api": "Sales_Rep",
+      "type": "PermissionSet",
+      "via": "fieldPermission",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/permissionsets/Sales_Rep.permissionset-meta.xml:6"
+    },
+    {
+      "api": "Service_Agent",
+      "type": "PermissionSet",
+      "via": "fieldPermission",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/permissionsets/Service_Agent.permissionset-meta.xml:14"
+    },
+    {
+      "api": "Team_Lead",
+      "type": "PermissionSet",
+      "via": "fieldPermission",
+      "target": "Account.Service_Level__c",
+      "hop": 1,
+      "evidence": "demo/org/force-app/main/default/permissionsets/Team_Lead.permissionset-meta.xml:14"
+    },
+    {
+      "api": "CaseTriggerHandler",
+      "type": "ApexClass",
+      "via": "apexClassRef",
+      "target": "CaseEscalationService",
+      "hop": 2,
+      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:15"
+    },
+    {
+      "api": "EscalationNotifier",
+      "type": "ApexClass",
+      "via": "apexClassRef",
+      "target": "CaseEscalationService",
+      "hop": 2,
+      "evidence": "demo/org/force-app/main/default/classes/EscalationNotifier.cls:34"
+    },
+    {
+      "api": "caseEscalationPanel",
+      "type": "LightningComponentBundle",
+      "via": "lwcApexImport",
+      "target": "CaseEscalationService",
+      "hop": 2,
+      "evidence": "demo/org/force-app/main/default/lwc/caseEscalationPanel/caseEscalationPanel.js:2"
+    },
+    {
+      "api": "CaseTrigger",
+      "type": "ApexTrigger",
+      "via": "apexClassRef",
+      "target": "CaseTriggerHandler",
+      "hop": 3,
+      "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2"
+    },
+    {
+      "api": "CaseTriggerHandler_Test",
+      "type": "ApexClass",
+      "via": "apexClassRef",
+      "target": "CaseTriggerHandler",
+      "hop": 3,
+      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls:99"
+    },
+    {
+      "api": "Case_Agent_Console",
+      "type": "FlexiPage",
+      "via": "flexipageComponent",
+      "target": "caseEscalationPanel",
+      "hop": 3,
+      "evidence": "demo/org/force-app/main/default/flexipages/Case_Agent_Console.flexipage-meta.xml:120"
+    },
+    {
+      "api": "Case_Escalate_Premium",
+      "type": "Flow",
+      "via": "flowApexAction",
+      "target": "EscalationNotifier",
+      "hop": 3,
+      "evidence": "demo/org/force-app/main/default/flows/Case_Escalate_Premium.flow-meta.xml:8"
+    }
+  ],
+  "note": null
+}
