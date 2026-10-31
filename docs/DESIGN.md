@@ -11,7 +11,7 @@ Six rules it never breaks:
 1. **The checkout is the only source of truth.** Knowledge files are leads to re-verify. Anything countable is computed from the repo at a stated commit, never typed into a file.
 2. **Deterministic before probabilistic.** If a script can do a check (existence of an API name, a count, a secret pattern, a manifest diff), a script does it and the model interprets the result. The model is reserved for judgement: scope, meaning, risk.
 3. **Enforcement lives in the layer that runs everywhere.** Hooks and deny rules sit in project settings so every agent, skill and direct invocation inherits them. A rule written only in prose is a request.
-4. **Nothing from an org enters git.** Exports, inputs and generated reports are git-ignored by path (the whole `ai-context/` workspace only once the WS2 `.gitignore` patch lands; see "Data boundary") and scanned pre-commit. Impact records a human promotes into `impacts/` are the one assistant output meant for git. Fixtures are synthetic.
+4. **Nothing from an org enters git.** Exports, inputs and generated reports are git-ignored by path (`data/` and the whole `/ai-context/` workspace; see "Data boundary") and scanned pre-commit. Impact records and refined stories a human promotes into `impacts/` are the only assistant output meant for git. Fixtures are synthetic.
 5. **Every claim carries evidence and a label.** `path:line` or "zero hits for pattern X", labelled Confirmed, Inferred or Unverifiable under one taxonomy for all squads.
 6. **The assistant never approves, deploys, pushes or decides.** It produces evidence, options and open decisions with an owner role. Humans act.
 
@@ -40,7 +40,8 @@ Rules for the index:
 - Every `path` and `path:line` in the index is relative to the repo root (the git checkout's top level), whatever `--root` was, so evidence opens from the checkout as cited. `tools/index/test_index.py` proves it on the fixtures.
 - Managed-package metadata is indexed from `pkg-*/` and from a committed `namespaces.json` list; package internals the repo does not hold are marked Unverifiable, not guessed.
 - The index is rebuilt in CI on every PR and committed artefacts are never trusted: a skill that finds the stamp's commit does not match `HEAD` rebuilds before proceeding.
-- Query helpers (`tools/index/query.py`) answer the questions skills ask: `consumers(apiName, hops)` (up to 3 hops; story-impact defaults to 2 and takes an optional `hops` input), `exists(apiName)`, `type(apiName)`, `below_api_floor(n)`. Skills call these, not `grep`.
+- Query helpers (`tools/index/query.py`) answer the questions skills ask: `consumers(apiName, hops)` (up to 3 hops; story-impact defaults to 2 and takes an optional `hops` input), `exists(apiName)`, `type(apiName)`, `below_api_floor(n)`, and `edge-seeds <api>...` (candidate edge cases for story refinement; see "Story refinement"). Skills call these, not `grep`.
+- Index version `0.5.0` (`INDEX_VERSION` in `build_index.py`, recorded in the stamp as `indexVersion`) adds the field attributes `picklistValues`, `globalValueSet` and `formula`. `picklistValues` lists each value of a field's own value set as `{value, active, line}`, where `line` is the value's `<fullName>` line and `active` is false only when the value says `<isActive>false</isActive>`. `globalValueSet` holds the name of a global value set the field uses; its values live outside the field file and are not indexed. `formula` is true when the field has a formula. An index built by an earlier version lacks these attributes, so rebuild it before running `edge-seeds`.
 
 ## Layer 2: the control plane
 
@@ -50,7 +51,7 @@ The control plane is built and tested before the first skill, because every late
 | --- | --- | --- |
 | Offline guard | PreToolUse hook on every tool (matcher `.*`) in `.claude/settings.json`, registered as `sh "$CLAUDE_PROJECT_DIR/tools/guard/guard.sh"`, which runs `tools/guard/guard.py` with `-I`. The wrapper exits 2 if no interpreter is found or `guard.py` is unreadable, and maps any other exit code to 2, so a missing Python blocks rather than passes. `guard.cmd` is a Windows fallback, not the registered command. Rules live in `tools/guard/policy.json`; the active mode picks the allowed write paths, the Bash allowlist and the Salesforce CLI level. Mirrored as a Copilot hook in `.github/hooks/`. | `sfdx`, org logins and every other org-changing `sf` command, pushes, `curl`, `wget`, writes outside the mode's paths, Bash outside the mode's allowlist, unquoted globs that could expand to an option, WebFetch to domains not on the allowlist, MCP tools that write (and every MCP tool in `advise`), and any write or non-read-only Bash while the tripwire is tripped |
 | Deny rules | Static `permissions.deny` patterns in the same settings file for the always-blocked Salesforce CLI command prefixes, `sfdx`, `git push`, `curl`, `wget` and `WebFetch` | Belt and braces: a deny rule applies even when the hook cannot start. They do not cover Write/Edit paths, colon-style ids, the `force` topic or `--flags-dir`; those depend on the hook |
-| Data boundary | `.gitignore` for `data/` and `/index/`, and under `ai-context/` for these patterns only: `**/inputs/`, `**/*.pptx`, `**/*.xlsx`, `**/*.docx` and `**/scan/*.json`. Other workspace files, such as draft `impact.md` and `impact.json`, are not ignored today. Once the owner applies `ai-context/ws2/patches/gitignore-ws2.patch`, `/ai-context/` replaces those `ai-context/` lines and the whole workspace is ignored. Plus `tools/guard/scan_data.py` as a pre-commit hook and a pipeline gate | Org exports and user inputs entering git (all workspace output only after the gitignore patch); Salesforce IDs, account-number formats, emails and `LLC_BI__` record names in any committed file |
+| Data boundary | `.gitignore` for `data/`, `/index/` and the whole `/ai-context/` workspace (the WS2 owner patch, applied in `3fb9e73`). Plus `tools/guard/scan_data.py` as a pre-commit hook and a pipeline gate | Org exports, user inputs and workspace output entering git; Salesforce IDs, account-number formats, emails and `LLC_BI__` record names in any committed file |
 | Secrets | gitleaks (or the platform's native scanner) pre-commit and in CI | Keys, tokens and credentials in commits |
 | Kill switch | One line in `.claude/settings.json` (`"env": {"AI_FRAMEWORK_MODE": "advise"}`) that the guard reads: in `advise` mode every write is blocked and only read-only Bash runs, and the model is told to output recommendations only. The committed value is the ceiling: committed `advise` always wins over any local override | Programme-wide pause in minutes if a skill misbehaves, without touching squads' machines |
 
@@ -136,6 +137,8 @@ Every skill has the same anatomy, enforced by `tools/build/lint_skill.py`:
 | `scripts/*.py` | Anything deterministic: queries, counts, docx/pptx/xlsx builders | stdlib only; `--version` flag; runs on Windows via `py -3` |
 | `evals/cases/*.json` and `evals/expected/*` | Three to five synthetic inputs with expected outputs | Required to merge; run with variance (N=5) |
 
+Step 0 of the workflow comes before story-impact and pr-reference-check: **story-refine** turns one rough story into Given/When/Then acceptance criteria and edge cases seeded from the index, and writes a draft `story.json` and `story.md` (see "Story refinement"). Sizing the refined story is then story-impact's job.
+
 The first two skills, in order:
 
 1. **story-impact.** Input: a work item (story, feature, defect) as text. Method: seed terms from the taxonomy, `consumers()` to two hops by default (an optional `hops` input takes 1 to 3), triage with recorded drop reasons, classify each hit (layer, ownership, change type, impact, confidence), write `ai-context/<id>-<slug>/impact.md`, the draft record `impact.json` (see "Impact record and register") and, later, the RICEFW workbook. This is the skill that proves the index and pays back first.
@@ -170,7 +173,15 @@ Folders are named `<storyId>-<slug>` in both `ai-context/` and `impacts/`. `vali
 | Evidence files | Checked at write time; nothing is written on an error | Checked again by `promote.py` before it writes |
 | In git | No; it is workspace output | Yes, through an ordinary PR that a reviewer checks |
 
-`promote.py` validates the draft with its evidence files checked, then runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`. It refuses when the destination exists (unless `--replace`), when a path is a symlink, or when the draft folder resolves outside `ai-context/`. `--confirmed-by` records who confirmed the record. The script decides nothing.
+`promote.py` validates the draft with its evidence files checked, then runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`. It refuses (exit 1, nothing written):
+
+- when the destination folder exists (unless `--replace`);
+- when a source file, the destination or `impacts/` itself is a symlink;
+- when `impact.json` cannot be parsed, deeply nested JSON included;
+- when the same `storyId` already has an `impact.json` or `story.json` in another `impacts/` folder;
+- when the data scan finds a hit in the sources, or in the exact bytes it is about to write. That final scan covers the record with `--confirmed-by` filled in, so an email-shaped or other real-data value there is refused too.
+
+A draft folder that resolves outside `<root>/ai-context/` is bad usage (exit 2). `--confirmed-by` records who confirmed the record. The script decides nothing.
 
 Promotion is a human step. In `normal` the guard blocks the assistant from running `promote.py` and from writing `impacts/`. `maintain` admits both, so there the rule that the owner runs it with their own `--confirmed-by` (`! python3 tools/impacts/promote.py ...` in Claude Code) is a process rule, not a guard rule. The assistant never supplies a confirmation.
 
@@ -206,13 +217,13 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 ### Where the checks run
 
-- **On a laptop, today.** The left check runs whenever story-impact writes. The writer calls the register in-process, so it needs no extra allowlist entry. In `normal` the guard's allowlist does not yet hold `register.py`, `validate.py`, `render_register.py` or `pr_check.py`, so the assistant cannot run them directly. A human can, from a terminal, and so can `maintain`.
-- **On a laptop, after the owner applies `ai-context/ws2/patches/guard-ws2.patch`.** `register.py` becomes read-only (every mode). `validate.py`, `render_register.py` and `pr_check.py` join the framework scripts (`normal`, `build`, `maintain`). `promote.py` stays `maintain`-only.
-- **In CI, today.** `.github/workflows/framework-ci.yml` runs none of the impact checks. Its `paths` filter holds neither `impacts/**` nor `demo/**`.
-- **In CI, after the owner applies the WS1 and then the WS2 CI patches** (`ai-context/ws2/patches/APPLY.md`):
-  - `paths` gains `demo/**` and `impacts/**`.
+The WS1 and WS2 owner patches are applied (`3fb9e73`), so the following holds today.
+
+- **On a laptop.** The left check runs whenever story-impact writes. The writer calls the register in-process. `register.py` is read-only, so it runs in every mode. `validate.py`, `render_register.py` and `pr_check.py` are framework scripts (`normal`, `build`, `maintain`). `promote.py` is `maintain`-only.
+- **In CI.** `.github/workflows/framework-ci.yml`:
+  - Its `paths` filter includes `demo/**` and `impacts/**`.
   - `guard-and-lint` runs every impact test script and then `validate.py --all`.
-  - A new `impact-checks` job runs on pull requests:
+  - The `impact-checks` job runs on pull requests:
     - It builds the index from the head's `demo/org`.
     - It runs the base branch's `pr_check.py` with `--root .` and `--base-root base`, so the check code, settings and register all come from base. Only the PR that first adds `pr_check.py` runs its own copy, and its result says so.
     - It writes the result to the step summary and posts or edits one PR comment.
@@ -226,6 +237,126 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 - **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks `CaseTrigger`, `CaseTriggerHandler` and `CaseTriggerHandler_Test` as `review`, so its overlaps with DEMO-202 are watches.
 - **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because the register was empty when it was drafted.
 
+## Story refinement
+
+Story refinement is step 0 of the workflow, before story-impact sizes anything. A product owner or BA brings a rough story. The `story-refine` skill (`framework/skills/story-refine/`, run by the `discovery-lead` agent) turns it into testable Given/When/Then acceptance criteria. It adds edge cases that come only from the index, records the seeds it dropped with a reason, lists overlaps with stories on the register, and turns every guess into an open question with an owner role. The output is a draft: `ai-context/<storyId>-<slug>/story.json` and `story.md`. The product owner confirms it by promoting it. The assistant never confirms a story.
+
+### The story record
+
+`tools/stories/validate_story.py` is the schema's source of truth. Each key's rules (patterns, allowed values, when evidence may be null) live there and nowhere else. The key names are:
+
+- **Top level:** `schemaVersion`, `storyId`, `slug`, `status`, `squad`, `persona`, `goal`, `benefit`, `inScope`, `outOfScope`, `nonFunctional`, `openQuestions`, `acceptanceCriteria`, `edgeCases`, `droppedSeeds`, `overlaps`, `seeds`, plus `confirmedBy` on a confirmed story.
+- **Each acceptance criterion:** `id` (`AC-n`), `given`, `when`, `then`, `examples`, `source` (`stated`, `edge-case` or `assistant-proposed`).
+- **Each edge case:** `id` (`EC-n`), `category`, `component`, `detail`, `evidence`, `confidence`, `becameCriterion` (an `AC-n` id, or null with a `reason`), `reason`.
+- **Each dropped seed:** `category`, `component`, `detail`, `reason`.
+- **Each open question:** `id` (`OQ-n`), `text`, `ownerRole`, `answer` (text or null), `deferred` (true or false).
+- **Each overlap:** `api`, `type`, `kind`, `stories` (each with `storyId`, `squad`, `status`, `changeType`, `type`, `commit`).
+
+`status` is `draft` in `ai-context/` and `confirmed` in `impacts/`, where `confirmedBy` is set. `AC`, `EC` and `OQ` ids run from 1 with no gaps. The id formats are fixed now because WS8's `check_trace.py` will read them. `validate_story.py --all` checks every `impacts/*/story.json` as confirmed, checks that its folder is named `<storyId>-<slug>`, and checks that no `storyId` appears twice among the story records.
+
+**Decision: `detail` on edge cases and dropped seeds.** The spec's `story.json` list gives `edgeCases[]` no `detail` and has no `droppedSeeds[]` at all. WS11 adds both. Several seeds share a component and a category (on `Case`: a validation rule, a trigger and a flow are all `automation`). Without `detail` they collapse into one, and "each seed kept or dropped with a reason" cannot be checked. A seed is identified by its (component, category, detail). The skill copies the component, category and detail verbatim from the seed and never rewords `detail`. The spec text still lacks `detail`; this section records the extension.
+
+### Vague criteria: `check_ac.py`
+
+`tools/stories/check_ac.py <story.json>` prints `{"ok", "findings": [{id, rule, detail}]}` and exits 1 when there are findings. Its rules:
+
+- **`missing-gwt`:** `given`, `when` or `then` is empty or missing.
+- **`multiple-outcomes`:** `then` holds a `;`, a sentence break (`.`, `!` or `?`, then whitespace, then a capital or a digit), or the word `and` or `or`. The documented fix is to split it into separate criteria, one outcome each.
+- **`no-example`:** `examples` holds no non-empty string.
+- **`vague-word`:** `given`, `when` or `then` contains a word or phrase from `tools/stories/vague_words.json`. Matching is whole-word and case-insensitive, and a phrase matches as a phrase.
+
+Quoted text (`"..."` or `` `...` ``) is ignored by `multiple-outcomes` and `vague-word`, so a criterion can quote a field label or a value that contains `and`.
+
+**Honest limits.** This is a heuristic, not a parser of meaning.
+
+- `and` or `or` outside quotes always fails, even when the outcome is single ("shows black and white").
+- Quoting exempts anything, so an author can hide a vague word in quotes. Review catches that; the script does not.
+- An abbreviation such as `e.g. Foo` reads as a sentence break, and a break followed by a lowercase letter is missed.
+- Curly quotes are not treated as quotes.
+- The word list is short and English only. A criterion can be precise in wording and still wrong.
+
+### Edge seeds: `query.py edge-seeds`
+
+`python3 tools/index/query.py edge-seeds <api> [<api>...]` prints `{"seeds": [...], "unresolved": [...]}`. Each seed is `{category, component, detail, evidence, confidence}`. It is built from index edges and node attributes only, so it is deterministic: it is deduplicated by (component, category, detail) and sorted by the same triple. A seed that would be `Confirmed` but has no evidence becomes `Unverifiable`. A field api gives seeds for the field and for its object. An object api gives seeds for the object only, not for all its fields. An api the index does not hold is listed under `unresolved` and gives no seeds; for a story, that is a planned new component or a typo.
+
+| Category | Emitted for (code: `edge_seeds` in `tools/index/query.py`) | Evidence | Confidence |
+| --- | --- | --- | --- |
+| `blank` | A field whose `required` is false, unless it is a formula, roll-up summary, auto-number or master-detail field | The field's `<required>` line, else its `<type>` line | Confirmed |
+| `picklist-value` | Each value of the field's own value set; an inactive value's `detail` ends in ` (inactive)`. A field on a global value set gives one seed instead, `global value set; values not in this repo` | The value's `<fullName>` line; the `<valueSetName>` line for a global value set | Confirmed; Unverifiable for a global value set |
+| `field-access` | Each permission set that grants the field (`<PermissionSet> read` or `edit`) | The permission set's grant | Confirmed |
+| `record-type` | Each record type of the object | The record type | Confirmed |
+| `automation` | Each validation rule on the object, with its state (`active`, `inactive` or `status unknown`); each flow whose trigger object is the object, with its status; each trigger on the object (`status not in index`) | The rule, flow or trigger | Confirmed |
+| `bulk` | Every object: `a bulk change of 200 records or more` | The object's first trigger, else the object file's `<CustomObject` line, else none. A standard object with no trigger and no object file in the repo (such as `Account` in the demo) gets no evidence | Confirmed; Unverifiable with no evidence |
+| `integration-user` | A permission set whose api name contains `integration` (any case) and that grants a field on the object | That grant | Inferred: the codebase holds no users |
+
+The code differs from the spec's wording on automation and on the integration user. The spec says validation rules, flows and triggers "already active"; the code emits every one it finds and puts the state in `detail`, so the skill can judge an inactive rule. The spec says "the integration user, when the codebase has one"; the code infers one only from a permission set named for integration that grants a field on the object.
+
+The skill saves the output as `ai-context/<id>-<slug>/scan/edge-seeds.json`. It must account for every seed: keep it as an edge case (copying `category`, `component`, `detail`, `evidence` and `confidence` verbatim) or drop it with a one-line reason. It never adds an edge case that is not a seed. A risk the index cannot see becomes an open question. For a greenfield story the scan returns few or no seeds, and the skill says so rather than inventing any.
+
+### Writing the draft
+
+`framework/skills/story-refine/scripts/write_story.py --id <id> --slug <slug> --draft <draft.json>` fills in `schemaVersion`, `status` (`draft`) and `overlaps`. It refuses a draft that already carries any of them, or `confirmedBy`. It validates the record with `validate_story` (evidence files checked) and the criteria with `check_ac`, both in-process. On any error it writes nothing and exits 1. It writes `story.json` and `story.md` to `<root>/ai-context/<id>-<slug>/` through `tools/impacts/safe_write.py`, the helpers it shares with story-impact's `write_report.py`:
+
+- `checkout_out_dir` refuses (exit 2) a folder that resolves outside `<root>/ai-context/` or outside this checkout's `ai-context/`, or an `ai-context/` that is a symlink.
+- `write_nofollow` never writes through a symlink.
+
+**Every overlap at refinement is a watch.** The writer sends each term in the story's `seeds` list through `register.overlaps()` as a `changeType: "review"` component. A watch is any overlap where one side marks the component `review`, so every refinement overlap is a watch. Whether the story will modify a component is not known until it is sized. `story.md`'s `## Overlaps with other stories` section is a snapshot of the register at write time, built the same way as `impact.md`'s.
+
+### Confirmation by the product owner
+
+The product owner confirms a refined story by promoting it:
+
+```sh
+python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --story --confirmed-by "<name or role>"
+```
+
+Promotion is the confirmation, and it is a human step. The assistant never runs it to confirm a story and never supplies `--confirmed-by`. It refuses (exit 1, nothing written) at the first of these that fails:
+
+1. `story.json` or `story.md` is missing or a symlink, or `story.json` cannot be parsed (deeply nested JSON included).
+2. The draft fails `validate_story` with evidence files checked.
+3. `check_ac` has any finding.
+4. An open question is neither answered (non-empty `answer`) nor `deferred: true`.
+5. The data scan finds a hit in `story.json` or `story.md`.
+6. Destination checks: `impacts/`, the destination folder or a destination file is a symlink; the folder resolves outside `<root>/impacts/`; `story.json` or `story.md` already exists there (unless `--replace`); or the same `storyId` already has an `impact.json` or `story.json` in another `impacts/` folder.
+7. The confirmed record (status `confirmed`, `confirmedBy` set) fails validation.
+8. The data scan finds a hit in the exact bytes about to be written, `--confirmed-by` included.
+
+It writes `impacts/<storyId>-<slug>/story.json` and a byte-for-byte copy of `story.md`, and never touches `impact.json` or `impact.md` in the same folder. `--replace` applies only to the story files.
+
+**One folder per story id.** Because of the cross-folder refusal, a story and its impact record must share one `<storyId>-<slug>` folder, so the refinement and the sizing need the same slug. A story confirmed as `DEMO-201-premium-escalation-refined` blocks an impact promoted as `DEMO-201-premium-escalation-key`, and the other way round. The impact path refuses a destination folder that exists at all unless `--replace` is given (`promote.py` main path); with `--replace` it rewrites only `impact.json` and `impact.md`.
+
+### Where it runs
+
+The WS11 owner patches (`ai-context/ws11/patches/`, applied by a human as `APPLY.md` there describes) are **not applied yet**.
+
+| Command | Today (applied `tools/guard/policy.json`) | After the WS11 guard patch |
+| --- | --- | --- |
+| `query.py edge-seeds` | Every mode (`read_only`). The skill's `>` redirect into `ai-context/` is a write, which `advise` blocks | Unchanged |
+| `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern). The guard does not see where it writes; the script's own realpath check is the control | Unchanged, and the guard also models its output: `story.json` and `story.md` in `ai-context/<id>-<slug>/`. A `--root` other than `.`, or a `/`, `\` or `..` in `--id` or `--slug`, blocks |
+| `check_ac.py`, `validate_story.py` run directly | `maintain` only (or a human terminal). The skill's own path is admitted in `normal` anyway, because `write_story.py` calls both in-process (Inferred from the policy; no run has shown it) | `normal`, `build`, `maintain` |
+| `promote.py --story` | `maintain` only; a human step by working rule | Unchanged |
+| `tools/stories/test_*.py`, `tools/index/test_edge_seeds.py` | `maintain` only (or a human terminal) | Unchanged |
+
+In CI today the workflow runs none of the story checks. After the WS11 CI patch, `guard-and-lint` runs `tools/stories/test_check_ac.py`, `test_validate_story.py`, `test_write_story.py`, `tools/index/test_edge_seeds.py` and `validate_story.py --all`.
+
+### Evals and what is proven
+
+The skill's eval cases are in `framework/skills/story-refine/evals/cases/`: a vague story (001, DEMO-101), a story whose seeds include an existing validation rule that must be kept (002, DEMO-201, `must_keep_edge: ["Escalation_Needs_Level"]`), and a greenfield story (003, DEMO-301). `tools/evals/run_skill.py` applies these assertions:
+
+- `story_json_valid`: the `story.json` beside the output passes `validate_story` as a draft, with evidence, and `check_ac` has no findings.
+- `edges_from_seeds_only`: every edge case's triple is in `scan/edge-seeds.json`, with the seed's evidence and confidence unchanged.
+- `seeds_accounted`: every seed is an edge case or a dropped seed.
+- `must_keep_edge`: the named item is an edge case that is a real seed (by component, or a whole word in `detail`).
+- `must_list_overlap`: as story-impact's `must_flag_overlap`, for `story.md`.
+
+No case asserts an overlap: DEMO-201's natural seeds share no component with DEMO-202, the only story on the register.
+
+**Not proven yet.** No model has run story-refine under Claude Code. The only evidence for case 002 is a smoke test of the writer: a hand-built draft fed through `write_story.py` and then `run_skill.py`. That shows the writer and the assertions work. It is not evidence that the skill works under Claude Code. Consistency across repeated runs (WS3) is not built.
+
+### Deferred: `check_trace.py`
+
+The spec's `tools/code/check_trace.py` (every confirmed criterion and kept edge case has a test that names its id) is deferred to WS8. There are no tests to trace until implement-story exists. WS11 fixes the `AC-n` and `EC-n` id formats it will read.
+
 ## Layer 5: agents
 
 An agent is justified only when a workflow needs a posture that a single skill cannot carry: a fixed tool set, a fixed set of skills, and a fixed list of things it must refuse. Three are enough for most programmes; a fourth needs a written reason.
@@ -234,7 +365,7 @@ An agent is justified only when a workflow needs a posture that a single skill c
 | --- | --- | --- | --- |
 | `analyst` | Read-only on the build, offline, writes only to `ai-context/` | story-impact, release-impact | Any org call, any write outside `ai-context/`, any recommendation phrased as a decision |
 | `reviewer` | Read-only, offline, no writes at all | pr-reference-check, test-quality judgement | Approving, voting, editing code, reformatting |
-| `discovery-lead` | Read-only on the build, offline, writes only to `ai-context/` | discovery-pack, wiki-page, test-case-design | Writing code, committing, estimating in points |
+| `discovery-lead` | Read-only on the build, offline, writes only to `ai-context/` | story-refine (which absorbs the discovery-pack backlog item), story-impact, test-case-design (planned) | Writing code, committing, pushing, deploying, estimating in points |
 
 Agent files contain a posture and a skill table, nothing else: no persona prose, no domain facts, no counts. Everything an agent knows about the org it reads from fact files on demand.
 
@@ -277,7 +408,7 @@ The index and control plane are built together in the first fortnight because th
 | `framework/` | The one source tree squads edit: `rules/`, `knowledge/`, `skills/`, `agents/` | Single source of truth; CODEOWNERS puts the guild on every change |
 | `tools/index/build_index.py` | Walks `force-app/` and `pkg-*/`, emits `metadata.json` (nodes, edges) and `inventory.json` (counts) stamped with commit SHA, version and time | Layer 1; the thing every skill reads instead of grepping |
 | `tools/index/test_index.py` | Builds the index on the fixtures and checks every node path and `path:line` opens from the repo root | Evidence the skill evals and reviewers can follow without knowing where the index was built |
-| `tools/index/query.py` | `exists`, `type`, `consumers --hops`, `below-api-floor`, `stamp`, `check-stale` (exit 3 when the index commit is not HEAD) | Skills call this; zero hits are reported as evidence |
+| `tools/index/query.py` | `exists`, `type`, `consumers --hops`, `below-api-floor`, `edge-seeds`, `stamp`, `check-stale` (exit 3 when the index commit is not HEAD) | Skills call this; zero hits are reported as evidence |
 | `tools/guard/guard.py` + `guard.sh` + `guard.cmd` | PreToolUse hook: reads the mode (advise, normal, build, maintain), blocks `sfdx`, org-changing `sf` commands, pushes, `curl`, writes outside the mode's paths (resolved through `..` and symlinks first, so neither can escape), Bash off the mode's allowlist and fetches off the allowlist; the tripwire blocks writes and non-read-only Bash while guard files or git config differ from `HEAD` or the baseline; the re-baseline flag is human-only | The offline guard of the control plane; `guard.sh` is the registered wrapper and exits 2 when no interpreter is found so the guard fails closed; `guard.cmd` is the Windows fallback |
 | `tools/guard/policy.json` | The guard's rules as data: blocked command patterns, the git subcommand allowlist, fetch allowlist, tripwire paths, always-blocked write paths, per-mode write paths and Bash groups, and the Salesforce CLI levels and allowed orgs | Rules change by a reviewed PR without editing code; an unreadable policy blocks |
 | `tools/guard/test_guard.py` | Synthetic hook payloads with required exit codes, the registered hook command run as written, a run with no Python on PATH (must exit 2), a throwaway repo with symlinks out of `ai-context/` (must be blocked), and tripwire and mode cases | Proves the control on each OS in CI and on each laptop at onboarding |
@@ -288,8 +419,10 @@ The index and control plane are built together in the first fortnight because th
 | `tools/evals/run_agent.py` | Trajectory assertions over a JSONL tool-call log: must-call, must-not-call, must-block | Agent regression; works with any harness that logs tool calls |
 | `framework/skills/story-impact/` | SKILL.md, input checklist, seed-term method, manual checks, `write_report.py`, its eval cases | The first skill, built as the template for the rest |
 | `framework/skills/pr-reference-check/` | SKILL.md, input checklist, `extract_refs.py` (diff against the PR's target branch), three eval cases with diff fixtures | The second skill; CI does the deterministic review checks |
+| `framework/skills/story-refine/` | SKILL.md, input checklist, criteria style, edge-seed method, `write_story.py`, its eval cases | Step 0: refine a story before sizing it; see "Story refinement" |
 | `framework/agents/` | `analyst`, `reviewer`, `discovery-lead`: posture plus skill table only; `evals/analyst.json` and a sample run log | Layer 5, kept to three |
-| `tools/impacts/` | `validate.py` (the record schema), `register.py` (overlaps, scope, view), `promote.py` (the human promotion step), `render_register.py` (static HTML view), `pr_check.py` (code overlap and scope drift on a PR), and a test script for each | The impact record and register; see "Impact record and register" |
+| `tools/stories/` | `validate_story.py` (the story schema), `check_ac.py` (vague criteria), `vague_words.json`, and a test script for each plus one for `write_story.py` | The story record; see "Story refinement" |
+| `tools/impacts/` | `validate.py` (the record schema), `register.py` (overlaps, scope, view), `promote.py` (the human promotion step, impacts and stories), `render_register.py` (static HTML view), `pr_check.py` (code overlap and scope drift on a PR), `safe_write.py` (shared output checks for the skill writers, covered by the writer tests), and a test script for each of the others | The impact record and register; see "Impact record and register" |
 | `impacts/` | `squads.json` and the promoted records, one `<storyId>-<slug>/` folder each | The register, in git; records enter through an ordinary PR that a reviewer checks |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |

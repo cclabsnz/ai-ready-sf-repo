@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "storyId": "DEMO-101",
+  "slug": "customer-tier-vague-example",
+  "status": "draft",
+  "squad": "Customer Care",
+  "persona": "Service agent",
+  "goal": "See the customer's tier on the Case page",
+  "benefit": "Agents treat higher-tier customers according to their tier",
+  "inScope": ["A Customer Tier picklist on Account, shown on the Case page"],
+  "outOfScope": ["Changes to case escalation"],
+  "nonFunctional": [],
+  "openQuestions": [
+    {"id": "OQ-1", "text": "Which tier values does the business use?", "ownerRole": "Product owner", "answer": null, "deferred": false}
+  ],
+  "acceptanceCriteria": [
+    {"id": "AC-1", "given": "an agent opens a Case on an Account with a tier", "when": "the Case page loads", "then": "the tier shows quickly and properly", "examples": ["Account tier \"Gold\""], "source": "stated"},
+    {"id": "AC-2", "given": "an Account whose tier changes", "when": "an agent reopens one of its Cases", "then": "the Case page shows the tier as needed", "examples": ["tier changes from \"Silver\" to \"Gold\""], "source": "stated"}
+  ],
+  "edgeCases": [],
+  "droppedSeeds": [],
+  "overlaps": [],
+  "seeds": ["Account.Customer_Tier__c"]
+}

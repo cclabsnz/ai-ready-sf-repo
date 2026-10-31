@@ -24,12 +24,23 @@ Six principles, in order of precedence:
 - **Guard** (`tools/guard/`): a hook on every Claude Code tool call. It has four modes (`advise`,
   `normal`, `build`, `maintain`) and a committed kill switch. It also runs a tripwire over its own
   files and the git config, and enforces Salesforce CLI access levels.
-- **Metadata index** (`tools/index/`): parses the checkout into nodes and reference edges. It
-  answers `exists`, `type` and `consumers` queries to 3 hops.
+- **Metadata index** (`tools/index/`): parses the checkout into nodes and reference edges,
+  including each picklist value with its active flag (index version `0.5.0`). It answers
+  `exists`, `type` and `consumers` queries to 3 hops, and `edge-seeds`: candidate edge cases for
+  a story's fields and objects, each with evidence.
 - **Demo org** (`demo/`): a synthetic Sales/Service org with three stories and a reviewed answer
   key for each.
-- **Skills**: `story-impact` (the evidenced impact of one story, written as `impact.md` plus a
-  draft record, `impact.json`) and `pr-reference-check` (invented or mistyped API names in a diff).
+- **Skills**: `story-refine` (step 0: one rough story turned into Given/When/Then criteria and
+  edge cases seeded from the index, written as a draft `story.json` and `story.md`),
+  `story-impact` (the evidenced impact of one story, written as `impact.md` plus a draft record,
+  `impact.json`) and `pr-reference-check` (invented or mistyped API names in a diff).
+- **Story refinement** (`tools/stories/`, WS11): the `story.json` schema
+  (`validate_story.py`), a vague-criteria check (`check_ac.py`), and confirmation by the product
+  owner, who promotes the story into `impacts/` (`promote.py --story`). No model has run
+  story-refine under Claude Code yet; its writer and eval assertions are tested on a hand-built
+  draft only (see [Story refinement](docs/DESIGN.md#story-refinement)). The WS11 guard and CI
+  patches are not applied yet: until they are, the assistant runs `check_ac.py` and
+  `validate_story.py` directly only in `maintain`, and CI runs none of the story checks.
 - **Impact record and register** (`tools/impacts/`, `impacts/`): a validated `impact.json`
   schema, a human promotion step into `impacts/`, and the register of in-flight stories. Two
   overlap checks read it. At story time, story-impact lists the other stories that touch the same
@@ -37,16 +48,16 @@ Six principles, in order of precedence:
   files to components and lists the registered stories and other open PRs that touch the same
   components; that listing never fails anything. It also reports scope drift (`outOfScope`,
   `noImpact`) as comments, unless `.ai-framework.json` sets a finding class to `fail`. The PR
-  check runs in CI only once the owner applies the WS2 patches (see
-  [Running the checks](#running-the-checks)).
+  check runs in CI (see [Running the checks](#running-the-checks)).
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
 - **Evals**: `run_agent.py` (trajectory assertions over a tool-call log) and `run_skill.py`
   (deterministic assertions on a skill's output).
 
 **Planned, not built** (order and detail in the [spec](docs/superpowers/specs/2026-10-29-published-framework-design.md#order)
-and [docs/DESIGN.md](docs/DESIGN.md)): story refinement (WS11), solution design and starting points (WS10), scoped code
-writing in `build` mode (WS8; until then `build` cannot write source), consistency evals that
+and [docs/DESIGN.md](docs/DESIGN.md)): solution design and starting points (WS10), scoped code
+writing in `build` mode and `check_trace.py`, which traces each confirmed criterion to its tests
+(WS8; until then `build` cannot write source), consistency evals that
 score repeated runs against the answer keys (WS3), versioned packaging and pinning (WS7), and the
 Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
 
@@ -55,8 +66,8 @@ Copilot hook (WS6; `.github/hooks/README.md` is a placeholder).
 - **Python 3**, standard library only. CI uses Python 3.12
   (`.github/workflows/framework-ci.yml:13`).
 - **git**.
-- **Claude Code**, needed only for the AI step (quick start step 8). Every other step is plain
-  Python.
+- **Claude Code**, needed only for the AI steps (quick start step 8 and the optional end of
+  step 9). Every other step is plain Python.
 - **A shell**: macOS or Linux, or Windows with Git Bash. Windows is **Inferred, not yet tested**:
   the hook is assumed to run through Git Bash, and no Windows CI run has confirmed it. On Windows,
   use `py -3` wherever this page says `python3`.
@@ -146,7 +157,9 @@ The fourth line, `CaseTriggerHandler_Test`, is the handler's test class. It reac
 same way the trigger does, through `CaseTriggerHandler`. A test that exercises a changed path
 belongs in the impact too; the DEMO-201 answer key lists it for review.
 
-Drop the `| grep ...` to see the full JSON, with `path:line` evidence for every edge.
+Drop the `| grep ...` to see the full JSON, with `path:line` evidence for every edge. If the
+command prints nothing, the index is missing, stale or built from another root (for example the
+fixtures build in the smoke test). Re-run step 4 and try again.
 
 **6. Check the answer keys against the index.**
 
@@ -197,15 +210,17 @@ grep '| watch |' ai-context/DEMO-201-premium-escalation-key/impact.md
 Expected:
 
 ```
-| `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
-| `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
-| `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `b8cb1e9` |
+| `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
+| `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
+| `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
 ```
 
 - **Each row:** a component both stories list, and the other story's squad, status and change
   type. That tells DEMO-201's squad (Customer Care) whom to talk to.
 - **The last column:** the commit that last changed DEMO-202's record, not your `HEAD`. It stays
-  the same until that record changes, or until history is rewritten.
+  the same until that record changes, or until history is rewritten. The commit hashes pasted on
+  this page (here and in `registerCommit` above) come from the reference checkout; on your clone
+  they can differ, for example after a rebase or on a fork.
 - **Why watches, not conflicts:** DEMO-202 modifies these components, while DEMO-201's key marks
   them `review`. A conflict needs both stories to `new`, `modify` or `delete` the component.
 
@@ -250,8 +265,8 @@ To compare with the answer key:
   change type and hop by hand.
 - Run the automated part of eval case 004. It scores the files the story-impact run in this
   step (quick start step 8) wrote: `ai-context/DEMO-201-<slug>/impact.md` and the `impact.json` beside it, where `<slug>`
-  is the one the assistant picked. In a fresh clone, run story-impact first; the command has
-  nothing to read until then. Any draft at that path works too. It checks that the report names
+  is the one the assistant picked. In a fresh clone, run story-impact first; `ai-context/` is
+  git-ignored, so the command has nothing to read until then. Any draft at that path works too. It checks that the report names
   the three hop-3 components, labels every table row, stays within 3 hops and avoids banned phrases. It also
   checks that `impact.json` is a valid draft record and that the report flags the overlap on
   `CaseTriggerHandler` and `CaseTrigger`:
@@ -268,6 +283,124 @@ cite that starts with `force-app/`, `pkg-*/`, `fixtures/` or `demo/`: the file m
 have at least that many lines. That covers the `demo/org/...` evidence in this report. It does
 not check that the cited line says what the report claims, so spot-check a few cites yourself.
 
+**9. Refinement: story-refine, step 0 of the workflow.**
+
+In real use, refinement comes first. Step 0 is story-refine: it turns a rough story into testable
+Given/When/Then criteria and edge cases from the index. story-impact then sizes the refined
+story. The quick start shows refinement last because it needs only the index from step 4.
+
+See the edge seeds the index gives for `Account.Service_Level__c`, the field behind "premium
+customers":
+
+```sh
+python3 tools/index/query.py edge-seeds Account.Service_Level__c | grep -o '"category": "[^"]*", "component": "[^"]*", "detail": "[^"]*"'
+```
+
+Expected:
+
+```
+"category": "automation", "component": "Account", "detail": "flow Account_Churn_Flag (Active)"
+"category": "automation", "component": "Account", "detail": "flow Account_Coverage_Check (Active)"
+"category": "automation", "component": "Account", "detail": "flow Account_Plan_Review_Stamp (Active)"
+"category": "automation", "component": "Account", "detail": "flow Account_Renewal_Stamp (Active)"
+"category": "automation", "component": "Account", "detail": "flow Account_Seat_Flag (Active)"
+"category": "automation", "component": "Account", "detail": "flow Account_Segment_Default (Active)"
+"category": "automation", "component": "Account", "detail": "validation rule Account.Churn_Risk_Pct_In_Range (active)"
+"category": "automation", "component": "Account", "detail": "validation rule Account.Expansion_Potential_Not_Negative (active)"
+"category": "automation", "component": "Account", "detail": "validation rule Account.Health_Score_In_Range (active)"
+"category": "automation", "component": "Account", "detail": "validation rule Account.Last_Review_Date_Not_Ancient (active)"
+"category": "automation", "component": "Account", "detail": "validation rule Account.Seat_Count_Not_Negative (active)"
+"category": "bulk", "component": "Account", "detail": "a bulk change of 200 records or more"
+"category": "blank", "component": "Account.Service_Level__c", "detail": "field is not required; value left blank"
+"category": "field-access", "component": "Account.Service_Level__c", "detail": "Sales_Rep edit"
+"category": "field-access", "component": "Account.Service_Level__c", "detail": "Service_Agent read"
+"category": "field-access", "component": "Account.Service_Level__c", "detail": "Team_Lead read"
+"category": "picklist-value", "component": "Account.Service_Level__c", "detail": "Legacy Bronze (inactive)"
+"category": "picklist-value", "component": "Account.Service_Level__c", "detail": "Premium"
+"category": "picklist-value", "component": "Account.Service_Level__c", "detail": "Standard"
+```
+
+- **No lines at all** means the index is missing, stale or not the demo's (for example after the
+  smoke test's fixtures build). Re-run step 4 and try again.
+- **Each line is a candidate edge case.** Drop the `| grep ...` to see the full JSON, with
+  `path:line` evidence and a confidence label on every seed.
+- **A field covers its object too,** hence the `Account` flows, rules and bulk seed.
+- **`Legacy Bronze (inactive)`** is a retired value, kept in the demo as a deliberate sign of age.
+  Old records can still hold it, so a story that reads the field may need to handle it.
+- **The `Account` bulk seed has no evidence** (`null`) and is `Unverifiable`: the demo holds
+  neither a trigger on `Account` nor an `Account` object file to cite.
+
+Then see what a vague criterion looks like.
+`demo/stories/DEMO-101.vague-example.story.json` is a hand-written draft `story.json`. It is
+valid apart from its criteria (`python3 tools/stories/validate_story.py` on it prints
+`"ok": true`). Check its criteria:
+
+```sh
+python3 tools/stories/check_ac.py demo/stories/DEMO-101.vague-example.story.json
+```
+
+Expected (exit code 1, because there are findings):
+
+```
+{
+  "ok": false,
+  "findings": [
+    {
+      "id": "AC-1",
+      "rule": "multiple-outcomes",
+      "detail": "then states more than one outcome (the word 'and'); split into separate criteria"
+    },
+    {
+      "id": "AC-1",
+      "rule": "vague-word",
+      "detail": "then contains 'quickly'"
+    },
+    {
+      "id": "AC-1",
+      "rule": "vague-word",
+      "detail": "then contains 'properly'"
+    },
+    {
+      "id": "AC-2",
+      "rule": "vague-word",
+      "detail": "then contains 'as needed'"
+    }
+  ]
+}
+```
+
+story-refine's writer runs the same check and writes nothing until it passes. The fix is to
+split AC-1 into one criterion per outcome and to state each outcome as something a tester can
+observe, with a concrete example. Text in quotes is exempt, so a criterion can quote a value.
+
+In Claude Code, `check_ac.py` and `validate_story.py` run directly only in `maintain` until the
+owner applies the WS11 guard patch (`ai-context/ws11/patches/APPLY.md`). In your own terminal
+they just run. `query.py edge-seeds` runs in every mode, but the skill saves its output with a
+`> ai-context/...` redirect, and that redirect is a write, which `advise` blocks.
+
+Optional, in Claude Code. The guard's `normal` allowlist admits the commands the skill runs
+(`query.py edge-seeds` and its writer, `write_story.py`); that is Inferred from the policy, not
+yet shown by a run:
+
+```
+/story-refine DEMO-201 Premium case escalation. Change case escalation for premium customers. Squad: Customer Care
+```
+
+The skill writes `ai-context/DEMO-201-<slug>/story.json`, `story.md` and `scan/edge-seeds.json`.
+Score it with eval case 002, which checks among other things that the `Escalation_Needs_Level`
+validation rule on `Case` is kept as an edge case. The eval reads the files the `/story-refine`
+run above wrote. `ai-context/` is git-ignored, so on a fresh clone the folder does not exist and
+the command has nothing to read until you run the skill:
+
+```sh
+python3 tools/evals/run_skill.py --skill story-refine --case 002-escalation-validation-rule --output ai-context/DEMO-201-<slug>/story.md
+```
+
+**This part is unproven.** No model has run story-refine under Claude Code yet, so this page
+gives no expected output for it. Case 002 has passed only as a smoke test of the writer: a
+hand-built draft fed through `write_story.py`. That shows the writer and the assertions work, not
+that the skill does.
+
 ## Promoting an impact
 
 A draft in `ai-context/` is workspace output. Neither the register nor the PR check reads it. To
@@ -281,10 +414,35 @@ python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --confirmed-by "<yo
   exists, and it runs `tools/guard/scan_data.py` over `impact.json` and `impact.md`.
 - **What it writes:** `impacts/<storyId>-<slug>/`, holding `impact.json` (with `status`
   `in-flight` and your `confirmedBy`) and a copy of `impact.md`.
-- **What it refuses:** a folder that already exists (unless you pass `--replace`), and symlinks.
+- **What it refuses:** a folder that already exists (unless you pass `--replace`); a symlinked
+  source, destination or `impacts/`; JSON it cannot parse, deeply nested JSON included; a story
+  id that already has a record (`impact.json` or `story.json`) in another `impacts/` folder; and
+  a data-scan hit in the sources or in the exact bytes it would write. That last scan includes
+  your `--confirmed-by`, so give a name or a role, never an email address.
 
 Then `git add` the folder and open a PR; a reviewer checks the impact before merge. When the story
 ships, edit its `status` to `shipped` in a later PR, and the register stops listing it.
+
+### Confirming a refined story
+
+The product owner confirms a story that story-refine drafted by promoting it. Promotion is the
+confirmation; the assistant never confirms a story.
+
+```sh
+python3 tools/impacts/promote.py ai-context/<storyId>-<slug> --story --confirmed-by "<name or role>"
+```
+
+- **What it checks first:** the draft `story.json` validates with every evidence file and line
+  checked; `check_ac.py` has no findings; every open question has an answer or is
+  `deferred: true`; and the data scan finds nothing in `story.json` and `story.md`.
+- **What it writes:** `impacts/<storyId>-<slug>/story.json` (status `confirmed`, with your
+  `confirmedBy`) and a copy of `story.md`. It never touches `impact.json` or `impact.md` in that
+  folder. `--replace` applies only to the story files.
+- **What it refuses:** the same symlink, cross-folder and final-bytes checks as an impact.
+- **One folder per story id.** A refined story and its impact record must share one
+  `<storyId>-<slug>` folder, so give them the same slug. A story id on record in one folder
+  blocks a promotion into any other. Promoting an impact into a folder that already holds the
+  confirmed story needs `--replace`, which rewrites only `impact.json` and `impact.md`.
 
 **Promotion is a human step.** In `normal` mode the guard blocks the assistant both from running
 `promote.py` and from writing `impacts/`. `maintain` allows both, so there it is a working rule
@@ -300,8 +458,8 @@ To look at the register:
 - `python3 tools/impacts/render_register.py` writes a static page,
   `ai-context/register/register.html`.
 
-Until the owner applies the WS2 guard patch, run these from your own terminal, because the
-assistant cannot run them in `normal` mode. To tell which mode you are in, read
+`register.py` runs in every mode and `render_register.py` in `normal`, `build` and `maintain`;
+`promote.py` runs only in `maintain`, as a human step. To tell which mode you are in, read
 `AI_FRAMEWORK_MODE` in the committed `.claude/settings.json`, then check for a git-ignored
 `.claude/settings.local.json`. A committed `advise` always wins. The local file's mode applies
 only while the committed value is `normal`, and a committed `build` or `maintain` is treated as
@@ -361,8 +519,11 @@ Common reasons:
 | Symptom | Why | What to do |
 | --- | --- | --- |
 | `python3 tools/impacts/register.py scope <storyId>` exits 4 and prints `"found": false` | The story has no record on the register. Either it is still a draft in `ai-context/`, or its record is `shipped` (the register skips those), or its record failed validation (listed under `invalid` in the same output) | Promote the draft (see [Promoting an impact](#promoting-an-impact)). For an `invalid` entry, run `python3 tools/impacts/validate.py --all` and fix the record in a PR. Exit 4 is "nothing on record", not an error |
-| The guard blocks `tools/impacts/register.py`, `validate.py`, `render_register.py` or `pr_check.py` in `normal` with `command not on the <mode> allowlist` | The WS2 guard patch is not applied yet, so these scripts are not on `normal`'s allowlist | Run them from your own terminal, or apply `ai-context/ws2/patches/` as `APPLY.md` there describes. Story-impact's overlap section works either way |
 | The guard blocks `tools/impacts/promote.py` | Promotion is a human step and is never on `normal`'s allowlist | Run it yourself (see [Promoting an impact](#promoting-an-impact)) |
+| The guard blocks `tools/stories/check_ac.py` or `validate_story.py` in `normal` with `command not on the <mode> allowlist` | The WS11 guard patch is not applied yet, so these scripts are not on `normal`'s allowlist | Run them from your own terminal, or apply `ai-context/ws11/patches/` as `APPLY.md` there describes. story-refine's writer, `write_story.py`, is on `normal`'s allowlist either way and runs both checks in-process |
+| `write_story.py` exits 1 and writes nothing | The draft failed validation or the criteria check; the errors are on stderr | Fix the draft and run it again. A `vague-word` or `multiple-outcomes` finding means rewording or splitting a criterion, not deleting it |
+| `promote.py` refuses with `story <id> already has a record in ...` | That story id is on record in another `impacts/` folder | Use the existing folder's slug (see [Confirming a refined story](#confirming-a-refined-story)) |
+| `query.py edge-seeds` gives no `picklist-value` seeds for a picklist field | The index predates version `0.5.0`, or the field uses a global value set (one `Unverifiable` seed) | Rebuild the index (quick start step 4) |
 
 ## Running the checks
 
@@ -385,32 +546,33 @@ python3 tools/impacts/test_promote.py      # promotion into impacts/
 python3 tools/impacts/test_render_register.py # static register page
 python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
 python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/index/test_edge_seeds.py     # edge seeds from the index
+python3 tools/stories/test_validate_story.py # story.json schema
+python3 tools/stories/test_check_ac.py     # vague-criteria check
+python3 tools/stories/test_write_story.py  # story-refine writer: story.json and overlaps
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
+python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
-The impact test scripts each end with a `<n> passed, 0 failed` line; some add a skipped count,
-which covers symlink cases on machines without symlinks.
+The impact and story test scripts each end with a `<n> passed, 0 failed` line; some add a
+skipped count, which covers symlink cases on machines without symlinks.
 
 The fixtures build (`--root fixtures --out ../index`) overwrites `index/` with the fixtures
 index. Re-run quick start step 4 before using story-impact on the demo again.
 
-**CI today.** `.github/workflows/framework-ci.yml` runs on pull requests that touch `framework/`,
-`tools/`, `.claude/`, `.github/`, `force-app/` or `fixtures/`. It runs on Ubuntu and Windows with
-Python 3.12 and covers the guard test, `scan_data.py --all`, lint, the render check, the fixtures
-index build, `test_index.py` and the sample agent eval, plus a gitleaks job. None of the impact
-checks run in CI yet: not the impact test scripts, not `validate.py --all` and not the PR check.
-A change only under `demo/` or `impacts/` does not trigger the workflow. The demo checks
-(`test_parsers.py`, the filler and answer-key tests, the filler `--check`) are not in CI either.
-Run all of them locally with the smoke test.
+**CI today.** The WS1 and WS2 owner patches are applied (`3fb9e73`).
+`.github/workflows/framework-ci.yml` runs on pull requests that touch `framework/`, `tools/`,
+`.claude/`, `.github/`, `force-app/`, `fixtures/`, `demo/` or `impacts/`, with Python 3.12.
 
-**CI after the owner patches land.** The workflow changes come as patches that a human applies,
-in the order set out in `ai-context/ws2/patches/APPLY.md`: the WS1 patches first, then WS2.
-
-- **Triggers:** the workflow also runs on changes under `demo/` and `impacts/`.
-- **`guard-and-lint`:** runs every impact test script above, then `validate.py --all`.
-- **New `impact-checks` job,** on pull requests:
+- **`guard-and-lint`,** on Ubuntu and Windows: the guard test, `scan_data.py --all`, lint, the render check, the
+  fixtures index build, `test_index.py`, `test_parsers.py`, the filler and answer-key tests, the
+  filler `--check`, the sample agent eval, every impact test script above, `test_run_skill.py`
+  and `validate.py --all`. None of the story checks run yet: not `test_edge_seeds.py`, not the
+  `tools/stories/` tests and not `validate_story.py --all`.
+- **gitleaks:** a secret scan.
+- **`impact-checks` job,** on pull requests:
   - It builds the index from the PR's `demo/org`.
   - It runs `pr_check.py` from the base branch with `--base-root`, so the check code, the
     `.ai-framework.json` settings and the register all come from base. A PR cannot change
@@ -424,17 +586,24 @@ in the order set out in `ai-context/ws2/patches/APPLY.md`: the WS1 patches first
 Findings are comments unless `.ai-framework.json` sets them to `fail`. Until a remote exists, the
 comment step is Unverifiable.
 
+**CI after the WS11 owner patch lands.** `ai-context/ws11/patches/ci-ws11.patch`, which a human
+applies as `ai-context/ws11/patches/APPLY.md` describes, adds these steps to `guard-and-lint`:
+`tools/stories/test_check_ac.py`, `tools/stories/test_validate_story.py`,
+`tools/stories/test_write_story.py`, `tools/index/test_edge_seeds.py`, then
+`validate_story.py --all`. The `paths` filter already covers `tools/stories/`.
+
 ## Layout
 
 ```
 framework/            the ONE source tree squads edit (guild-owned via CODEOWNERS)
   rules/              always-on rules; scope front-matter -> Copilot applyTo
   knowledge/          owned, dated facts; no counts allowed (lint enforces)
-  skills/<name>/      SKILL.md + references/ + scripts/ + evals/ (story-impact, pr-reference-check)
+  skills/<name>/      SKILL.md + references/ + scripts/ + evals/ (story-refine, story-impact,
+                      pr-reference-check)
   agents/             posture + skill table, nothing else; evals/ holds trajectory specs
 tools/
   index/              build_index.py (the index), query.py (what skills call instead of grep),
-                      test_index.py, test_parsers.py
+                      test_index.py, test_parsers.py, test_edge_seeds.py
   guard/              guard.py + guard.sh/.cmd (fail-closed PreToolUse hook), policy.json (modes,
                       allowlists, Salesforce CLI levels), scan_data.py, test_guard.py
   build/              render.py (framework/ -> .claude/ + .github/), lint.py
@@ -442,10 +611,14 @@ tools/
   demo/               generate_filler.py (seeded filler), check_answers.py (answer keys vs index),
                       answer_to_draft.py (draft impact from a reviewed key), tests
   impacts/            validate.py (record schema), register.py (overlaps, scope, view),
-                      promote.py (human step), render_register.py, pr_check.py, tests
+                      promote.py (human step, impacts and stories), render_register.py,
+                      pr_check.py, safe_write.py (shared writer checks), tests
+  stories/            validate_story.py (story schema), check_ac.py + vague_words.json (vague
+                      criteria), tests
 demo/
   org/force-app/      synthetic Sales/Service org: hand-written story core + generated filler
-  stories/            DEMO-*.md story text and DEMO-*.answer.json reviewed answer keys
+  stories/            DEMO-*.md story text, DEMO-*.answer.json reviewed answer keys, and
+                      DEMO-101.vague-example.story.json (a draft story.json with vague criteria)
 impacts/              the register: squads.json and promoted <storyId>-<slug>/ records (in git)
 docs/
   DESIGN.md           design, layers, modes, what the guard guarantees
@@ -453,8 +626,7 @@ docs/
 .claude/              GENERATED, plus the hand-written settings.json (hook, deny rules, kill switch)
 .github/              GENERATED instructions/knowledge/skills/agents, plus workflows/ and hooks/
 fixtures/             small synthetic metadata and diffs for tool tests and CI; never real
-ai-context/           every assistant output lands here (today inputs/, scan/*.json and Office
-                      files are git-ignored; all of it once the WS2 .gitignore patch lands)
+ai-context/           every assistant output lands here; git-ignored as a whole
 index/                generated; git-ignored, never committed
 VERSION               framework version (no install or pinning mechanism yet; WS7)
 ```
@@ -464,7 +636,7 @@ VERSION               framework version (no install or pinning mechanism yet; WS
 - [demo/README.md](demo/README.md): the demo org, what the index models, the stories and how
   the answer keys work.
 - [docs/DESIGN.md](docs/DESIGN.md): the five layers, the modes, the impact record and register,
-  and what the guard does and does not guarantee.
+  story refinement, and what the guard does and does not guarantee.
 - [HANDOFF.md](HANDOFF.md): working rules for contributors, the smoke test and the backlog.
 - [The spec](docs/superpowers/specs/2026-10-29-published-framework-design.md): intent, owner
   decisions and the workstream order.

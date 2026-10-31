@@ -39,18 +39,24 @@ python3 tools/impacts/test_promote.py      # promotion into impacts/
 python3 tools/impacts/test_render_register.py # static register page
 python3 tools/impacts/test_pr_check.py     # PR check: code overlap and scope drift
 python3 tools/evals/test_run_skill.py      # skill output assertions
+python3 tools/index/test_edge_seeds.py     # edge seeds from the index
+python3 tools/stories/test_validate_story.py # story.json schema
+python3 tools/stories/test_check_ac.py     # vague-criteria check
+python3 tools/stories/test_write_story.py  # story-refine writer: story.json and overlaps
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
+python3 tools/stories/validate_story.py --all # every confirmed story validates; "ok": true
 python3 tools/index/query.py consumers Account.Risk_Rating__c --hops 2 --index index   # 5 consumers
 python3 tools/evals/run_agent.py --log framework/agents/evals/sample-run.jsonl --spec framework/agents/evals/analyst.json
 ```
 
 On Windows use `py -3`. If the guard test fails here, fix that before touching anything else.
-The impact test scripts each end with `<n> passed, 0 failed`; some add a skipped count for
-symlink cases. In `normal` and `build` modes the assistant cannot run the `tools/demo/` and
-`tools/impacts/` test scripts, or `tools/evals/test_run_skill.py`; run them yourself or in
-`maintain`.
-`validate.py --all` joins `normal`'s allowlist only once the owner applies the WS2 guard patch
-(`ai-context/ws2/patches/APPLY.md`).
+The impact and story test scripts each end with `<n> passed, 0 failed`; some add a skipped count
+for symlink cases. In `normal` and `build` modes the assistant cannot run the `tools/demo/`,
+`tools/impacts/` and `tools/stories/` test scripts, `tools/index/test_edge_seeds.py`, or
+`tools/evals/test_run_skill.py`; run them yourself or in `maintain`. `validate.py --all` runs in
+`normal`. `validate_story.py --all` joins `normal`'s allowlist only once the owner applies the
+WS11 guard patch (`ai-context/ws11/patches/APPLY.md`); until then it needs `maintain` or your
+own terminal.
 
 ## Working rules for this repo
 
@@ -79,10 +85,18 @@ symlink cases. In `normal` and `build` modes the assistant cannot run the `tools
   byte-comparing filler `--check` on Windows too; without the LF pin in `.gitattributes` a Windows
   checkout converts `demo/org/` to CRLF and that step fails.
 - The WS2 owner patches (`ai-context/ws2/patches/`: `.gitignore`, the guard policy and its tests,
-  and the CI workflow) go on after the WS1 patches, in the order `ai-context/ws2/patches/APPLY.md`
-  gives. Until they land, CI runs none of the impact checks and the assistant cannot run
-  `register.py` or `validate.py` in `normal`. story-impact's overlap section works today, because
-  its writer reads the register in-process.
+  and the CI workflow) went on after the WS1 patches; both sets are applied in `3fb9e73`.
+- The WS11 owner patches (`ai-context/ws11/patches/`: the guard policy, its cases and the guard's
+  modelling of `write_story.py`'s output, and the CI workflow) are **not applied yet**; apply them
+  as `ai-context/ws11/patches/APPLY.md` gives. Until they land, CI runs none of the story checks,
+  and the assistant runs `check_ac.py` and `validate_story.py` directly only in `maintain`.
+  The guard's `normal` allowlist already admits what story-refine calls: `query.py edge-seeds`
+  (read-only) and its writer `write_story.py`, which runs both checks in-process. That is
+  Inferred from the policy; no story-refine run has gone through the guard in `normal` yet.
+- Story promotion (`promote.py --story`) is the product owner's confirmation. The assistant never
+  runs it to confirm a story and never supplies `--confirmed-by`.
+- No model has run story-refine under Claude Code yet. Its eval case 002 has passed only on a
+  hand-built draft fed through the writer, a smoke test of the writer, not of the skill.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
@@ -144,6 +158,12 @@ symlink cases. In `normal` and `build` modes the assistant cannot run the `tools
 - [ ] `release-impact`: new skill. Reads `inventory.json` plus user-supplied release-note text.
       Needs `references/input-checklist.md`, `scripts/baseline.py` (reads inventory, never greps),
       and three eval cases. Description ≤ 200 chars.
+
+- [x] `story-refine` (WS11): skill, writer, eval cases 001, 002 and 003, `tools/stories/` checks,
+      product-owner confirmation through `promote.py --story`.
+- [ ] `story-refine`: run it under Claude Code on each of its eval cases and record the results;
+      today only the writer smoke test exists.
+- [ ] `tools/code/check_trace.py`: deferred to WS8 (no tests to trace until implement-story).
 
 ### Evals harness
 - [ ] `tools/evals/run_all.py`: for each skill and case, invoke `claude -p` N times (default 5)

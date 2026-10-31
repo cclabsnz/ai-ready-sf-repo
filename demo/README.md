@@ -1,6 +1,6 @@
 # Demo org
 
-A synthetic Sales/Service org used to exercise the index, story-impact and the evals. Nothing here
+A synthetic Sales/Service org used to exercise the index, story-refine, story-impact and the evals. Nothing here
 comes from a real org; names are fictional. Nothing was deployed anywhere.
 
 ## Layout
@@ -9,13 +9,19 @@ comes from a real org; names are fictional. Nothing was deployed anywhere.
   customer-tier chains, including one deliberately aged legacy class) plus generated filler.
 - `demo/stories/DEMO-*.md`: the story text a squad would hand to story-impact.
 - `demo/stories/DEMO-*.answer.json`: the reviewed answer key for each story.
+- `demo/stories/DEMO-101.vague-example.story.json`: a hand-written draft `story.json` for DEMO-101
+  whose criteria are vague on purpose. It passes `tools/stories/validate_story.py` and fails
+  `tools/stories/check_ac.py`, to show what that check reports (README quick start step 9). It is
+  not story-refine output: the skill's writer refuses vague criteria.
 
 ## What the index models
 
 Beyond the original nodes and edges: validation rules, record types, triggers to their objects, Apex
 class to class, invocable and `@AuraEnabled` methods (the LWC Apex import edge has `auraEnabled` true
 or false, or null when the class is not indexed), flow Apex actions and trigger objects, FlexiPages,
-and permission-set object and class access. `consumers` goes to 3 hops.
+and permission-set object and class access. `consumers` goes to 3 hops. Since index version
+`0.5.0`, fields also carry their picklist values (with an active flag and the value's line), a
+global value set's name, and a formula flag; `query.py edge-seeds` reads them.
 
 ## Stories
 
@@ -95,6 +101,14 @@ These classes are deliberately aged, and each says so in a header comment: `Lega
 API, `without sharing`), and the filler `RenewalOutlookService` and `ContractTermService` (old API).
 Each uses plain SOQL and DML with no user-mode enforcement, as code from before user mode would;
 the WS8 rule baseline records that debt. Their tests stay on the current API and match them.
+
+`Account.Service_Level__c` keeps a retired picklist value, `Legacy Bronze`, marked
+`<isActive>false</isActive>` (`demo/org/force-app/main/default/objects/Account/fields/Service_Level__c.field-meta.xml:27-29`).
+It is a deliberate sign of age: records created before the value was retired can still hold it,
+while Salesforce no longer offers it for new selections (Inferred from platform behaviour; nothing
+here was deployed). `query.py edge-seeds Account.Service_Level__c` lists it as
+`Legacy Bronze (inactive)`, so story refinement has a real inactive value to judge. The answer
+keys are unaffected: a picklist value is a field attribute in the index, not a node or an edge.
 
 ## Building an index of the demo
 
