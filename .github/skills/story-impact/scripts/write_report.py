@@ -6,7 +6,13 @@
 
 classified.json: list of {api, layer, type, ownership, changeType, impact, scale, hop, evidence,
 confidence, note[, path]}
-meta.json: {squad, hops, model, assistantVersion, decisions: [{text, ownerRole}], unknowns: [str]}
+meta.json: {squad, hops, model, assistantVersion, decisions: [{text, ownerRole}], unknowns: [str]
+[, designOption, recommendedBy]}
+
+designOption ("OPT-<n>", the solution-design option this record assesses) passes through to the
+top level of impact.json, and recommendedBy ("assistant") to its provenance. Each is written only
+when meta.json carries it, so a record sized without a design is unchanged. impact.md names the
+assessed option in its header when there is one.
 
 Writes ai-context/<id>-<slug>/impact.json (a draft record) and impact.md. The record is validated
 as a draft, with evidence checked against --root, before anything is written; on errors nothing is
@@ -124,8 +130,13 @@ def render_md(doc, rows, st, found, invalid, reg_commit):
     lines = ["# Impact: %s %s" % (doc["storyId"], doc["slug"]), "",
              "Index commit `%s`, index version %s, built %s." % (
                  str(st.get("commit", "unknown"))[:12], st.get("indexVersion", "?"),
-                 st.get("builtAt", "?")), "",
-             "| Impact | Count |", "|---|---|"]
+                 st.get("builtAt", "?")), ""]
+    if "designOption" in doc:
+        rec = doc["provenance"].get("recommendedBy")
+        lines += ["Assessed option: %s from design.json%s. A named owner confirms the option at "
+                  "promotion." % (cell(doc["designOption"]),
+                                  " (recommended by: %s)" % cell(rec) if rec else ""), ""]
+    lines += ["| Impact | Count |", "|---|---|"]
     lines += ["| %s | %s |" % (k, v) for k, v in sorted(by_impact.items())]
     lines += ["", "| Component | Layer | Type | Ownership | Change | Impact | Scale | Hop | Evidence | Confidence |",
               "|---|---|---|---|---|---|---|---|---|---|"]
@@ -198,6 +209,11 @@ def main(argv=None):
         "decisions": meta.get("decisions", []),
         "unknowns": meta.get("unknowns", []),
     }
+    # Written only when meta.json carries them: a record sized without a design stays as before.
+    if "designOption" in meta:
+        doc["designOption"] = meta["designOption"]
+    if "recommendedBy" in meta:
+        doc["provenance"]["recommendedBy"] = meta["recommendedBy"]
     errors = validate(doc, "draft", a.root, check_evidence=True)
     if errors:
         for e in errors:

@@ -194,6 +194,171 @@ def test_all_empty_exits_zero():
     assert p.returncode == 0, (p.stdout, p.stderr)
 
 
+# --- WS10: designOption, provenance.recommendedBy, chosenOption -----------------------------------
+
+CTX = os.path.join(REPO, "ai-context")
+CLS = "force-app/main/default/classes/WidgetService.cls"
+
+
+def promoted_with_design():
+    d = good()
+    d["status"], d["confirmedBy"] = "in-flight", "Tech Lead"
+    d["designOption"] = d["chosenOption"] = "OPT-2"
+    d["provenance"]["recommendedBy"] = "assistant"
+    return d
+
+
+def test_impact_without_design_unchanged():
+    """DEMO-202's committed record carries none of the WS10 fields and still validates."""
+    path = os.path.join(REPO, "impacts", "DEMO-202-round-robin-assignment", "impact.json")
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    for k in ("designOption", "chosenOption"):
+        assert k not in doc, k
+    assert "recommendedBy" not in doc["provenance"]
+    assert V.validate(doc, "promoted", REPO, check_evidence=True) == []
+    p = subprocess.run([sys.executable, CLI, "--all"], capture_output=True, text=True)
+    assert p.returncode == 0, (p.stdout, p.stderr)
+
+
+def test_design_fields_draft_and_promoted():
+    d = good()
+    d["designOption"] = "OPT-2"
+    d["provenance"]["recommendedBy"] = "assistant"
+    assert V.validate(d, "draft", ROOT) == []
+    assert V.validate(promoted_with_design(), "promoted", ROOT) == []
+    # designOption alone (owner chose a non-recommended option, re-assessed) is valid in a draft.
+    d = good()
+    d["designOption"] = "OPT-3"
+    assert V.validate(d, "draft", ROOT) == []
+
+
+def test_design_fields_rejected():
+    cases = []
+    d = good(); d["designOption"] = "option-2"; cases.append((d, "draft", "does not match OPT-<n>"))
+    d = good(); d["designOption"] = "OPT-2"; d["provenance"]["recommendedBy"] = "model"
+    cases.append((d, "draft", "recommendedBy 'model'"))
+    d = good(); d["provenance"]["recommendedBy"] = "assistant"
+    cases.append((d, "draft", "without a designOption"))
+    d = good(); d["designOption"] = d["chosenOption"] = "OPT-2"
+    cases.append((d, "draft", "chosenOption is present in a draft"))
+    d = promoted_with_design(); del d["chosenOption"]
+    cases.append((d, "promoted", "chosenOption is missing"))
+    d = promoted_with_design(); d["chosenOption"] = "OPT-3"
+    cases.append((d, "promoted", "differs from designOption"))
+    d = promoted_with_design(); del d["designOption"]; del d["provenance"]["recommendedBy"]
+    cases.append((d, "promoted", "differs from designOption"))
+    for doc, stage, word in cases:
+        errs = V.validate(doc, stage, ROOT)
+        assert has(errs, word), (word, errs)
+
+
+def _design(chosen="OPT-2"):
+    return {
+        "schemaVersion": 1, "storyId": "DEMO-201", "slug": "premium-escalation",
+        "status": "confirmed", "confirmedBy": "Tech Lead", "chosenOption": chosen,
+        "options": [
+            {"id": "OPT-1", "title": "Do nothing", "summary": "Keep it.", "doNothing": True,
+             "components": [], "tradeOffs": [{"criterion": "reuse", "note": "No change."}],
+             "impactSummary": "None."},
+            {"id": "OPT-2", "title": "Extend", "summary": "Extend the class.", "doNothing": False,
+             "components": [{"api": "WidgetService", "type": "ApexClass", "changeType": "modify",
+                             "evidence": CLS + ":1", "confidence": "Confirmed"}],
+             "tradeOffs": [{"criterion": "maintainability", "note": "One class."}],
+             "impactSummary": "One class."}],
+        "recommendation": {"optionId": "OPT-2", "reasons": ["Reuse."]},
+        "provenance": {"indexStamp": {"commit": "feedc0de"}, "frameworkVersion": "0.1.0",
+                       "model": "m", "assistantVersion": "unknown"}}
+
+
+def _design_root(design=None, impact=None):
+    os.makedirs(CTX, exist_ok=True)
+    root = tempfile.mkdtemp(prefix="validate_design_all_", dir=CTX)
+    atexit.register(shutil.rmtree, root, True)
+    write(os.path.join(root, CLS), "public with sharing class WidgetService {}\n")
+    write(os.path.join(root, "index", "metadata.json"), json.dumps(
+        {"stamp": {"commit": "feedc0de"}, "edges": [],
+         "nodes": {"WidgetService": {"type": "ApexClass", "path": CLS}}}))
+    folder = os.path.join(root, "impacts", "DEMO-201-premium-escalation")
+    write(os.path.join(folder, "impact.json"), json.dumps(impact or promoted_with_design()))
+    if design is not False:
+        write(os.path.join(folder, "design.json"), json.dumps(design or _design()))
+    return root
+
+
+def _all(root, *extra):
+    p = subprocess.run([sys.executable, CLI, "--all", "--root", root] + list(extra),
+                       capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
+def test_all_validates_design_beside_impact():
+    root = _design_root()
+    idx = os.path.join(root, "index")
+    code, out = _all(root, "--index", idx)
+    assert code == 0, out
+    assert "design.json" in out, out
+    # A modify component missing from the index fails the confirmed design check.
+    d = _design()
+    d["options"][1]["components"][0]["api"] = "GhostService"
+    code, out = _all(_design_root(design=d), "--index", idx)
+    assert code == 1 and "GhostService" in out, out
+    # A draft design on record fails: designs beside impacts are confirmed.
+    d = _design()
+    d["status"] = "draft"
+    code, out = _all(_design_root(design=d), "--index", idx)
+    assert code == 1 and "status 'draft'" in out, out
+    # The design's chosenOption agrees with the impact's.
+    code, out = _all(_design_root(design=_design("OPT-1")), "--index", idx)
+    assert code == 1 and "differs from the impact's chosenOption" in out, out
+    # An impact with chosenOption and no design beside it.
+    code, out = _all(_design_root(design=False), "--index", idx)
+    assert code == 1 and "no design.json is beside the impact" in out, out
+    # An unreadable index is exit 2; with no design on record the index is not needed.
+    code, out = _all(root, "--index", os.path.join(root, "missing"))
+    assert code == 2 and "cannot load index" in out, out
+    imp = promoted_with_design()
+    for k in ("designOption", "chosenOption"):
+        del imp[k]
+    del imp["provenance"]["recommendedBy"]
+    code, out = _all(_design_root(design=False, impact=imp), "--index", os.path.join(root, "missing"))
+    assert code == 0, out
+    # --index only with --all.
+    p = subprocess.run([sys.executable, CLI, os.path.join(root, "x.json"), "--index", idx],
+                       capture_output=True, text=True)
+    assert p.returncode == 2, p.stderr
+
+
+def test_all_deep_nesting_reported_not_crash():
+    root = mkroot("deep")
+    write(os.path.join(root, "impacts", "DEMO-1-a", "impact.json"), "[" * 100000 + "]" * 100000)
+    p = subprocess.run([sys.executable, CLI, "--all", "--root", root], capture_output=True, text=True)
+    assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)
+    out = json.loads(p.stdout)
+    assert out["ok"] is False and "cannot read JSON" in out["results"][0]["errors"][0], out
+    assert "Traceback" not in p.stderr, p.stderr
+    # A deeply nested design.json beside an impact is reported the same way.
+    root = _design_root()
+    write(os.path.join(root, "impacts", "DEMO-201-premium-escalation", "design.json"),
+          "[" * 100000 + "]" * 100000)
+    code, out = _all(root, "--index", os.path.join(root, "index"))
+    assert code == 1 and "cannot read JSON" in out and "Traceback" not in out, out
+
+
+def test_all_do_nothing_choice_with_changes():
+    idx_root = _design_root()
+    idx = os.path.join(idx_root, "index")
+    imp = promoted_with_design()
+    imp["designOption"] = imp["chosenOption"] = "OPT-1"
+    del imp["provenance"]["recommendedBy"]
+    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp), "--index", idx)
+    assert code == 1, out
+    assert "the chosen option is do nothing; the impact must not change components" in out, out
+    imp["components"][0]["changeType"] = "review"
+    code, out = _all(_design_root(design=_design("OPT-1"), impact=imp), "--index", idx)
+    assert code == 0, out
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     passed = failed = 0

@@ -293,6 +293,69 @@ def test_missing_meta_is_usage_error():
         cleanup(root, scan)
 
 
+def _meta(**extra):
+    meta = {"squad": "Customer Care", "hops": 2, "model": "test-model", "assistantVersion": "unknown",
+            "decisions": [], "unknowns": []}
+    meta.update(extra)
+    return meta
+
+
+def test_write_report_passes_design_option():
+    root = make_root()
+    scan, c, m = inputs(root, meta=_meta(designOption="OPT-2", recommendedBy="assistant"))
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "impact.json")))
+        assert doc["designOption"] == "OPT-2", doc
+        assert doc["provenance"]["recommendedBy"] == "assistant", doc["provenance"]
+        assert "chosenOption" not in doc, doc
+        assert validate(doc, "draft", root, check_evidence=True) == []
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        head = md.split("| Impact | Count |", 1)[0]
+        assert "Assessed option: OPT-2 from design.json (recommended by: assistant)." in head, head
+        for word in ("we recommend", "should", "approve", "block"):
+            assert word not in md.lower(), (word, md)
+    finally:
+        cleanup(root, scan)
+    # Re-assessed for an owner-named option: designOption without recommendedBy.
+    root = make_root()
+    scan, c, m = inputs(root, meta=_meta(designOption="OPT-3"))
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "impact.json")))
+        assert doc["designOption"] == "OPT-3" and "recommendedBy" not in doc["provenance"], doc
+        md = read(os.path.join(out_dir(root), "impact.md"))
+        assert "Assessed option: OPT-3 from design.json." in md, md
+    finally:
+        cleanup(root, scan)
+    # Bad values are refused and nothing is written.
+    for extra in ({"designOption": "two"}, {"designOption": "OPT-2", "recommendedBy": "owner"},
+                  {"recommendedBy": "assistant"}):
+        root = make_root()
+        scan, c, m = inputs(root, meta=_meta(**extra))
+        try:
+            code, out = run(root, "--classified", c, "--meta", m)
+            assert code == 1, (extra, out)
+            assert not os.path.exists(os.path.join(root, "ai-context")), extra
+        finally:
+            cleanup(root, scan)
+
+
+def test_no_design_meta_writes_no_design_fields():
+    root = make_root()
+    scan, c, m = inputs(root, meta=_meta())
+    try:
+        code, out = run(root, "--classified", c, "--meta", m)
+        assert code == 0, out
+        doc = json.loads(read(os.path.join(out_dir(root), "impact.json")))
+        assert "designOption" not in doc and "recommendedBy" not in doc["provenance"], doc
+        assert "Assessed option" not in read(os.path.join(out_dir(root), "impact.md"))
+    finally:
+        cleanup(root, scan)
+
+
 def test_rendered_copies_find_repo_root():
     for path in RENDERED:
         here = os.path.dirname(path)

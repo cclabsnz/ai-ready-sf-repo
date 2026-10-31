@@ -280,7 +280,7 @@ def _load_json(path):
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh), None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         return None, "cannot read JSON: %s" % exc
 
 
@@ -288,7 +288,7 @@ def load_index(index_dir):
     """(idx, None) or (None, problem text)."""
     try:
         idx = query.load(index_dir)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         return None, "cannot load index %s: %s" % (index_dir, exc)
     if not isinstance(idx, dict) or not isinstance(idx.get("nodes"), dict):
         return None, "index %s has no nodes object" % index_dir

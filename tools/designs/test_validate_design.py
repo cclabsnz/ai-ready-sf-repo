@@ -353,6 +353,22 @@ def test_cli_files_and_all():
         shutil.rmtree(root)
 
 
+def test_all_deep_nesting_reported_not_crash():
+    root = make_root()
+    try:
+        write(os.path.join(root, "index", "metadata.json"), json.dumps(IDX))
+        write(os.path.join(root, "impacts", "DEMO-921-widget-resize", "design.json"),
+              "[" * 100000 + "]" * 100000)
+        p = subprocess.run([sys.executable, SCRIPT, "--all", "--root", root,
+                            "--index", os.path.join(root, "index")], capture_output=True, text=True)
+        assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)
+        out = json.loads(p.stdout)
+        assert out["ok"] is False and "cannot read JSON" in out["results"][0]["errors"][0], out
+        assert "Traceback" not in p.stderr, p.stderr
+    finally:
+        shutil.rmtree(root)
+
+
 def main():
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     return run_tests(tests, show_pass=True)

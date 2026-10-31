@@ -24,6 +24,13 @@ Two to four sentences: item type, persona and segment, trigger or symptom, what 
 3. Zero hits is valid evidence: record "zero consumers in index for `<term>`".
 4. Triage: drop false positives with a one-line reason each, kept in the output.
 
+## Step 3a: a design on record (when `ai-context/<id>-<slug>/design.json` exists)
+solution-design wrote options and one provisional recommendation. Assess the recommended option (`recommendation.optionId`), or the option the owner named when you are re-run for another one. Use only that option's components:
+- An existing component (`changeType` `modify`, `delete` or `review`) gets evidence `path:line` from the Step 3 scan, like any other row.
+- A component the option adds is declared `changeType: new`, with null evidence.
+- For a do-nothing option (`doNothing: true`), record only `review` components, or none. `promote.py` refuses a do-nothing choice whose impact has a `new`, `modify` or `delete` component.
+- Seed terms from the rest of the story still apply. A component the scan finds outside the option is listed with its evidence, and the gap is named in the framing.
+
 ## Step 4: classify
 For each impacted component: layer, metadata type, ownership (Custom / Managed / Standard), change type, impact (High / Medium / Low / None), scale band (S / M / L / XL, a measure of surface area not effort), hop, evidence `path:line`, confidence (Confirmed / Inferred / Unverifiable).
 
@@ -33,6 +40,7 @@ For each impacted component: layer, metadata type, ownership (Custom / Managed /
    - `hops` is an integer from 1 to 3.
    - Each `api` appears once in `classified.json`.
    - `evidence` is null only when the change type is `new` or the confidence is Unverifiable.
+   - With a design on record (Step 3a), meta.json also carries `"designOption": "OPT-<n>"` (the assessed option) and `"recommendedBy": "assistant"` when that option is the design's recommendation. For an option the owner named instead, leave `recommendedBy` out. `promote.py` refuses an impact whose `designOption` is not the option the owner confirms, so a different choice means re-running this skill for it, never hand-editing the record.
 2. Run `python3 framework/skills/story-impact/scripts/write_report.py --id <id> --slug <slug> --classified ai-context/<id>-<slug>/scan/classified.json --meta ai-context/<id>-<slug>/scan/meta.json`. It validates the record first and writes nothing on errors (exit 1). Fix the inputs and run it again. On success it writes `impact.json` (a draft record) and `impact.md`.
 3. `impact.md` has an `## Overlaps with other stories` section that the script builds from the register in `impacts/`. Report it as written and never rewrite it.
 4. Run `references/manual-checks.md` for what the index cannot see (order of execution, dynamic SOQL, `without sharing` paths) and append findings.

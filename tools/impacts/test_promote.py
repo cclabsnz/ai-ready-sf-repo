@@ -51,8 +51,14 @@ def draft_doc():
             "unknowns": ["Org-only config"]}
 
 
-def make_root(doc=None, md=MD):
-    root = tempfile.mkdtemp(prefix="promote_")
+def make_root(doc=None, md=MD, in_ctx=False):
+    """in_ctx: make the root under the checkout's ai-context/ (removed by story_cleanup)."""
+    if in_ctx:
+        os.makedirs(CTX, exist_ok=True)
+        root = tempfile.mkdtemp(prefix="promote_", dir=CTX)
+        _ROOTS.append(root)
+    else:
+        root = tempfile.mkdtemp(prefix="promote_")
     write(os.path.join(root, CLS), "public with sharing class WidgetService {\n"
                                    "    public static void run() {}\n}\n")
     write(os.path.join(root, DRAFT, "impact.json"), json.dumps(doc or draft_doc(), indent=2) + "\n")
@@ -563,6 +569,281 @@ def case_story_refuses_symlink_destination_file():
     with open(target, encoding="utf-8") as fh:
         assert fh.read() == "keep\n"
     shutil.rmtree(os.path.dirname(target), ignore_errors=True)
+
+
+# --- WS10: design.json promoted with the impact -------------------------------------------------
+
+DDRAFT = "ai-context/DEMO-905-widget-resize"
+DDEST = "impacts/DEMO-905-widget-resize"
+
+
+def design_doc():
+    return {
+        "schemaVersion": 1, "storyId": "DEMO-905", "slug": "widget-resize", "status": "draft",
+        "options": [
+            {"id": "OPT-1", "title": "Do nothing", "summary": "Keep the widget service.",
+             "doNothing": True, "components": [],
+             "tradeOffs": [{"criterion": "reuse", "note": "No change to the build."}],
+             "impactSummary": "No metadata changes."},
+            {"id": "OPT-2", "title": "Extend WidgetService", "summary": "Add a resize method.",
+             "doNothing": False,
+             "components": [{"api": "WidgetService", "type": "ApexClass", "changeType": "modify",
+                             "evidence": CLS + ":2", "confidence": "Confirmed"}],
+             "tradeOffs": [{"criterion": "maintainability", "note": "One class holds widget logic."}],
+             "impactSummary": "One class changes."},
+            {"id": "OPT-3", "title": "New resize object", "summary": "Store sizes on a new object.",
+             "doNothing": False,
+             "components": [{"api": "WidgetSize__c", "type": "CustomObject", "changeType": "new",
+                             "evidence": None, "confidence": "Inferred"}],
+             "tradeOffs": [{"criterion": "data-volume", "note": "One row per widget size."}],
+             "impactSummary": "One object is added."}],
+        "recommendation": {"optionId": "OPT-2", "reasons": ["Reuses the existing service."]},
+        "provenance": {"indexStamp": {"commit": "feedc0de"}, "frameworkVersion": "0.1.0",
+                       "model": "m", "assistantVersion": "unknown"}}
+
+
+def design_impact(option="OPT-2", recommended=True):
+    doc = draft_doc()
+    doc["storyId"], doc["slug"] = "DEMO-905", "widget-resize"
+    doc["designOption"] = option
+    if recommended:
+        doc["provenance"]["recommendedBy"] = "assistant"
+    if option == "OPT-3":
+        doc["components"] = [{"api": "WidgetSize__c", "type": "CustomObject", "changeType": "new",
+                              "impact": "Medium", "confidence": "Inferred", "hop": 0,
+                              "evidence": None, "path": None}]
+    return doc
+
+
+def make_design_root(impact=None, design=None):
+    """A temp root under the checkout's ai-context/, with a synthetic index at <root>/index."""
+    os.makedirs(CTX, exist_ok=True)
+    root = tempfile.mkdtemp(prefix="promote_design_", dir=CTX)
+    _ROOTS.append(root)
+    write(os.path.join(root, CLS), "public with sharing class WidgetService {\n"
+                                   "    public static void run() {}\n}\n")
+    write(os.path.join(root, "index", "metadata.json"), json.dumps(
+        {"stamp": {"commit": "feedc0de"}, "edges": [],
+         "nodes": {"WidgetService": {"type": "ApexClass", "path": CLS}}}))
+    write(os.path.join(root, DDRAFT, "impact.json"), json.dumps(impact or design_impact(), indent=2) + "\n")
+    write(os.path.join(root, DDRAFT, "impact.md"), MD)
+    write(os.path.join(root, DDRAFT, "design.json"), json.dumps(design or design_doc(), indent=2) + "\n")
+    write(os.path.join(root, DDRAFT, "design.md"), "# Design: draft\n")
+    return root
+
+
+def design_run(root, *extra, who="Service Ops lead", draft=DDRAFT, index=True):
+    args = [sys.executable, PROMOTE, os.path.join(root, draft), "--confirmed-by", who, "--root", root]
+    if index:
+        args += ["--index", os.path.join(root, "index")]
+    p = subprocess.run(args + list(extra), capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
+def _design_md():
+    sys.path.insert(0, os.path.join(REPO, "tools", "designs"))
+    import design_md
+    from validate_design import validate_design
+    return design_md, validate_design
+
+
+@story_cleanup
+def case_promote_with_design_records_choice():
+    design_md, validate_design = _design_md()
+    root = make_design_root()
+    code, out = design_run(root)
+    assert code == 0, out
+    dest = os.path.join(root, DDEST)
+    assert sorted(os.listdir(dest)) == ["design.json", "design.md", "impact.json", "impact.md"]
+    imp = load(os.path.join(dest, "impact.json"))
+    assert imp["chosenOption"] == "OPT-2" and imp["designOption"] == "OPT-2", imp
+    assert imp["provenance"]["recommendedBy"] == "assistant", imp
+    assert validate(imp, "promoted", root) == []
+    raw = read_bytes(os.path.join(dest, "design.json")).decode("utf-8")
+    des = json.loads(raw)
+    assert raw == json.dumps(des, indent=2, sort_keys=True) + "\n"
+    assert des["status"] == "confirmed" and des["confirmedBy"] == "Service Ops lead", des
+    assert des["chosenOption"] == "OPT-2", des
+    assert validate_design(des, "confirmed", root) == []
+    md = read_bytes(os.path.join(dest, "design.md"))
+    assert md == design_md.render_md(des).encode("utf-8")
+    text = md.decode("utf-8")
+    assert "Status: confirmed. Confirmed by: Service Ops lead. Chosen option: OPT-2." in text, text
+    assert "| OPT-2 (chosen) | Extend WidgetService |" in text, text
+    assert "Chosen option: OPT-2 (Extend WidgetService), confirmed by Service Ops lead at promotion." in text
+    assert "provisional" not in text, text
+    assert read_bytes(os.path.join(dest, "impact.md")) == MD.encode("utf-8")
+    assert "Chosen option: OPT-2 (recommended: OPT-2), confirmed by Service Ops lead." in out, out
+    # An owner who picks another option promotes once the impact assesses that option.
+    root = make_design_root(impact=design_impact("OPT-3", recommended=False))
+    code, out = design_run(root, "--option", "OPT-3")
+    assert code == 0, out
+    assert load(os.path.join(root, DDEST, "design.json"))["chosenOption"] == "OPT-3"
+    assert load(os.path.join(root, DDEST, "impact.json"))["chosenOption"] == "OPT-3"
+    text = read_bytes(os.path.join(root, DDEST, "design.md")).decode("utf-8")
+    assert "Confirmed by: Service Ops lead. Chosen option: OPT-3." in text, text
+    assert "| OPT-3 (chosen) |" in text and "| OPT-2 | Extend WidgetService |" in text, text
+    assert "Recommended option: OPT-2 (Extend WidgetService)." in text, text
+
+
+@story_cleanup
+def case_option_mismatch_refused():
+    root = make_design_root()
+    code, out = design_run(root, "--option", "OPT-3")
+    assert code == 1, out
+    assert "impact assesses OPT-2; re-run story-impact for OPT-3 before promoting" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    # Recommendation OPT-2, impact sized for OPT-3, no --option: refused the same way.
+    root = make_design_root(impact=design_impact("OPT-3", recommended=False))
+    code, out = design_run(root)
+    assert code == 1 and "impact assesses OPT-3; re-run story-impact for OPT-2" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    # An impact with no designOption beside a design is refused too.
+    imp = design_impact()
+    del imp["designOption"], imp["provenance"]["recommendedBy"]
+    root = make_design_root(impact=imp)
+    code, out = design_run(root)
+    assert code == 1 and "impact assesses no design option; re-run story-impact for OPT-2" in out, out
+    # An option the design does not hold.
+    root = make_design_root()
+    code, out = design_run(root, "--option", "OPT-9")
+    assert code == 1 and "OPT-9 is not an option in design.json" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+
+
+@story_cleanup
+def case_option_without_design_is_usage_error():
+    root = make_root(in_ctx=True)
+    for opt in ("OPT-2", "bogus"):
+        code, out = run(root, "--option", opt)
+        assert code == 2, out
+    assert not os.path.exists(os.path.join(root, DEST))
+    root = make_story_root()
+    code, out = story_run(root, "--option", "OPT-1")
+    assert code == 2, out
+    assert not os.path.exists(os.path.join(root, SDEST))
+
+
+@story_cleanup
+def case_design_symlink_refused():
+    root = make_design_root()
+    secret = os.path.join(root, "data", "secret.json")
+    write(secret, json.dumps(design_doc()))
+    src = os.path.join(root, DDRAFT, "design.json")
+    os.remove(src)
+    symlink(secret, src)
+    code, out = design_run(root)
+    assert code == 1 and "symlink" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    # A dangling symlink is a design to refuse, not "no design".
+    os.remove(secret)
+    code, out = design_run(root)
+    assert code == 1 and "symlink" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    # A symlinked destination design file is never written through.
+    for name in ("design.json", "design.md"):
+        root = make_design_root()
+        target = os.path.join(root, "data", "victim.txt")
+        write(target, "keep\n")
+        os.makedirs(os.path.join(root, DDEST))
+        symlink(target, os.path.join(root, DDEST, name))
+        code, out = design_run(root, "--replace")
+        assert code == 1 and "symlink" in out, (name, out)
+        with open(target, encoding="utf-8") as fh:
+            assert fh.read() == "keep\n"
+
+
+@story_cleanup
+def case_design_data_hit_refused():
+    d = design_doc()
+    d["options"][1]["summary"] = "Account " + "-".join(["12", "3456", "7890123", "00"])
+    root = make_design_root(design=d)
+    code, out = design_run(root)
+    assert code == 1 and "data guard" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+
+
+@story_cleanup
+def case_design_same_id_other_folder_refused():
+    root = make_design_root()
+    write(os.path.join(root, "impacts", "DEMO-905-old-slug", "design.json"), '{"storyId": "DEMO-905"}\n')
+    code, out = design_run(root)
+    assert code == 1 and "already has a record" in out and "design.json" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+
+
+@story_cleanup
+def case_design_invalid_or_mismatched_refused():
+    # A modify component missing from the index fails the draft design check.
+    d = design_doc()
+    d["options"][1]["components"][0]["api"] = "GhostService"
+    root = make_design_root(design=d)
+    code, out = design_run(root)
+    assert code == 1 and "GhostService" in out and "draft design is not valid" in out, out
+    # A design for another story.
+    d = design_doc()
+    d["slug"] = "other-thing"
+    root = make_design_root(design=d)
+    code, out = design_run(root)
+    assert code == 1 and "design.json is for DEMO-905-other-thing" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    # An unreadable index is a usage error.
+    root = make_design_root()
+    code, out = design_run(root, "--index", os.path.join(root, "no-index"), index=False)
+    assert code == 2 and "cannot load index" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+
+
+@story_cleanup
+def case_do_nothing_option_refuses_changes():
+    # The impact assesses OPT-1 (do nothing) but still modifies WidgetService: refused.
+    imp = design_impact("OPT-1", recommended=False)
+    root = make_design_root(impact=imp)
+    code, out = design_run(root, "--option", "OPT-1")
+    assert code == 1, out
+    assert "the chosen option is do nothing; the impact must not change components" in out, out
+    assert "WidgetService" in out, out
+    assert not os.path.exists(os.path.join(root, DDEST))
+    for ct in ("new", "delete"):
+        imp = design_impact("OPT-1", recommended=False)
+        imp["components"][0]["changeType"] = ct
+        if ct == "new":
+            imp["components"][0]["evidence"] = None
+        root = make_design_root(impact=imp)
+        code, out = design_run(root, "--option", "OPT-1")
+        assert code == 1 and "the chosen option is do nothing" in out, (ct, out)
+    # review components only, or none, promote.
+    for comps in ("review", None):
+        imp = design_impact("OPT-1", recommended=False)
+        if comps:
+            imp["components"][0]["changeType"] = "review"
+        else:
+            imp["components"] = []
+        root = make_design_root(impact=imp)
+        code, out = design_run(root, "--option", "OPT-1")
+        assert code == 0, (comps, out)
+        assert load(os.path.join(root, DDEST, "impact.json"))["chosenOption"] == "OPT-1"
+
+
+@story_cleanup
+def case_impact_without_design_unchanged():
+    # A designOption with no design.json beside it is refused, never promoted half-way.
+    root = make_root(in_ctx=True)
+    write(os.path.join(root, "ai-context", "DEMO-905-widget-resize", "impact.json"),
+          json.dumps(design_impact()))
+    write(os.path.join(root, "ai-context", "DEMO-905-widget-resize", "impact.md"), MD)
+    code, out = run(root, draft="ai-context/DEMO-905-widget-resize")
+    assert code == 1 and "impact assesses OPT-2 but" in out and "design.json is missing" in out, out
+    # The WS2 path writes no design files and no chosenOption.
+    root = make_root(in_ctx=True)
+    code, out = run(root)
+    assert code == 0, out
+    doc = load(os.path.join(root, DEST, "impact.json"))
+    assert "chosenOption" not in doc and "designOption" not in doc, doc
+    # --replace over a folder that holds a confirmed design, from a draft without one, is refused.
+    write(os.path.join(root, DEST, "design.json"), "{}\n")
+    code, out = run(root, "--replace")
+    assert code == 1 and "the draft has no design.json" in out, out
 
 
 def main():
