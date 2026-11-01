@@ -2,8 +2,12 @@ name: ai-framework
 on:
   pull_request:
     paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**", "demo/**", "impacts/**", ".ai-framework.json"]
+  # Only the optional live-consistency job runs on this; every other job is gated to pull_request.
+  # No schedule until the owner decides on a CI baseline for the guard.
+  workflow_dispatch:
 jobs:
   guard-and-lint:
+    if: github.event_name == 'pull_request'
     strategy:
       matrix: { os: [ubuntu-latest, windows-latest] }
     runs-on: ${{ matrix.os }}
@@ -14,8 +18,11 @@ jobs:
       - name: Guard blocks on this OS
         shell: bash  # Git Bash on Windows, so the test's bash is not the WSL launcher
         run: python tools/guard/test_guard.py
+      # Tracked files only: a contributor's local, git-ignored exports are never read here.
       - name: Real-data scan
-        run: python tools/guard/scan_data.py --all
+        run: python tools/guard/scan_data.py --tracked
+      - name: Real-data scanner tests
+        run: python tools/guard/test_scan_data.py
       - name: Framework lint
         run: python tools/build/lint.py
       - name: Rendered outputs are current
@@ -90,7 +97,21 @@ jobs:
       # Exits 1 when the configured source root has a rule finding that tools/code/baseline.json does not hold.
       - name: Apex rule check (baseline)
         run: python tools/code/check_rules.py --from-config
+      - name: Consistency comparer tests
+        run: python tools/evals/test_consistency.py
+      - name: Live runner tests (fake runner, no model call)
+        run: python tools/evals/test_run_all.py
+      - name: Measurement score tests
+        run: python demo/measure/test_score.py
+      - name: Measurement timing tests
+        run: python demo/measure/test_timing.py
+      - name: Walkthrough check tests
+        run: python tools/demo/test_walkthrough_check.py
+      # The walkthrough's deterministic path against demo/expected/, on both OSes through the matrix.
+      - name: Walkthrough deterministic path
+        run: python tools/demo/walkthrough_check.py
   impact-checks:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -228,8 +249,54 @@ jobs:
           CODE: ${{ steps.check.outputs.code }}
         run: exit "${CODE:-2}"
   secrets:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v2
+  # Optional live consistency run: started by hand (workflow_dispatch) from the default branch only, never on
+  # pull_request. It calls the model with the ANTHROPIC_API_KEY repository secret, so it is not a required check.
+  # run_all.py runs one case N times, consistency.py compares the run folders, and the folders are uploaded for review.
+  # Golden outputs are committed by a human after review, never by this job.
+  live-consistency:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CASE: story-impact/004-escalation-hops-3
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      # Pin an exact, reviewed version before the first run: this package later receives the API key.
+      - name: Install Claude Code
+        env:
+          PNPM_HOME: /home/runner/.pnpm-global
+        run: |
+          export PATH="$PNPM_HOME:$PATH"
+          pnpm add -g @anthropic-ai/claude-code
+          echo "$PNPM_HOME" >> "$GITHUB_PATH"
+      # The secret reaches only this step, the one that calls claude.
+      - name: Live runs for one case
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python tools/evals/run_all.py --case "$CASE"
+      - name: Agreement across the runs
+        if: always()
+        run: |
+          runs="ai-context/evals/${CASE//\//-}"
+          if [ ! -d "$runs" ]; then echo "No run folders were written."; exit 1; fi
+          python tools/evals/consistency.py --text "$runs"/run-*
+      - name: Upload the run folders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-consistency
+          path: ai-context/evals/
+          if-no-files-found: warn

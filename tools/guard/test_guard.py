@@ -1396,6 +1396,25 @@ SCOPE_BASH_CASES = [
          env_mode="maintain", stderr_has="never allowed"),
 ]
 
+# ---- Publish: the live eval runner is owner-run ----
+# tools/evals/run_all.py starts `claude -p` runs on the owner's account. It matches no allowlist group in any mode;
+# maintain's generic script pattern carries a case-insensitive negative lookahead for it, as for start.py. These run
+# under the normal allowlist only (not through no_allowlist_variants): the runner models no write target, so with
+# every allowlist opened it would be allowed.
+RUN_ALL = "python3 tools/evals/run_all.py --case story-impact/004-escalation-hops-3"
+PUBLISH_CASES = [
+    Case(f"publish {m or 'normal'}: run_all.py blocked (live runs are owner-run)", bash(RUN_ALL), 2, env_mode=m,
+         stderr_has="" if m == "advise" else NOT_ON_LIST) for m in (None, "advise", "build", "maintain")] + [
+    Case("publish maintain: py -3 run_all.py blocked", bash("py -3 tools/evals/run_all.py --case story-impact/x --n 1"), 2,
+         env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("publish maintain: run_all.py with no arguments blocked", bash("python3 tools/evals/run_all.py"), 2,
+         env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("publish maintain: run_all.py in another case blocked", bash("python3 tools/Evals/RUN_ALL.py --case story-impact/x"), 2,
+         env_mode="maintain", stderr_has=NOT_ON_LIST),
+    Case("publish maintain: the comparer still runs", bash("python3 tools/evals/consistency.py ai-context/a ai-context/b"), 0,
+         env_mode="maintain"),
+]
+
 
 def s_project(files=None, story=True):
     """A committed project with the synthetic story (and, when story, its .active-story file). Returns the realpath."""
@@ -1600,6 +1619,28 @@ def check_start_modelled():
         check("WS8 maintain still runs other tools/impacts scripts", g.segment_matches(["python3", "tools/impacts/starter.py"], maintain))
 
     guarded(check, "WS8 start.py modelled", body)
+    return all(results)
+
+
+def check_run_all_refused():
+    """tools/evals/run_all.py matches no allowlist group in any mode, in any letter case; maintain still runs the
+    other tools/evals scripts."""
+    g = guard_module()
+    check, results = checker()
+
+    def body():
+        policy = guard_policy()
+        for words in (["python3", "tools/evals/run_all.py", "--case", "story-impact/x"], ["py", "-3", "tools/evals/run_all.py"],
+                      ["python", "tools/evals/run_all.py", "--n", "1"], ["python3", "TOOLS/EVALS/Run_All.py"]):
+            for mode, cfg in policy["modes"].items():
+                patterns = [p for grp in cfg["bash_allow"] for p in policy["bash_groups"][grp]]
+                check(f"publish run_all.py matches no {mode} allowlist group: {' '.join(words)}", not g.segment_matches(words, patterns))
+        maintain = [p for grp in policy["modes"]["maintain"]["bash_allow"] for p in policy["bash_groups"][grp]]
+        for words in (["python3", "tools/evals/consistency.py", "ai-context/a"], ["python3", "tools/evals/test_run_all.py"],
+                      ["python3", "tools/evals/run_all_notes.py"]):
+            check(f"publish maintain still runs {words[1]}", g.segment_matches(words, maintain))
+
+    guarded(check, "publish run_all.py refused", body)
     return all(results)
 
 
@@ -2912,7 +2953,7 @@ def main():
     results = []
     for case in (CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES
                  + ROUND2_CASES + FINAL_CASES + EXTRA_CASES + list(no_allowlist_variants(CASES))
-                 + SCOPE_CASES + SCOPE_BASH_CASES + list(no_allowlist_variants(SCOPE_BASH_CASES))):
+                 + SCOPE_CASES + SCOPE_BASH_CASES + list(no_allowlist_variants(SCOPE_BASH_CASES)) + PUBLISH_CASES):
         results.append(report(case, *run_case(case)))
     results.append(check_core_units())
     results.append(check_source_root_drift())
@@ -2924,6 +2965,7 @@ def main():
     results.append(check_scope_symlink())
     results.append(check_scope_hardlink())
     results.append(check_start_modelled())
+    results.append(check_run_all_refused())
     results.append(check_settings_deny())
     results.append(check_hook_matcher())
     results.append(check_walk_budget())

@@ -233,7 +233,7 @@
     "maintainer_tools": [
       "(cp|mv|mkdir|rm|touch|rmdir|sed|diff|cmp)( .*)?",
       "tar -t[a-zA-Z]*( .*)?",
-      "(python3?|py -3) (?!tools/impacts/start\\.py( |$))(tools|ai-context|framework|fixtures|demo)(/[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*)+\\.py( .*)?",
+      "(python3?|py -3) (?!(?i:tools/(impacts/start|evals/run_all)\\.py)( |$))(tools|ai-context|framework|fixtures|demo)(/[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*)+\\.py( .*)?",
       "(python3?|py -3) tools/build/render\\.py( .*)?",
       "git (add|commit)( .*)?",
       "pnpm exec (prettier|eslint|jest)( .*)?"
