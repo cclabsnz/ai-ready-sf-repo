@@ -1131,13 +1131,16 @@ def pnpm_targets(args):
 
 
 SCRIPT_FLAGS = {  # argparse options of the framework scripts that choose where they write: name -> takes a value
-    "build_index.py": {"--root": True, "--out": True, "--version": False, "--help": False},
+    "build_index.py": {"--root": True, "--out": True, "--from-config": False, "--version": False, "--help": False},
     "write_report.py": {"--id": True, "--slug": True, "--classified": True, "--root": True, "--help": False},
     "write_story.py": {"--id": True, "--slug": True, "--draft": True, "--root": True, "--help": False},
+    "write_design.py": {"--id": True, "--slug": True, "--draft": True, "--index": True, "--root": True,
+                        "--model": True, "--assistant-version": True, "--help": False},
 }
 STORY_OUTPUTS = {  # files the --id/--slug writers put in ai-context/<--id>-<--slug>/
     "write_report.py": ("impact.json", "impact.md"),
     "write_story.py": ("story.json", "story.md"),
+    "write_design.py": ("design.json", "design.md"),
 }
 
 
@@ -1171,14 +1174,29 @@ def script_flag_values(args, flags):
     return vals
 
 
-def script_targets(script, args):
+def script_flag_given(args, flags, flag):
+    """Whether a no-value option is on the command line, by its full name or a unique prefix (argparse's rule),
+    before any "--"."""
+    for a in args:
+        if a == "--":
+            return False
+        name = a.partition("=")[0]
+        if name.startswith("--") and (name == flag or [f for f in flags if f.startswith(name)] == [flag]):
+            return True
+    return False
+
+
+def script_targets(script, args, cwd=None):
     """(paths a framework script writes through its flags, False), or None when unknown. Other scripts: ([], False).
 
-    build_index.py writes <--root>/<--out>/{metadata,inventory}.json. write_report.py writes
+    build_index.py writes <--root>/<--out>/{metadata,inventory}.json. With --from-config it writes
+    <checkout>/index/{metadata,inventory}.json, the checkout being three folders above the script's realpath
+    (resolved against cwd), as build_index's from_config() computes it, and it exits 2 when --root or --out is also given; that combination is unknown here. write_report.py writes
     ai-context/<--id>-<--slug>/{impact.json,impact.md} under --root, and runs <--root>/tools/index/query.py, so a --root other
     than "." is unknown. write_story.py writes ai-context/<--id>-<--slug>/{story.json,story.md} under --root and
-    reads the index and register from it; a --root other than "." is unknown for it too. query.py prints to
-    stdout only.
+    reads the index and register from it; a --root other than "." is unknown for it too. write_design.py writes
+    ai-context/<--id>-<--slug>/{design.json,design.md} under --root, reads its index from --index and evidence
+    from --root, and is held to the same rules as write_story.py. query.py prints to stdout only.
     """
     name = script.replace("\\", "/").rsplit("/", 1)[-1]
     if name not in SCRIPT_FLAGS:
@@ -1188,6 +1206,13 @@ def script_targets(script, args):
         return None
     out = []
     if name == "build_index.py":
+        if script_flag_given(args, SCRIPT_FLAGS[name], "--from-config"):
+            if vals["--root"] or vals["--out"]:
+                return None
+            # build_index's from_config(): three dirnames above the script's realpath.
+            real = os.path.realpath(os.path.join(cwd or "", script))
+            d = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(real))), "index")
+            return [os.path.join(d, ""), os.path.join(d, "metadata.json"), os.path.join(d, "inventory.json")], False
         for root in vals["--root"] or ["."]:
             for sub in vals["--out"] or ["index"]:
                 d = os.path.join(root, sub)
@@ -1226,7 +1251,7 @@ def command_targets(words, policy, cwd, walk=True):
             if a in ("-W", "-X"):
                 i += 1
             elif not a.startswith("-"):
-                return script_targets(a, args[i:])
+                return script_targets(a, args[i:], cwd)
         return None
     if base == "pnpm":
         return pnpm_targets(args)

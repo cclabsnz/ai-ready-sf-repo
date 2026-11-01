@@ -1,7 +1,7 @@
 name: ai-framework
 on:
   pull_request:
-    paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**", "demo/**", "impacts/**"]
+    paths: ["framework/**", "tools/**", ".claude/**", ".github/**", "force-app/**", "fixtures/**", "demo/**", "impacts/**", ".ai-framework.json"]
 jobs:
   guard-and-lint:
     strategy:
@@ -50,6 +50,9 @@ jobs:
         run: python tools/demo/test_answer_to_draft.py
       - name: Skill eval runner tests
         run: python tools/evals/test_run_skill.py
+      # index/ is untracked. The --all checks below read no index; this keeps index/ built from sourceRoot.
+      - name: Build index from .ai-framework.json
+        run: python tools/index/build_index.py --from-config
       - name: Committed impact records are valid
         run: python tools/impacts/validate.py --all
       - name: Acceptance-criteria check tests
@@ -62,6 +65,16 @@ jobs:
         run: python tools/index/test_edge_seeds.py
       - name: Committed stories are valid
         run: python tools/stories/validate_story.py --all
+      - name: Framework config tests
+        run: python tools/config/test_framework_config.py
+      - name: Onboarding tests
+        run: python tools/onboard/test_onboard.py
+      - name: Design validator tests
+        run: python tools/designs/test_validate_design.py
+      - name: Design writer tests
+        run: python tools/designs/test_write_design.py
+      - name: Committed designs are valid
+        run: python tools/designs/validate_design.py --all
   impact-checks:
     runs-on: ubuntu-latest
     permissions:
@@ -72,8 +85,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, persist-credentials: false }
       # The base branch, checked out after the head so the head checkout's clean step cannot remove it.
-      # The check code (pr_check, register, validate, build_index), settings and the register all come
-      # from here; only data (demo/org, impact records, the diff) comes from the PR. So a PR cannot
+      # The check code (pr_check, register, validate, build_index, framework_config), settings (including
+      # the source root in .ai-framework.json) and the register all come from here; only data (the
+      # metadata under that source root, impact records, the diff) comes from the PR. So a PR cannot
       # relax its own check, except the PR that first adds pr_check (see "Impact checks").
       - name: Check out the base branch
         uses: actions/checkout@v4
@@ -83,11 +97,15 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - name: Build index on the demo org
+      # The source root is read from the base branch's .ai-framework.json; demo/org when the base has no
+      # config tool yet. An invalid base config makes framework_config exit 2, which fails this step.
+      - name: Build index on the source root
         run: |
           builder=tools/index/build_index.py
           if [ -f base/tools/index/build_index.py ]; then builder=base/tools/index/build_index.py; fi
-          python "$builder" --root demo/org --out "$GITHUB_WORKSPACE/index"
+          src=demo/org
+          if [ -f base/tools/config/framework_config.py ]; then src="$(python base/tools/config/framework_config.py source-root --root base)"; fi
+          python "$builder" --root "$src" --out "$GITHUB_WORKSPACE/index"
       - name: Files changed against the base branch
         env:
           BASE_REF: ${{ github.base_ref }}

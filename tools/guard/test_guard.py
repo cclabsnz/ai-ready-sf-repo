@@ -539,6 +539,11 @@ ALLOWLIST_CASES = [
     Case("edge-seeds allowed in advise", bash("python3 tools/index/query.py edge-seeds Case"), 0, env_mode="advise"),
     Case("story promote blocked in normal", bash("python3 tools/impacts/promote.py ai-context/X --story --confirmed-by lead"), 2, stderr_has=NOT_ON_LIST),
     Case("story promote blocked in build", bash("python3 tools/impacts/promote.py ai-context/X --story --confirmed-by lead"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
+    # WS10 starting points: validate_design and framework_config are framework scripts; onboard is maintain-only
+    # (it can write .ai-framework.json and the knowledge stubs).
+    Case("validate_design allowed in normal", bash("python3 tools/designs/validate_design.py --all"), 0),
+    Case("framework_config allowed in normal", bash("python3 tools/config/framework_config.py source-root"), 0),
+    Case("onboard blocked in normal", bash("python3 tools/onboard/onboard.py --starting-point existing"), 2, stderr_has=NOT_ON_LIST),
     # Salesforce CLI levels.
     Case("normal: sf --version allowed", bash("sf --version"), 0),
     Case("build: sf version allowed", bash("sf version"), 0, env_mode="build"),
@@ -989,6 +994,7 @@ PRE_SH = {"ai-context/--pre=sh": "", "ai-context/evil": ""}
 DASH_DELETE = {"ai-context/-delete": ""}
 WRITE_REPORT = "python3 framework/skills/story-impact/scripts/write_report.py"
 WRITE_STORY = "python3 framework/skills/story-refine/scripts/write_story.py"
+WRITE_DESIGN = "python3 framework/skills/solution-design/scripts/write_design.py"
 BUILD_INDEX = "python3 tools/index/build_index.py"
 # Final review fix wave (C1, I1-I5, minors, extras). C2 has its own runner (check_walk_budget, check_deadline).
 FINAL_CASES = [
@@ -1035,6 +1041,9 @@ FINAL_CASES = [
     Case("I3: build_index default allowed", bash(BUILD_INDEX), 0),
     Case("I3: build_index smoke-test form allowed", bash(f"{BUILD_INDEX} --root fixtures --out ../index"), 0, files={"fixtures/.keep": ""}),
     Case("I3: build_index into ai-context allowed", bash(f"{BUILD_INDEX} --out ai-context/idx"), 0),
+    Case("build_index --from-config allowed in normal", bash(f"{BUILD_INDEX} --from-config"), 0),
+    Case("build_index --from-config with --out blocked", bash(f"{BUILD_INDEX} --from-config --out ai-context/idx"), 2),
+    Case("build_index --from abbreviation with --root blocked", bash(f"{BUILD_INDEX} --from --root ai-context/x"), 2),
     Case("I3: write_report slug traversal blocked", bash(f"{WRITE_REPORT} --id 1 --slug ../../tools/guard --classified ai-context/c.json"), 2),
     Case("I3: write_report slug with / blocked", bash(f"{WRITE_REPORT} --id 1 --slug a/b --classified ai-context/c.json"), 2),
     Case("I3: write_report slug with backslash blocked", bash(f"{WRITE_REPORT} --id 1 --slug 'a\\b' --classified ai-context/c.json"), 2),
@@ -1045,6 +1054,8 @@ FINAL_CASES = [
     Case("write_story with --root elsewhere blocked", bash(f"{WRITE_STORY} --id 1 --slug x --draft ai-context/d.json --root ai-context/x"), 2),
     Case("write_story slug traversal blocked", bash(f"{WRITE_STORY} --id 1 --slug ../../tools/guard --draft ai-context/d.json"), 2),
     Case("write_story allowed in normal", bash(f"{WRITE_STORY} --id 1 --slug risk-rating --draft ai-context/d.json"), 0),
+    Case("write_design with --root elsewhere blocked", bash(f"{WRITE_DESIGN} --id 1 --slug x --draft ai-context/d.json --root ai-context/x"), 2),
+    Case("write_design allowed in normal", bash(f"{WRITE_DESIGN} --id 1 --slug risk-rating --draft ai-context/d.json"), 0),
     Case("I3: query.py has no write flags", bash("python3 tools/index/query.py stamp --index tools/guard --root ."), 0),
     # I4: every tool goes through the guard.
     Case("I4: mcp write tool on tools/guard blocked", tool("mcp__filesystem__write_file", path="tools/guard/x"), 2),
@@ -1762,6 +1773,25 @@ def check_story_outputs():
     return good
 
 
+def check_design_outputs():
+    """write_design.py's files (write_design.py:132-133) and build_index --from-config's <checkout>/index are modelled."""
+    g = guard_module()
+    d = os.path.join("ai-context", "1-x")
+    got = g.script_targets("framework/skills/solution-design/scripts/write_design.py",
+                           ["--id", "1", "--slug", "x", "--draft", "ai-context/d.json"])
+    want = ([os.path.join(d, ""), os.path.join(d, "design.json"), os.path.join(d, "design.md")], False)
+    i = os.path.join(os.path.realpath(os.getcwd()), "index")
+    try:
+        got_idx = g.script_targets("tools/index/build_index.py", ["--from-config"], os.getcwd())
+    except TypeError as e:  # a guard without the cwd argument
+        got_idx = f"TypeError: {e}"
+    want_idx = ([os.path.join(i, ""), os.path.join(i, "metadata.json"), os.path.join(i, "inventory.json")], False)
+    good = got == want and got_idx == want_idx
+    note = "" if good else f" {got} != {want} or {got_idx} != {want_idx}"
+    print(f"[{'PASS' if good else 'FAIL'}] write_design design.json and --from-config index paths modelled{note}")
+    return good
+
+
 def check_hook_matcher():
     """I4: the hook runs for every tool, so MCP and future tools cannot skip the guard."""
     name = "settings hook matcher covers every tool"
@@ -1806,6 +1836,7 @@ def main():
     results.append(check_deadline())
     results.append(check_glob_scan())
     results.append(check_story_outputs())
+    results.append(check_design_outputs())
     results.append(check_rebaseline_cli())
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))
