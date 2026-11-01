@@ -49,7 +49,7 @@ The control plane is built and tested before the first skill, because every late
 | --- | --- | --- |
 | Offline guard | PreToolUse hook on every tool (matcher `.*`) in `.claude/settings.json`, registered as `sh "$CLAUDE_PROJECT_DIR/tools/guard/guard.sh"`, which runs `tools/guard/guard.py` with `-I`. The wrapper exits 2 if no interpreter is found or `guard.py` is unreadable, and maps any other exit code to 2, so a missing Python blocks rather than passes. `guard.cmd` is a Windows fallback, not the registered command. Rules live in `tools/guard/policy.json`; the active mode picks the allowed write paths, the Bash allowlist and the Salesforce CLI level. Claude Code only: no Copilot hook is registered. `.github/hooks/` holds only a README describing how one could be, so Copilot users get the rendered instructions but no guard today (WS6; see "Copilot today"). | `sfdx`, org logins and every other org-changing `sf` command, pushes, `curl`, `wget`, writes outside the mode's paths, Bash outside the mode's allowlist, unquoted globs that could expand to an option, WebFetch to domains not on the allowlist, MCP tools that write (and every MCP tool in `advise`), and any write or non-read-only Bash while the tripwire is tripped |
 | Deny rules | Static `permissions.deny` patterns in the same settings file for the always-blocked Salesforce CLI command prefixes, `sfdx`, `git push`, `curl`, `wget` and `WebFetch` | Belt and braces: a deny rule applies even when the hook cannot start. They do not cover Write/Edit paths, colon-style ids, the `force` topic or `--flags-dir`; those depend on the hook |
-| Data boundary | `.gitignore` for `data/`, `/index/` and the whole `/ai-context/` workspace (the WS2 owner patch, applied in `3fb9e73`). Plus `tools/guard/scan_data.py` as a pre-commit hook and a pipeline gate. Today every pattern applies on every scan. After the publish owner patch lands (`ai-context/publish/patches/APPLY.md`), the NZ and nCino patterns become opt-in packs that apply only when `tools/guard/scan_packs.json` names them; the patch ships that file with the default pack only | Org exports, user inputs and workspace output entering git; Salesforce IDs and emails in any committed file. Today also NZ account-number and IRD formats and `LLC_BI__` record names; after the publish patch, only where those packs are enabled |
+| Data boundary | `.gitignore` for `data/`, `/index/` and the whole `/ai-context/` workspace (the WS2 owner patch, applied in `3fb9e73`). Plus `tools/guard/scan_data.py` as a pre-commit hook (staged files) and a pipeline gate (`--tracked`, the files git tracks). The default pack of patterns is always on. The NZ and nCino patterns are opt-in packs that apply only when `tools/guard/scan_packs.json` names them; this repo ships that file with the default pack only | Org exports, user inputs and workspace output entering git; Salesforce IDs and emails in any committed file. NZ account-number and IRD formats and `LLC_BI__` record names only where those packs are enabled |
 | Secrets | gitleaks (or the platform's native scanner) pre-commit and in CI | Keys, tokens and credentials in commits |
 | Kill switch | One line in `.claude/settings.json` (`"env": {"AI_FRAMEWORK_MODE": "advise"}`) that the guard reads: in `advise` mode every write is blocked and only read-only Bash runs, and the model is told to output recommendations only. The committed value is the ceiling: committed `advise` always wins over any local override | Programme-wide pause in minutes if a skill misbehaves, without touching squads' machines |
 
@@ -63,7 +63,7 @@ The guard has four modes, set by `AI_FRAMEWORK_MODE`. Committed `.claude/setting
 | --- | --- | --- | --- | --- |
 | `advise` | Everyone, when the programme pulls the kill switch | None | Read-only commands only (`cat`, `ls`, `grep`, read-only `git`, `find` without actions, `query.py`). Redirects only to `/dev/null` or a file descriptor; no `$`, brace or command substitution | `none` |
 | `normal` | The default for every squad member | `ai-context/`, `index/` | Read-only commands plus the framework scripts (index build and query, evals, lint, `test_guard.py`, `scan_data.py`, skill scripts). Every write target the command makes must also be under the mode's write paths | `offline` |
-| `build` | A developer, by personal override (after the WS8 guard patch, `tools/impacts/start.py` gives the session its story scope) | Same as `normal`, plus source writes scoped to the active story's committed build package. Under the applied guard there is no scope yet, so no source write is allowed; the scope lock arrives with the unapplied WS8 guard patch (see "Scoped code writing") | `normal` plus dev tooling: `git add` and `git commit` (local only), `pnpm exec` prettier, eslint, jest and sfdx-lwc-jest, `pnpm lint`, `pnpm format`, `pnpm test` | `offline` |
+| `build` | A developer, by personal override (`tools/impacts/start.py` gives the session its story scope) | Same as `normal`, plus source writes to the exact paths in the active story's committed build package, tests first (see "Scoped code writing"). With no active story, no source write is allowed | `normal` plus dev tooling: `git add` and `git commit` (local only), `pnpm exec` prettier, eslint, jest and sfdx-lwc-jest, `pnpm lint`, `pnpm format`, `pnpm test` | `offline` |
 | `maintain` | A framework maintainer, by personal override | The framework paths listed under `maintain` in `policy.json` (for example `framework/`, `tools/`, `docs/`, `README.md`), plus `ai-context/` and `index/` | `normal` plus the maintainer allowlist (`maintainer_tools` in `policy.json`): `cp`, `mv`, `mkdir`, `rm`, `touch`, `rmdir`, `sed`, `diff`, `cmp`, `tar` in list mode, `git add` and `git commit`, `pnpm exec` prettier, eslint and jest, and Python scripts under `tools/`, `framework/`, `fixtures/`, `demo/` and `ai-context/` | `offline` |
 
 Outside `advise`, Bash is allowlist-based: a command that is not on the mode's list is blocked, and so is any command whose write targets the guard cannot work out. The framework scripts' own output flags count as write targets: `build_index.py --out` (joined to `--root`, abbreviations included) and `write_report.py`'s `ai-context/<id>-<slug>/` (a `/`, `\` or `..` in `--id` or `--slug`, or a `--root` other than `.`, blocks); `query.py` only prints. Scripts, `pnpm` and the Salesforce CLI run only from the project root, with no `cd` before them. In every mode, including `advise`, a Bash line is blocked when it holds a `$` (double-quoted too, since the shell still expands it there), a `{` or `}`, or a bracket expression with `[:`, `[=` or `[.` (`[[:punct:]]`) outside single quotes: the shell can expand any of them into an option or a path the guard never sees (`rg x {--pre=sh,evil}`, `build_index.py --o${U}ut tools/guard`). A backslash-escaped character stays literal. Put such text in single quotes, or put it in a file and point the command at the file. A heredoc (`<<` or `<<-`; the here-string `<<<` is fine) is blocked in every mode too, because a `'` in its body is an ordinary character and a `$(...)` there still runs; write the text to a file instead. A line that already holds the guard's private marker characters (U+E000 to U+E002) is unparseable and blocked. The glob rules below are a second, narrower check and do not close the class on their own. In every mode, an unquoted glob word is blocked when it starts with `-`, when it comes after a `cd`, `pushd` or `popd` on the same line, when it holds an expansion, or when it matches a name starting with `-` in the working directory: the shell would hand such a match to the command as an option (`sort -[o]`, `find .. -delet[e]`, `rg x *` beside a file named `--pre=sh`). Quote the glob (`'*.py'`) to pass it literally. A line with more than 64 unquoted glob words is blocked ("too many glob patterns"); identical words are expanded once, and every directory entry a glob reads, matched or not, is charged to the per-call budget. Git is a subcommand allowlist (`status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `check-ignore`, `blame`, `branch --show-current`; `add` and `commit` only in `build` and `maintain`); global options such as `-C` and `-c` are refused. Pushes, `git commit --amend` (and any prefix of it git accepts, such as `--amen`), `curl`, `wget`, `ssh`, `scp` and `sfdx` are blocked in every mode. A `git commit` whose message holds a `$` or braces outside single quotes, or a substitution, is blocked because the guard cannot read it; the block message says to single-quote it or write the message to a file under `ai-context/` and run `git commit -F ai-context/<file>`. `git commit -m 'fix $5 bug'` passes. The guard refuses writes to these paths in every mode (a laptop rule, best effort; see Layer 1 below): `tools/guard/`, `.claude/settings.json`, `.claude/settings.local.json`, `.github/workflows/`, `.github/hooks/`, every `CODEOWNERS` file, and `.git/`. Those change by a human-applied patch with a second reviewer, and the human applies and commits the guard files together.
@@ -96,7 +96,7 @@ Limits accepted in Layer 1, each with its backstop:
 
 Operations a human must know:
 
-- **One-time step after applying the guard patches:** run the re-baseline command from a terminal (see the README). Until then every write and every non-read-only Bash call is blocked.
+- **One-time step after applying the guard patches:** run the re-baseline command from a terminal (see the README). Until then every write and every non-read-only Bash call is blocked. A `git status` that the assistant can run shows the baseline is current, because the guard refuses every git command while it is missing or stale.
 - **Re-baseline whenever `.git/config` or `.git/hooks/` legitimately change**, for example when installing husky hooks or editing core settings.
 - **Every new git worktree needs its own re-baseline.** The baseline lives in each worktree's git directory, so a fresh `git worktree add` blocks writes there until a human runs the re-baseline command from inside it.
 - **Text with `$`, braces or a `[[:class:]]` bracket, in any mode:** single-quote it (`git commit -m 'fix $5 bug'`), or write it to a file under `ai-context/` and point the command at the file (`git commit -F ai-context/<file>`). Unquoted or double-quoted, the guard cannot see what the shell expands it to and blocks the line.
@@ -167,7 +167,7 @@ The steps continue into code (see "Scoped code writing"). Steps 6 and 7 are huma
 | 8. Build | Tests first, then code, only inside the package scope; then the package's done commands | `implement-story` (the `builder` agent) | `check_trace.py --skeletons`, `check_rules.py --from-config`, `check_trace.py`, `write_change.py` | Code and tests in scope; `change.json` and `change.md` in `ai-context/<id>-<slug>/` |
 | 9. Review | The developer opens a PR. A named reviewer reviews it; CI re-runs the checks | none (a human step) | CI | A reviewed merge, or not |
 
-Steps 7 and 8 need the WS8 guard patch: without it start.py exits 2 (the guard-owned core is missing) and build mode allows no source write.
+Steps 7 and 8 need a committed build package. Without one, start.py refuses and build mode allows no source write. This repo has none yet: DEMO-202's story, design and impact wait on the owner's confirmation.
 
 The `analyst` agent runs solution-design and story-impact; the `discovery-lead` agent runs story-refine; the `builder` agent runs implement-story. Design is optional for a story: story-impact without a `design.json` sizes the story as it did before WS10, its impact carries no `designOption`, and promotion works as before. WS2's DEMO-202 record on the register is such an impact.
 
@@ -231,18 +231,18 @@ Without `design.json`, `--option` is bad usage (exit 2), an impact that names a 
 
 ### Where it runs
 
-The WS10 owner patches (`ai-context/ws10/patches/`, applied by a human as `APPLY.md` there describes) are **not applied yet**. They stack on the WS11 owner patches, which are not applied either, so WS11 goes first.
+The WS10 owner patches (`ai-context/ws10/patches/`) are applied, on top of the WS11 ones. Under `tools/guard/policy.json`:
 
-| Command | Today (applied `tools/guard/policy.json`) | After the WS10 guard patch |
-| --- | --- | --- |
-| `build_index.py --from-config` | `normal`, `build`, `maintain`. The guard does not know the flag and falls back to the defaults, so it already models the command as writing `index/` | Modelled explicitly as writing `<checkout>/index/`; with `--root` or `--out` alongside, blocked |
-| `write_design.py`, `write_report.py`, `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern) | Unchanged; the guard also models `write_design.py`'s `design.json` and `design.md` in `ai-context/<id>-<slug>/` |
-| `validate_design.py`, `framework_config.py` run directly | `maintain` only (or a human terminal). `write_design.py` calls the validator in-process, so the skill's path does not need it | `normal`, `build`, `maintain` |
-| `onboard.py` | `maintain` only (or a human terminal) | Unchanged |
-| `promote.py --option` | `maintain` only; a human step by working rule | Unchanged |
-| `tools/config/`, `tools/onboard/`, `tools/designs/` test scripts | `maintain` only (or a human terminal) | Unchanged |
+| Command | Where it runs |
+| --- | --- |
+| `build_index.py --from-config` | `normal`, `build`, `maintain`. The guard models it as writing `<checkout>/index/`; with `--root` or `--out` alongside, it is blocked |
+| `write_design.py`, `write_report.py`, `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern). The guard models `write_design.py`'s `design.json` and `design.md` in `ai-context/<id>-<slug>/`; a `--root` other than `.`, or a `/`, `\` or `..` in `--id` or `--slug`, blocks |
+| `validate_design.py`, `framework_config.py` run directly | `normal`, `build`, `maintain` |
+| `onboard.py` | `maintain` only (or a human terminal) |
+| `promote.py --option` | `maintain` only; a human step by working rule |
+| `tools/config/`, `tools/onboard/`, `tools/designs/` test scripts | `maintain` only (or a human terminal) |
 
-In CI today the workflow runs none of the new WS10 test scripts (the existing impact and eval test scripts it already runs hold WS10 cases). After the WS10 CI patch, `guard-and-lint` builds the index with `--from-config` before `validate.py --all` (the `--from-config` index covers only the configured `sourceRoot`, `demo/org` here; neither `--all` check reads it, so confirmed records do not depend on it), then runs `tools/config/test_framework_config.py`, `tools/onboard/test_onboard.py`, `tools/designs/test_validate_design.py`, `tools/designs/test_write_design.py` and `validate_design.py --all`. Its `paths` filter gains `.ai-framework.json`, and the `impact-checks` job builds its index from the base branch's `sourceRoot` (through `framework_config.py source-root --root base`) instead of a hard-coded `demo/org`.
+In CI, `guard-and-lint` builds the index with `--from-config` before `validate.py --all` (the `--from-config` index covers only the configured `sourceRoot`, `demo/org` here; neither `--all` check reads it, so confirmed records do not depend on it), then runs `tools/config/test_framework_config.py`, `tools/onboard/test_onboard.py`, `tools/designs/test_validate_design.py`, `tools/designs/test_write_design.py` and `validate_design.py --all`. Its `paths` filter includes `.ai-framework.json`, and the `impact-checks` job builds its index from the base branch's `sourceRoot` (through `framework_config.py source-root --root base`), falling back to `demo/org` when the base branch has no `framework_config.py`.
 
 ### Honest limits
 
@@ -319,14 +319,14 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 ### Where the checks run
 
-The WS1 and WS2 owner patches are applied (`3fb9e73`), so the following holds today.
+The WS1 and WS2 owner patches are applied (`3fb9e73`), and the WS10 CI patch after them, so the following holds.
 
 - **On a laptop.** The left check runs whenever story-impact writes. The writer calls the register in-process. `register.py` is read-only, so it runs in every mode. `validate.py`, `render_register.py` and `pr_check.py` are framework scripts (`normal`, `build`, `maintain`). `promote.py` is `maintain`-only.
 - **In CI.** `.github/workflows/framework-ci.yml`:
   - Its `paths` filter includes `demo/**` and `impacts/**`.
   - `guard-and-lint` runs every impact test script and then `validate.py --all`.
   - The `impact-checks` job runs on pull requests:
-    - It builds the index from the head's `demo/org`.
+    - It builds the index from the head's checkout at the base branch's `sourceRoot` (`demo/org` here).
     - It runs the base branch's `pr_check.py` with `--root .` and `--base-root base`, so the check code, settings and register all come from base. Only the PR that first adds `pr_check.py` runs its own copy, and its result says so.
     - It writes the result to the step summary and posts or edits one PR comment.
     - It exits with `pr_check.py`'s code.
@@ -334,7 +334,7 @@ The WS1 and WS2 owner patches are applied (`3fb9e73`), so the following holds to
 ### Honest limits
 
 - **Identity is the `api` string only.** Two records match only when they spell an API name the same way. Two components of different types with one name count as one. A renamed component shows no overlap with its old name.
-- **The CI index root is `demo/org` until the WS10 CI patch lands.** The applied `impact-checks` job hard-codes the demo org. `sourceRoot` in `.ai-framework.json` exists now (see "Day-one workflow"), and the unapplied WS10 CI patch makes the job read the base branch's `sourceRoot` instead. The workflow's `paths` filter also skips `pkg-*/` and `manifest/`.
+- **The CI index root comes from the base branch.** `impact-checks` reads `sourceRoot` from the base branch's `.ai-framework.json`, so a PR that moves the source to a folder the base branch lacks fails the job until that change is merged. The workflow's `paths` filter skips `pkg-*/` and `manifest/`, and an adopter whose `sourceRoot` lies outside the listed paths adds it there.
 - **The PR comment step is Unverifiable until a remote exists.** It is unclear whether `gh pr comment --edit-last` edits the right comment (it edits the token user's last comment, which may come from another workflow). Fork PRs, the `files` field of `gh pr list` and the base checkout are also unchecked. `APPLY.md` lists each one.
 - **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks `CaseTrigger`, `CaseTriggerHandler` and `CaseTriggerHandler_Test` as `review`, so its overlaps with DEMO-202 are watches.
 - **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because the register was empty when it was drafted.
@@ -435,17 +435,17 @@ It writes `impacts/<storyId>-<slug>/story.json` and a `story.md` re-rendered fro
 
 ### Where it runs
 
-The WS11 owner patches (`ai-context/ws11/patches/`, applied by a human as `APPLY.md` there describes) are **not applied yet**.
+The WS11 owner patches (`ai-context/ws11/patches/`) are applied. Under `tools/guard/policy.json`:
 
-| Command | Today (applied `tools/guard/policy.json`) | After the WS11 guard patch |
-| --- | --- | --- |
-| `query.py edge-seeds` | Every mode (`read_only`). The skill's `>` redirect into `ai-context/` is a write, which `advise` blocks | Unchanged |
-| `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern). The guard does not see where it writes; the script's own realpath check is the control | Unchanged, and the guard also models its output: `story.json` and `story.md` in `ai-context/<id>-<slug>/`. A `--root` other than `.`, or a `/`, `\` or `..` in `--id` or `--slug`, blocks |
-| `check_ac.py`, `validate_story.py` run directly | `maintain` only (or a human terminal). The skill's own path is admitted in `normal` anyway, because `write_story.py` calls both in-process (Inferred from the policy; no run has shown it) | `normal`, `build`, `maintain` |
-| `promote.py --story` | `maintain` only; a human step by working rule | Unchanged |
-| `tools/stories/test_*.py`, `tools/index/test_edge_seeds.py` | `maintain` only (or a human terminal) | Unchanged |
+| Command | Where it runs |
+| --- | --- |
+| `query.py edge-seeds` | Every mode (`read_only`). The skill's `>` redirect into `ai-context/` is a write, which `advise` blocks |
+| `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern). The guard models its output: `story.json` and `story.md` in `ai-context/<id>-<slug>/`. A `--root` other than `.`, or a `/`, `\` or `..` in `--id` or `--slug`, blocks. The script's own realpath check remains the control on the actual write |
+| `check_ac.py`, `validate_story.py` run directly | `normal`, `build`, `maintain`. `write_story.py` also calls both in-process |
+| `promote.py --story` | `maintain` only; a human step by working rule |
+| `tools/stories/test_*.py`, `tools/index/test_edge_seeds.py` | `maintain` only (or a human terminal) |
 
-In CI today the workflow runs none of the story checks. After the WS11 CI patch, `guard-and-lint` runs `tools/stories/test_check_ac.py`, `test_validate_story.py`, `test_write_story.py`, `tools/index/test_edge_seeds.py` and `validate_story.py --all`.
+In CI, `guard-and-lint` runs `tools/stories/test_check_ac.py`, `test_validate_story.py`, `test_write_story.py`, `tools/index/test_edge_seeds.py` and `validate_story.py --all`.
 
 ### Evals and what is proven
 
@@ -472,13 +472,13 @@ No case asserts an overlap: DEMO-201's natural seeds share no component with DEM
 
 WS8 lets the assistant write Salesforce code, but only inside one story's confirmed scope, only in `build` mode, and tests first. It is made of the build package (the agent's only input), deterministic rule checks with a baseline, test traceability, the guard's scope lock with tests-first, and the `implement-story` skill run by the `builder` agent. The design notes for the guard pieces are in `ai-context/ws8/guard-design-notes.md`, which is git-ignored workspace.
 
-**What runs today, and what waits.** The guard-owned pieces (the scope lock, tests-first, and the cores `tools/guard/trace_core.py` and `tools/guard/scope_core.py`) ship as the WS8 owner patch in `ai-context/ws8/patches/`, which is **not applied yet**. It is cut on top of the WS11 and WS10 patches, so the order is WS11, then WS10, then WS8 (`ai-context/ws8/patches/APPLY.md`). Today:
+**What runs, and what waits.** The guard-owned pieces (the scope lock, tests-first, and the cores `tools/guard/trace_core.py` and `tools/guard/scope_core.py`) came in the WS8 owner patch (`ai-context/ws8/patches/`), applied after the WS11 and WS10 ones. In this repo:
 
 - `check_rules.py` runs, and on the demo every finding is baselined (exit 0; the README shows the output).
 - `package.py` runs, but no package exists. `impacts/DEMO-202-round-robin-assignment/` holds only `impact.json` and `impact.md`, so `python3 tools/impacts/package.py DEMO-202` refuses with `story.json is missing; nothing written`. A package needs the owner to confirm the DEMO-202 story, design and impact first (`ai-context/OWNER-QUEUE.md` items 10 and 11 hold the demo and greenfield walkthroughs).
-- `check_trace.py` exits 2 with `trace core not found at <checkout>/tools/guard/trace_core.py; apply the WS8 guard patch (ai-context/ws8/patches)` (`tools/code/check_trace.py:42`). It exits 2 until the patch lands.
-- `start.py` exits 2 as well: first without a terminal, then because `tools/guard/scope_core.py` is missing (`tools/impacts/start.py:42-43`).
-- Build mode allows no source write. The applied guard has no scope (`active_scope` returns an empty list, `tools/guard/guard.py:368-369`), so a write under the source root is blocked with `no active story scope; run tools/impacts/start.py <storyId> (WS8)` (`tools/guard/guard.py:55`).
+- `check_trace.py DEMO-202` exits 2 with `check_trace: no impacts/DEMO-202-*/build-package.json under <repo>`, because there is no package.
+- `start.py` refuses without a terminal, and without a committed package.
+- So build mode writes no source here yet. With no `ai-context/.active-story`, a write under the source root is blocked with `no active story scope (ai-context/.active-story is absent); a human runs tools/impacts/start.py <storyId> in a terminal, adds the env lines it prints and restarts the session` (`tools/guard/guard.py:65-66`).
 
 ### The build package
 
@@ -492,7 +492,7 @@ It refuses (exit 1, naming the reason, nothing written) unless:
 - the impact's index stamp is not stale;
 - no component is a delete ("deletes are done by a human in this version");
 - `.ai-framework.json` names `sourceRoot` explicitly;
-- every derived path passes the guard's scope rules. `package.py` mirrors `scope_core`'s validation, and a drift check keeps the two equal. The fixtures are shared, in `tools/impacts/scope_fixtures.json`. `tools/impacts/test_package.py` compares `validate_package` with `tools/guard/scope_core.py` over them, and prints SKIP while the core is absent. The guard patch's tests run the same comparison against `package.py`, loaded by path.
+- every derived path passes the guard's scope rules. `package.py` mirrors `scope_core`'s validation, and a drift check keeps the two equal. The fixtures are shared, in `tools/impacts/scope_fixtures.json`. `tools/impacts/test_package.py` compares `validate_package` with `tools/guard/scope_core.py` over them, and would print SKIP if the core were absent. The guard's tests run the same comparison against `package.py`, loaded by path.
 
 **Stale** means the source root changed between the stamp commit and `HEAD`, with `impacts/` excluded so that committing the impact or the package never makes its own stamp stale. An unknown stamp commit also counts as stale.
 
@@ -541,15 +541,15 @@ A SOQL for-loop header, `for (X x : [SELECT ...])`, is not a loop body.
 - **Ids in companion files:** an id found only in a `-meta.xml` companion covers nothing. The core's `source_test_paths` decides which files those are, and the guard's tests-first rule uses the same helper.
 - **Exit codes:** 0 no gaps, 1 gaps or invalid criteria, 2 bad usage or nothing to check.
 
-**One implementation.** The matching lives in the guard-owned core, `tools/guard/trace_core.py`. It matches on word boundaries, so `AC-1` is not satisfied by `AC-10`. `check_trace.py` loads it by a path computed from its own location, compiling the source as the guard does (no `.pyc` is read or written), so this check and the guard's tests-first rule are the same code. There is deliberately no flag to load another core: build mode may run this script, and a selectable core would run unseen code. This reverses the spec's "the guard calls `check_trace.py`", because a guard that runs maintain-writable code is weaker. The spec amendment is queued for the spec owner (`ai-context/OWNER-QUEUE.md` item 9). The core ships in the WS8 guard patch, so **`check_trace.py` runs only after the guard patch is applied**. Until then it exits 2.
+**One implementation.** The matching lives in the guard-owned core, `tools/guard/trace_core.py`. It matches on word boundaries, so `AC-1` is not satisfied by `AC-10`. `check_trace.py` loads it by a path computed from its own location, compiling the source as the guard does (no `.pyc` is read or written), so this check and the guard's tests-first rule are the same code. There is deliberately no flag to load another core: build mode may run this script, and a selectable core would run unseen code. This reverses the spec's "the guard calls `check_trace.py`", because a guard that runs maintain-writable code is weaker. The spec amendment is queued for the spec owner (`ai-context/OWNER-QUEUE.md` item 9). The core sits under `tools/guard/`, so it changes only through a human-applied guard patch. Without it, `check_trace.py` exits 2.
 
 ### Entering build mode: `start.py`
 
 `python3 tools/impacts/start.py <storyId> [--root <repo>]` is run by a human in a real terminal. `--root` defaults to the checkout holding the script, never the current directory. On a fresh clone it creates the git-ignored `ai-context/` as a real folder, and it refuses a symlinked one. The story folder is found with `git ls-tree -d`, so a file with the folder's name does not count. It refuses without a TTY (exit 2: `run start.py yourself in a terminal; the assistant cannot start a build session`). It validates the package committed at `HEAD` through the guard's own reader, `tools/guard/scope_core.py`, and writes `ai-context/.active-story` (`<id>-<slug>`). Then it prints the env lines for the human to add under `env` in their git-ignored `.claude/settings.local.json`: `"AI_FRAMEWORK_MODE": "build"` and `"AI_FRAMEWORK_STORY": "<id>-<slug>"`. It never writes settings. The human then restarts Claude Code. Whether settings env reloads mid-session is not verified, so a restart is the safe instruction. To leave build mode, the human removes the lines and restarts. `.active-story` on its own has no effect outside build mode.
 
-### The scope lock and tests-first (after the WS8 guard patch)
+### The scope lock and tests-first
 
-This subsection describes the guard as the unapplied patch makes it (`ai-context/ws8/patches/APPLY.md`). In build mode, a write outside the mode's paths (`ai-context/`, `index/`) goes through these checks in order, and each failure has its own message:
+In build mode, a write outside the mode's paths (`ai-context/`, `index/`) goes through these checks in order, and each failure has its own message:
 
 1. **The source root.** The target must be under `sourceRoot`, read from `.ai-framework.json` at `HEAD`. A missing file or key means no source root, so no scoped writes; the guard deliberately does not use the `"."` default.
 2. **The active story.** `ai-context/.active-story` must exist.
@@ -562,11 +562,11 @@ This subsection describes the guard as the unapplied patch makes it (`ai-context
 
 The scope loads lazily, once per guard call. Git runs only after the tripwire's git-state check passes, and a git failure or timeout blocks.
 
-The patch also makes these changes:
+The guard also does the following:
 
-- `ai-context/.active-story` joins the always-blocked writes.
+- `ai-context/.active-story` is an always-blocked write.
 - Any `start.py` is modelled as writing `.claude/settings.local.json` and `.active-story`, so no mode lets the assistant run it.
-- `framework_scripts` gains anchored patterns for `check_rules.py [--from-config] [--compare-baseline <file>]` and `check_trace.py [--skeletons] <storyId>`, so build mode can run a package's `done[]`. `--write-baseline`, `--root`, `--source-root` and `--baseline` stay off that list.
+- `framework_scripts` holds anchored patterns for `check_rules.py [--from-config] [--compare-baseline <file>]` and `check_trace.py [--skeletons] <storyId>`, so build mode can run a package's `done[]`. `--write-baseline`, `--root`, `--source-root` and `--baseline` stay off that list.
 - `write_change.py` is modelled like the other skill writers: it writes `change.json` and `change.md` in `ai-context/<id>-<slug>/`, and a `--root` other than `.` blocks.
 
 ### implement-story and the builder
@@ -595,24 +595,22 @@ The skill's eval cases are in `framework/skills/implement-story/evals/cases/`. N
 
 ### Where it runs
 
-| Command | Today (applied `tools/guard/policy.json`) | After the WS8 guard patch |
-| --- | --- | --- |
-| `check_rules.py --from-config [--compare-baseline <file>]` | `maintain` only (its `tools/` script pattern), or a human terminal | `normal`, `build`, `maintain` (anchored pattern) |
-| `check_rules.py --write-baseline`, `--root`, `--source-root`, `--baseline` | `maintain` only | Unchanged |
-| `check_trace.py [--skeletons] <storyId>` | `maintain` only, and it exits 2 there (no core) | `normal`, `build`, `maintain`, and it runs |
-| `package.py` | `maintain` only; a maintainer step | Unchanged |
-| `start.py` | Matches `maintain`'s script pattern, but refuses without a terminal and without the core (exit 2) | No mode admits it; it is modelled as writing always-blocked paths. A human runs it in a terminal |
-| `write_change.py` | `normal`, `build`, `maintain` (the skill-scripts pattern). The guard does not model where it writes; the script's own realpath check is the control | Unchanged, and the guard models `change.json` and `change.md` in `ai-context/<id>-<slug>/`; a `--root` other than `.` blocks |
-| Source writes in `build` | None (`no active story scope`) | Only exact package-scope paths, tests first |
-| `tools/code/` and `tools/impacts/` test scripts | `maintain` only, or a human terminal | Unchanged |
+| Command | Where it runs (`tools/guard/policy.json`) |
+| --- | --- |
+| `check_rules.py --from-config [--compare-baseline <file>]` | `normal`, `build`, `maintain` (anchored pattern) |
+| `check_rules.py --write-baseline`, `--root`, `--source-root`, `--baseline` | `maintain` only |
+| `check_trace.py [--skeletons] <storyId>` | `normal`, `build`, `maintain` |
+| `package.py` | `maintain` only; a maintainer step |
+| `start.py` | No mode admits it; it is modelled as writing always-blocked paths. A human runs it in a terminal |
+| `write_change.py` | `normal`, `build`, `maintain` (the skill-scripts pattern). The guard models `change.json` and `change.md` in `ai-context/<id>-<slug>/`; a `--root` other than `.` blocks |
+| Source writes in `build` | Only exact package-scope paths, tests first; none without an active story |
+| `tools/code/` and `tools/impacts/` test scripts | `maintain` only, or a human terminal |
 
-**In CI today** the workflow runs none of the WS8 scripts. The WS8 CI patch adds these steps:
+**In CI** the workflow runs these steps:
 
 - **`guard-and-lint`:** `tools/code/test_check_trace.py`, `test_check_rules.py` and `test_write_change.py`, `tools/impacts/test_package.py` and `test_start.py`, the builder's trajectory eval on its sample run (`tools/evals/run_agent.py --log framework/agents/evals/builder-sample-run.jsonl --spec framework/agents/evals/builder.json`), then `check_rules.py --from-config`, each as its own step. The last one fails the job on a finding the committed baseline lacks.
 - **`impact-checks`:** the base branch's `check_rules.py` checks the PR's source root and compares the PR's baseline with the base copy. A new finding, or a baseline that grew, fails the job.
-- **`impact-checks`:** the base branch's `check_trace.py` runs for each build package the PR adds or changes. It is report-only, following the default-severity rule.
-
-The applied workflow runs neither `tools/impacts/test_package.py` nor `test_start.py`. The CI patch adds both.
+- **`impact-checks`:** the base branch's `check_trace.py` runs for each build package the PR adds or changes. It is report-only, following the default-severity rule. Whether it should fail the job, and whether it should also run when a PR touches a committed package's `scope` paths, is an open owner decision (`ai-context/ws8/patches/APPLY.md`, decision 2).
 
 ### Honest limits
 
@@ -667,7 +665,7 @@ These pieces show what the framework does and how far its output can be trusted.
 
 `tools/evals/consistency.py` compares N run folders of one eval case on the fields that must agree. It reads `impact.json`, `story.json`, `design.json` or `change.json` in each folder, and the file it finds sets the kind. It compares canonical values, so order never counts as drift. A run with no usable value for a field is invalid, and an invalid value never counts as agreement. It prints JSON, and with `--text` a grid plus a last line `k/N identical`. It always exits 0 after a comparison: it reports and never gates. The field list per kind is in its docstring (`tools/evals/consistency.py:2-51`).
 
-`tools/evals/run_all.py` produces those run folders. It runs one case N times with `claude -p` on a pinned model, into `ai-context/evals/<skill>-<case>/run-<i>/`, and writes a `run.json` beside each run with the model, the Claude Code version, the framework `VERSION` and the index stamp. It passes no permission-bypass flag. **The owner runs it.** It needs the owner's Claude Code account, and `claude` is on no assistant allowlist, so no live series has run in this repo and no consistency figure for a skill is published. The operator notes (a clean worktree per run, diff-names files for implement-story runs) are in `tools/evals/README.md`.
+`tools/evals/run_all.py` produces those run folders. It runs one case N times with `claude -p` on a pinned model, into `ai-context/evals/<skill>-<case>/run-<i>/`, and writes a `run.json` beside each run with the model, the Claude Code version, the framework `VERSION` and the index stamp. It passes no permission-bypass flag. **The owner runs it.** It needs the owner's Claude Code account, `claude` is on no assistant allowlist, and the guard refuses `tools/evals/run_all.py` itself in every mode (a case-insensitive negative lookahead in `maintain`'s script pattern), so no live series has run in this repo and no consistency figure for a skill is published. The operator notes (a clean worktree per run, diff-names files for implement-story runs) are in `tools/evals/README.md`.
 
 The runs committed in `demo/expected/consistency-fixture/` are hand-built to show the grid's format, with one run drifting on purpose. They are not output from any model run.
 
@@ -679,7 +677,7 @@ The runs committed in `demo/expected/consistency-fixture/` are hand-built to sho
 
 `demo/WALKTHROUGH.md` goes through the framework on the demo org, from the guard test to the scores against the answer key. It labels each step **deterministic (no Claude Code)**, **needs Claude Code** or **needs owner confirmations**, so a reader can see which outputs are fixed and which vary from run to run.
 
-`tools/demo/walkthrough_check.py` re-runs the deterministic steps and diffs each one against `demo/expected/<NN>-<step>.txt`. It normalises line endings, the repo path, temp folders, timestamps and commit hashes, and it sorts the consumers list by hop and api. It builds its index in a temp folder and writes nothing else. Exit 1 on any difference. `--show <step>` prints one step's normalised output, which a maintainer reviews and saves over the expected file after a deliberate change. It leaves out the guard test, which takes minutes and depends on the machine's shells. The Windows commands on the walkthrough page have not been run (Inferred).
+`tools/demo/walkthrough_check.py` re-runs the deterministic steps and diffs each one against `demo/expected/<NN>-<step>.txt`. It normalises line endings, the repo path, temp folders, timestamps and commit hashes, and it sorts the consumers list by hop and api. It builds its index in a temp folder and writes nothing else. Exit 1 on any difference. `--show <step>` prints one step's normalised output, which a maintainer reviews and saves over the expected file after a deliberate change. It leaves out the guard test, which takes minutes and depends on the machine's shells. CI runs it on Ubuntu and Windows, but no runner has run it yet, and the Windows commands on the walkthrough page have not been run (Inferred).
 
 ### Adoption guide
 
@@ -727,7 +725,7 @@ This repository is the working implementation of this design, in stdlib Python w
 | `tools/guard/guard.py` + `guard.sh` + `guard.cmd` | PreToolUse hook: reads the mode (advise, normal, build, maintain), blocks `sfdx`, org-changing `sf` commands, pushes, `curl`, writes outside the mode's paths (resolved through `..` and symlinks first, so neither can escape), Bash off the mode's allowlist and fetches off the allowlist; the tripwire blocks writes and non-read-only Bash while guard files or git config differ from `HEAD` or the baseline; the re-baseline flag is human-only | The offline guard of the control plane; `guard.sh` is the registered wrapper and exits 2 when no interpreter is found so the guard fails closed; `guard.cmd` is the Windows fallback |
 | `tools/guard/policy.json` | The guard's rules as data: blocked command patterns, the git subcommand allowlist, fetch allowlist, tripwire paths, always-blocked write paths, per-mode write paths and Bash groups, and the Salesforce CLI levels and allowed orgs | Rules change by a reviewed PR without editing code; an unreadable policy blocks |
 | `tools/guard/test_guard.py` | Synthetic hook payloads with required exit codes, the registered hook command run as written, a run with no Python on PATH (must exit 2), a throwaway repo with symlinks out of `ai-context/` (must be blocked), and tripwire and mode cases | Proves the control on each OS in CI and on each laptop at onboarding |
-| `tools/guard/scan_data.py` | Regex scan for Salesforce IDs, emails, credentialed URLs and session IDs, plus, today, NZ account and IRD formats and managed record names; pre-commit and CI. After the publish owner patch lands, the NZ and nCino patterns are opt-in packs named in `tools/guard/scan_packs.json` (default pack only as shipped), and `--tracked` scans only files git tracks | The data boundary as a control, not a request |
+| `tools/guard/scan_data.py` | Regex scan for Salesforce IDs, emails, credentialed URLs and session IDs (the default pack, always on), plus NZ account and IRD formats (`nz`) and managed record names (`ncino`) when `tools/guard/scan_packs.json` names those packs (default pack only as shipped); pre-commit and CI. `--tracked` scans only files git tracks, and CI uses it; `--all` walks the whole working tree. `test_scan_data.py` holds its tests | The data boundary as a control, not a request |
 | `tools/build/render.py` | Renders `CLAUDE.md`, `.github/instructions/*` (with `applyTo` from `scope`), both knowledge trees, a generated knowledge index with a computed "Used by" column, both skill trees (minus evals), both agent trees; `--check` fails CI on drift | One source tree, two generated outputs |
 | `tools/build/lint.py` | Knowledge: owner, date, method, no stored counts, staleness; skills: description ≤ 200 chars with when/not-for, input checklist, ≥ 3 eval cases; agents: tools listed, no persona prose | The multi-squad hygiene rules as code |
 | `tools/evals/run_skill.py` | Output assertions: references present, labels on every claim, banned phrases absent, verdict in set, every cited `path:line` exists; pass only if every run passes | Skill regression and variance, harness-independent |
@@ -751,7 +749,7 @@ This repository is the working implementation of this design, in stdlib Python w
 | `impacts/` | `squads.json` and the promoted records, one `<storyId>-<slug>/` folder each | The register, in git; records enter through an ordinary PR that a reviewer checks |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |
-| `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan, lint, render check, index build, agent eval; gitleaks job | Everything above, gated on every PR |
+| `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan (`--tracked`), lint, render check, index build, the tool tests and validators, the rule check, agent evals and the walkthrough check; the `impact-checks` and gitleaks jobs; and a manual-only `live-consistency` job that is not a required check | Everything above, gated on every PR |
 | `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys, and the empty greenfield skeleton (`demo/greenfield`); see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
 | `fixtures/` | Synthetic Account fields, Apex (one at API 45 and `without sharing`), a flow, a permission set, an LWC, three diff patches | Evals and CI never see real metadata |
 

@@ -57,6 +57,8 @@ The first published version. Each entry names what a workstream delivered; the c
 - The `story-refine` skill comes with a writer, eval cases and the `discovery-lead` agent.
 - A product owner confirms a refined story at promotion.
 - The index adds picklist values and deterministic edge seeds.
+- `validate_story.py` and `check_ac.py` join the `normal` and `build` allowlists, the guard models
+  where `write_story.py` writes, and CI runs the story checks.
 
 ### Starting points and the day-one workflow (WS10)
 
@@ -66,19 +68,32 @@ The first published version. Each entry names what a workstream delivered; the c
 - The `solution-design` skill always offers "do nothing" and recommends one option, and the
   `analyst` agent runs it.
 - `story-impact` assesses the recommended option, and promotion records the choice.
+- `validate_design.py` and `framework_config.py` join the `normal` and `build` allowlists, and the
+  guard models `build_index.py --from-config` and `write_design.py`'s outputs. CI runs the config,
+  onboarding and design checks, and `impact-checks` builds its index from the base branch's
+  `sourceRoot`.
 
 ### Scoped code writing (WS8)
 
 - `tools/code/check_rules.py` runs deterministic Apex rule checks against a baseline that only
   shrinks.
-- `tools/code/check_trace.py`, the test traceability check. Its guard-owned core ships in an
-  owner patch that is not yet applied, so until it lands the check exits 2.
-- `tools/impacts/package.py` makes a build package from a confirmed story, design and impact, and
-  `tools/impacts/start.py` is added. The build-session gating (a session starts only from a
-  committed package), the scope lock and tests-first in `build` mode ship in that same unapplied
-  owner patch; until it lands, `build` mode cannot write source.
+- `tools/code/check_trace.py`, the test traceability check. Its matching lives in the
+  guard-owned core, `tools/guard/trace_core.py`, which the guard's tests-first rule uses too.
+- `tools/impacts/package.py` makes a build package from a confirmed story, design and impact.
+  `tools/impacts/start.py`, run by a human in a terminal, starts a build session from a
+  committed package and writes `ai-context/.active-story`; the guard refuses it from the
+  assistant in every mode.
+- The guard's scope lock in `build` mode: a source write must be under the committed
+  `sourceRoot` and equal a path in the active story's build package committed at `HEAD`, with
+  `AI_FRAMEWORK_STORY` equal to `.active-story`. Tests first: code stays blocked until every
+  criterion id is named in a `scope.tests` file. The package is read by the guard-owned
+  `tools/guard/scope_core.py`. `check_rules.py --from-config` and `check_trace.py` join the
+  `normal` and `build` allowlists.
 - The `implement-story` skill and the `builder` agent, which write tests first inside the package
-  scope once the patch lands.
+  scope. No package is committed in this repo yet, so neither has run.
+- CI runs the code tests, the builder's sample eval and `check_rules.py --from-config` in
+  `guard-and-lint`. `impact-checks` fails on a new rule finding or a grown baseline, and runs the
+  trace check, report-only, for each changed build package.
 
 ### Consistency eval (WS3)
 
@@ -121,17 +136,17 @@ The first published version. Each entry names what a workstream delivered; the c
 - An owner role replaces the placeholder owner in the knowledge files.
 - `docs/DESIGN.md` loses its byline.
 
-### Publish owner patches (pending)
-
-These ship as owner patches that are not yet applied. Until a human applies them, none of the
-following is in effect.
+### Publish readiness (guard and CI)
 
 - **Scanner packs:** `tools/guard/scan_data.py` groups its patterns into packs. The default pack
   is always on; the `nz` and `ncino` packs apply only when `tools/guard/scan_packs.json` names
-  them, and it ships with the default pack only. A broken pack file exits 2.
-- **`scan_data.py --tracked`:** scans only the files git tracks. CI's real-data scan moves from
+  them, and it ships with the default pack only. A broken pack file exits 2. Its tests are in
+  `tools/guard/test_scan_data.py`.
+- **`scan_data.py --tracked`:** scans only the files git tracks. CI's real-data scan moved from
   `--all` to `--tracked`.
 - **The `run_all` refusal:** the guard refuses `tools/evals/run_all.py` in every mode, so only the
   owner starts live runs.
-- **CI:** the consistency, live-runner, measurement and walkthrough checks run in
-  `guard-and-lint`, and an optional `live-consistency` job can be started by hand.
+- **CI:** the scanner, consistency, live-runner, measurement and walkthrough checks run in
+  `guard-and-lint`, on Ubuntu and Windows. An optional `live-consistency` job can be started by
+  hand from the default branch. It has not run, and on a fresh runner the guard has no baseline,
+  so it is not expected to produce skill outputs; what to do with it is an owner decision.

@@ -51,18 +51,17 @@ must-call, must-not-call and must-block assertions over a tool-call log, run by
 python3 tools/build/render.py
 python3 tools/build/render.py --check
 python3 tools/build/lint.py
-python3 tools/guard/scan_data.py --all
+python3 tools/guard/scan_data.py --tracked
 ```
 
 Check each exit code directly. Don't pipe the data scan, because a pipe hides its exit code. A hit
 from the scan blocks the commit.
 
-Today `--all` walks the whole working tree, git-ignored folders such as `ai-context/` and `data/`
-included, and every pattern applies, the NZ and nCino ones included. Once the publish owner patch
-lands, use `python3 tools/guard/scan_data.py --tracked` instead: it scans only the files git
-tracks, as CI then does. From then on the NZ and nCino patterns apply only if
-`tools/guard/scan_packs.json` enables the `nz` or `ncino` pack; the patch ships it with the
-default pack only. Fix the data, and don't add an exemption for real-looking values.
+`--tracked` scans only the files git tracks, as CI does, so your git-ignored `ai-context/` and
+`data/` are never read. (`--all` walks the whole working tree, those folders included.) The
+default pack of patterns is always on. The `nz` and `ncino` packs apply only when
+`tools/guard/scan_packs.json` names them, and this repo ships that file with the default pack
+only. Fix the data, and don't add an exemption for real-looking values.
 Also run the tests for every tool you touch (`python3 tools/<area>/test_<name>.py`) and the skill's
 eval cases (`python3 tools/evals/run_skill.py`).
 
@@ -79,7 +78,6 @@ The assistant can never write `tools/guard/`, `.claude/settings.json`, `.github/
 under `ai-context/<work>/patches/`, with an `APPLY.md` that gives the order and the commands. A
 human applies them, reviews them and commits the guard files together, then runs the tripwire
 re-baseline from a terminal. Say in your PR description which owner patches it depends on or adds.
-
 ## Review rules
 
 - Every PR is reviewed by a human. CODEOWNERS routes `framework/`, `tools/` and the rendered trees

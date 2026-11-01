@@ -26,14 +26,25 @@ Where an output contains `<n>`, the number depends on the commit; this page neve
 - Run every command from the repo root in your own terminal. The guard screens the assistant's
   tool calls, not your shell.
 - **macOS and Linux** use `python3`. **Windows** uses `py -3` in PowerShell. The Windows commands
-  on this page are **Inferred, not yet run**: no Windows machine or CI run has executed them. CI
-  is planned to run the deterministic path on Ubuntu and Windows through an owner patch.
+  on this page are **Inferred, not yet run**: no Windows machine or CI run has executed them. The
+  CI workflow runs the deterministic path (`walkthrough_check.py`) on Ubuntu and Windows, but it
+  has not run on a GitHub runner yet.
 - **Version.** Run the walkthrough from a checkout of a release tag (`git checkout v<version>`,
   with the version from `VERSION`). No tag exists yet: the owner tags `v0.1.0` (queued in
   `ai-context/OWNER-QUEUE.md`). Until then, use the default branch.
 - **Owner items.** `ai-context/OWNER-QUEUE.md` and the `ai-context/<workstream>/patches/` folders
   named on this page are the maintainers' workspace. `ai-context/` is git-ignored, so they are not
   in your clone. They are named so you can see what an owner step waits on.
+- **Running these commands through the assistant.** In your own terminal every command runs. In
+  Claude Code, in the committed `normal` mode, the guard blocks some of them:
+  - `maintain` only: `tools/demo/walkthrough_check.py` (with or without `--show`),
+    `tools/demo/answer_to_draft.py`, `tools/evals/consistency.py`, `demo/measure/score.py`,
+    `tools/impacts/package.py` and `tools/impacts/promote.py`;
+  - no mode at all, so run them yourself: `tools/guard/guard.py --rebaseline`,
+    `tools/impacts/start.py` and `tools/evals/run_all.py`.
+
+  The rest (`test_guard.py`, `build_index.py`, `query.py`, `register.py`, `render_register.py`,
+  `run_skill.py`, `check_rules.py --from-config` and `check_trace.py <storyId>`) run in `normal`.
 
 ### The whole deterministic path in one command
 
@@ -301,15 +312,15 @@ browser.
 
 *needs Claude Code*, *needs owner confirmations*
 
-This step cannot run end to end today. It waits on two owner items in `ai-context/OWNER-QUEUE.md`:
+This step cannot run end to end yet. The guard's scope lock and tests-first are in place, but
+there is no build package to scope a session. That waits on an owner item in
+`ai-context/OWNER-QUEUE.md`:
 
-- **The WS8 guard patch** (item 8) brings the scope lock and tests-first. Without it, `build`
-  mode allows no source write at all.
 - **The DEMO-202 confirmations** (item 10). A build package is made only from a confirmed story,
-  design and impact. Today `python3 tools/impacts/package.py DEMO-202` refuses with
+  design and impact. For now `python3 tools/impacts/package.py DEMO-202` refuses with
   `./impacts/DEMO-202-round-robin-assignment/story.json is missing; nothing written`.
 
-Once both are done, the sequence is:
+Once that is done, the sequence is:
 
 1. A maintainer runs `python3 tools/impacts/package.py DEMO-202` (Windows:
    `py -3 tools/impacts/package.py DEMO-202`) and commits the package.
@@ -325,16 +336,18 @@ Once both are done, the sequence is:
 The skill writes test skeletons first, then code, only inside the package's scope, and records
 the change in `ai-context/DEMO-202-round-robin-assignment/change.json` and `change.md`. Eval case
 002 (`002-out-of-scope-needed`) covers a story that needs a file outside scope: the write is
-refused and the skill reports it. The patched guard's block message is not pasted here because the
-patch is not applied yet. Under the applied guard, a source write in `build` is refused with
-`no active story scope; run tools/impacts/start.py <storyId> (WS8)`.
+refused and the skill reports it. The guard's message for that case starts
+`write to '<path>' is not in the build package of the active story DEMO-202-round-robin-assignment;
+file a scope request`; no run has produced it here yet, because there is no package. Without a
+started session, a source write in `build` is refused with
+`no active story scope (ai-context/.active-story is absent)`.
 
 ## 7. Code checks pass; the change summary maps every file to the impact
 
 *deterministic (no Claude Code)* (the rule check) and *needs Claude Code*, *needs owner
 confirmations* (the trace check and the change summary)
 
-The Apex rule check runs today. On the demo, every finding is in the committed baseline, so it
+The Apex rule check runs now. On the demo, every finding is in the committed baseline, so it
 exits 0.
 
 macOS / Linux:
@@ -361,8 +374,8 @@ python3 tools/code/check_trace.py DEMO-202
 python3 tools/evals/run_skill.py --skill implement-story --case 001-assignment-on-insert --output ai-context/DEMO-202-round-robin-assignment/change.md --package impacts/DEMO-202-round-robin-assignment/build-package.json
 ```
 
-(Windows: the same lines with `py -3`.) Today `check_trace.py` exits 2 with
-`check_trace: trace core not found at <repo>/tools/guard/trace_core.py; apply the WS8 guard patch (ai-context/ws8/patches)`.
+(Windows: the same lines with `py -3`.) Until the package exists, `check_trace.py` exits 2 with
+`check_trace: no impacts/DEMO-202-*/build-package.json under <repo>`.
 
 ## 8. "Log into UAT and check": the guard blocks it
 
@@ -448,7 +461,7 @@ The `2/3 identical` line describes the fixture, not a skill. Full output:
 
 **Live runs.** `tools/evals/run_all.py` runs one eval case several times with `claude -p` on a
 pinned model and collects each run into `ai-context/evals/<skill>-<case>/run-<i>/`. It needs your
-Claude Code account, and the assistant cannot run it. See `tools/evals/README.md` for the operator
+Claude Code account, and the guard refuses it from the assistant in every mode. See `tools/evals/README.md` for the operator
 notes (a clean worktree per run, diff-names files for code runs).
 
 ```sh
@@ -458,8 +471,8 @@ python3 tools/evals/consistency.py ai-context/evals/story-impact-004-escalation-
 
 Each run folder's `run.json` records the model, the Claude Code version, the framework version
 and the index stamp. A consistency figure holds only for that combination. Golden outputs from
-the owner's runs belong in `evals/expected/`, which does not exist yet, so no model or Claude Code
-version is named here as reproducing them.
+the owner's runs belong in the skill's `evals/expected/` folder. No live run has produced any
+yet, so no model or Claude Code version is named here as reproducing them.
 
 ## 10. Scores against the answer key
 

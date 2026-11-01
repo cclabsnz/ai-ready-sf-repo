@@ -24,8 +24,9 @@ without a written reason in the PR.
 
 **Built, with tests:** the guard and its modes (WS0); the demo org, index and answer keys (WS1);
 the impact record, register and PR check (WS2); story refinement (WS11), starting points and
-solution design (WS10) and scoped code writing (WS8), whose guard and CI patches are not applied
-yet (so, for example, `build` cannot write source today); the consistency comparer and the live-run
+solution design (WS10) and scoped code writing (WS8), with their guard and CI patches applied
+(`build` writes source only once a story's package is committed and a human runs `start.py`, and
+no package exists here yet); the consistency comparer and the live-run
 collector (WS3); the measurement kit (WS4); the walkthrough with its deterministic check and the
 adoption guide (WS5); `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md`. `CHANGELOG.md` lists
 what each workstream delivered.
@@ -36,11 +37,17 @@ no guard; see "Copilot today" in `docs/DESIGN.md`.
 **Waits on the owner.** Human-only steps are tracked in the maintainers' owner queue,
 `ai-context/OWNER-QUEUE.md` (git-ignored workspace). In outline:
 
-- apply the owner patches in order: WS11, WS10, WS8, then the publish patches
-  (`ai-context/publish/patches/`), re-baselining the guard after each commit;
+- settle the owner decisions listed in `ai-context/ws8/patches/APPLY.md` and
+  `ai-context/publish/patches/APPLY.md` (the WS11, WS10, WS8 and publish patches themselves are
+  applied): `maintain` writing the source root, the CI trace check staying report-only,
+  `pnpm format` and `pnpm lint` in `build`, the `live-consistency` job, the `nz` and `ncino`
+  scan packs for this repo, and a schedule;
+- set up GitHub (private vulnerability reporting, branch protection with the required checks)
+  and run the full-history scans before the repository goes public;
 - confirm the DEMO-202 story, design and impact, build and commit its package, and start a
   build session, so the code walkthrough can run (and the same for the greenfield DEMO-301);
-- pick the plugin layout, place the drafted files and tag the first release;
+- pick the plugin layout, place the drafted files (LICENSE, CODEOWNERS, the plugin manifest,
+  the issue and PR templates) and tag the first release;
 - run the live `run_all.py` series and any skill runs under Claude Code; no model has run
   story-refine, solution-design or implement-story here yet.
 
@@ -48,9 +55,10 @@ no guard; see "Copilot today" in `docs/DESIGN.md`.
 
 ```sh
 python3 tools/guard/test_guard.py          # every case must pass
+python3 tools/guard/test_scan_data.py      # data scan: packs, --tracked, usage errors
 python3 tools/build/lint.py                # 0 errors
 python3 tools/build/render.py --check      # "rendered outputs are current"
-python3 tools/index/build_index.py --root fixtures --out ../index
+python3 tools/index/build_index.py --root fixtures --out ../index # writes index/ at the repo root
 python3 tools/index/test_index.py          # every path:line opens from the repo root
 python3 tools/index/test_parsers.py        # parsers build their own temp trees
 python3 tools/demo/test_generate_filler.py # filler is seeded and deterministic
@@ -77,9 +85,9 @@ python3 tools/onboard/test_onboard.py      # onboarding: existing and greenfield
 python3 tools/designs/test_validate_design.py # design.json schema
 python3 tools/designs/test_write_design.py # solution-design writer
 python3 tools/code/test_check_rules.py     # Apex rule checks and the baseline
-python3 tools/code/test_check_trace.py     # trace check CLI (stub core; real core once patched)
+python3 tools/code/test_check_trace.py     # trace check CLI, stub and real core
 python3 tools/impacts/test_package.py      # build package from confirmed records
-python3 tools/impacts/test_start.py        # start.py (stub core; real core once patched)
+python3 tools/impacts/test_start.py        # start.py, stub and real core
 python3 tools/code/test_write_change.py    # implement-story writer: change.json
 python3 tools/code/check_rules.py --from-config # exit 0: every demo finding is baselined
 python3 tools/impacts/validate.py --all    # every committed record validates; "ok": true
@@ -94,19 +102,16 @@ On Windows use `py -3`. If the guard test fails here, fix that before touching a
 The impact, story, config, onboarding, design, code, evals and measurement test scripts each end
 with `<n> passed, 0 failed`; some add a skipped count for symlink cases. `walkthrough_check.py`
 ends with `<n> passed, 0 failed` too, and builds its own index in a temp folder, so the fixtures
-build above does not affect it. `test_check_trace.py` and
-`test_start.py` also skip their real-core test until the WS8 guard patch puts
-`tools/guard/trace_core.py` and `scope_core.py` in place. In `normal` and `build` modes
+build above does not affect it. In `normal` and `build` modes
 the assistant cannot run the `tools/demo/`, `tools/impacts/`, `tools/stories/`, `tools/config/`,
-`tools/onboard/`, `tools/designs/` and `tools/code/` test scripts, `tools/index/test_edge_seeds.py`,
-the `tools/evals/` test scripts, the `demo/measure/` tests, or `walkthrough_check.py`; run them
-yourself or in `maintain`. `check_rules.py --from-config`
-also needs `maintain` or your terminal until the WS8 guard patch adds it to `normal` and `build`. `validate.py --all` runs in
-`normal`. `validate_story.py --all` joins `normal`'s allowlist only once the owner applies the
-WS11 guard patch (`ai-context/ws11/patches/APPLY.md`), and `validate_design.py --all` only once
-the owner applies the WS10 guard patch (`ai-context/ws10/patches/APPLY.md`); until then each
-needs `maintain` or your own terminal. The fixtures build above replaces `index/`; rebuild the
-demo index with `python3 tools/index/build_index.py --from-config` before using a skill.
+`tools/onboard/`, `tools/designs/` and `tools/code/` test scripts, `tools/guard/test_scan_data.py`,
+`tools/index/test_parsers.py`, `tools/index/test_edge_seeds.py`, the `tools/evals/` test scripts,
+the `demo/measure/` tests, `render.py` or `walkthrough_check.py`; run them yourself or in
+`maintain`. `check_rules.py --from-config`, `validate.py --all`, `validate_story.py --all` and
+`validate_design.py --all` run in `normal`, `build` and `maintain`. The fixtures build passes a
+relative `--out`, which `build_index.py` joins to `--root`, so it writes and replaces `index/` at
+the repo root; rebuild the demo index with `python3 tools/index/build_index.py --from-config`
+before using a skill.
 
 ## Working rules for this repo
 
@@ -138,10 +143,9 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
 - The WS2 owner patches (`ai-context/ws2/patches/`: `.gitignore`, the guard policy and its tests,
   and the CI workflow) went on after the WS1 patches; both sets are applied in `3fb9e73`.
 - The WS11 owner patches (`ai-context/ws11/patches/`: the guard policy, its cases and the guard's
-  modelling of `write_story.py`'s output, and the CI workflow) are **not applied yet**; apply them
-  as `ai-context/ws11/patches/APPLY.md` gives. Until they land, CI runs none of the story checks,
-  and the assistant runs `check_ac.py` and `validate_story.py` directly only in `maintain`.
-  The guard's `normal` allowlist already admits what story-refine calls: `query.py edge-seeds`
+  modelling of `write_story.py`'s output, and the CI workflow) are applied. CI runs the story
+  checks, and the assistant runs `check_ac.py` and `validate_story.py` in `normal`, `build` and
+  `maintain`. The guard's `normal` allowlist admits what story-refine calls: `query.py edge-seeds`
   (read-only) and its writer `write_story.py`, which runs both checks in-process. That is
   Inferred from the policy; no story-refine run has gone through the guard in `normal` yet.
 - Story promotion (`promote.py --story`) is the product owner's confirmation. The assistant never
@@ -150,12 +154,11 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
   hand-built draft fed through the writer, a smoke test of the writer, not of the skill.
 - The WS10 owner patches (`ai-context/ws10/patches/`: the guard policy, its cases, the guard's
   modelling of `build_index.py --from-config` and `write_design.py`'s output, and the CI
-  workflow) are **not applied yet**. They are cut on top of the WS11 patches, so apply WS11
-  first, then WS10 as `ai-context/ws10/patches/APPLY.md` gives. Until they land, CI runs none of
-  the new WS10 test scripts, and the assistant runs `validate_design.py` and `framework_config.py` directly
-  only in `maintain`. `write_design.py` already runs in `normal` (the skill-scripts pattern), and
-  `build_index.py --from-config` already runs there too: the guard models it as writing `index/`.
-  `onboard.py` stays `maintain`-only after the patch; run it in your own terminal.
+  workflow) are applied. CI runs the WS10 test scripts, and the assistant runs
+  `validate_design.py` and `framework_config.py` in `normal`, `build` and `maintain`.
+  `write_design.py` runs in `normal` (the skill-scripts pattern), and so does
+  `build_index.py --from-config`, which the guard models as writing `index/`; with `--root` or
+  `--out` alongside it is blocked. `onboard.py` is `maintain`-only; run it in your own terminal.
 - The day-one workflow (refine, understand, design, assess, confirm) is in `docs/DESIGN.md`,
   "Day-one workflow". No model has run solution-design, or story-impact on a design option,
   under Claude Code yet; both are shown only by writer smoke tests. The owner's choice of option
@@ -166,10 +169,15 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
 - The WS8 owner patches (`ai-context/ws8/patches/`: the build-mode scope lock and tests-first,
   the guard-owned cores `tools/guard/trace_core.py` and `scope_core.py`, `.active-story` always
   blocked, the modelling of `start.py` and `write_change.py`, the `check_rules`/`check_trace`
-  allowlist patterns, their cases, and the CI steps) are **not applied yet**. They are cut on top
-  of WS11 and WS10, so the order is WS11, then WS10, then WS8, as
-  `ai-context/ws8/patches/APPLY.md` gives, which also lists the owner decisions. Until WS8 lands,
-  `check_trace.py` and `start.py` exit 2 (no core) and `build` allows no source write.
+  allowlist patterns, their cases, and the CI steps) are applied. `ai-context/ws8/patches/APPLY.md`
+  lists the owner decisions still open. `check_trace.py` and `start.py` run, but with no committed
+  package in this repo, `check_trace.py DEMO-202` exits 2 (no build package) and `build` writes no
+  source.
+- The publish owner patches (`ai-context/publish/patches/`: scanner packs and
+  `tools/guard/scan_packs.json`, `scan_data.py --tracked`, the guard's refusal of
+  `tools/evals/run_all.py` in every mode, and the CI steps and the manual `live-consistency` job)
+  are applied. The owner decisions on the live job, the scan packs for this repo and a schedule
+  are open (`ai-context/publish/patches/APPLY.md`).
 - `tools/impacts/package.py` and `start.py` are human steps: a maintainer builds the package
   from a confirmed story, design and impact and commits it; a human runs `start.py` in a real
   terminal and pastes the env lines. No package exists until the owner confirms DEMO-202's story,
@@ -180,7 +188,9 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
   every write and non-read-only command. The guard blocks Bash lines that run it, and it also
-  refuses to run without a terminal.
+  refuses to run without a terminal. To confirm the baseline is current, have the assistant run
+  `git status`: the guard refuses every git command while the baseline is missing or stale, so a
+  `git status` that runs means it matches. The guard has no separate status option.
 - The guard runs on every tool call, MCP tools included (see "What the guard guarantees" in
   `docs/DESIGN.md`). Any tool other than Bash that takes a `command` is blocked in every mode.
 - The guard checks an internal 7-second deadline and blocks itself once past it; a cap of 64 glob
@@ -244,8 +254,7 @@ demo index with `python3 tools/index/build_index.py --from-config` before using 
       product-owner confirmation through `promote.py --story`.
 - [ ] `story-refine`: run it under Claude Code on each of its eval cases and record the results;
       today only the writer smoke test exists.
-- [x] `tools/code/check_trace.py` (WS8): built; it runs only after the WS8 guard patch, which
-      ships its core, `tools/guard/trace_core.py`.
+- [x] `tools/code/check_trace.py` (WS8): built, with its core in `tools/guard/trace_core.py`.
 - [x] `implement-story` and the `builder` agent (WS8): skill, `write_change.py`, eval cases 001,
       002 and 003, `framework/agents/evals/builder.json`.
 - [ ] `implement-story`: run it through the builder under Claude Code on each eval case once the

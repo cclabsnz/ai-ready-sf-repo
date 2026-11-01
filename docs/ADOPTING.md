@@ -126,7 +126,7 @@ python3 tools/onboard/onboard.py --starting-point existing --owner-role "<role>"
 python3 tools/build/render.py
 python3 tools/build/lint.py
 python3 tools/guard/test_guard.py
-python3 tools/guard/scan_data.py --all
+python3 tools/guard/scan_data.py --tracked
 python3 tools/guard/guard.py --rebaseline
 ```
 
@@ -141,13 +141,13 @@ python3 tools/guard/guard.py --rebaseline
 - **`render.py`** regenerates `CLAUDE.md`, `.claude/` and `.github/` from your `framework/`.
   Edit `framework/` only, never the rendered trees.
 - **The test must end with `<n> passed, 0 failed`.**
-- **`scan_data.py --all`** scans the whole working tree. Today every pattern applies, the NZ
-  bank-account and IRD formats and the nCino `LLC_BI__` record names included. Once the publish
-  owner patch is in the tag you copy, use `scan_data.py --tracked` (only the files git tracks),
-  and the NZ and nCino patterns become opt-in packs: they apply only if
-  `tools/guard/scan_packs.json` names `nz` or `ncino`, and the shipped file names the default
-  pack only. That file sits under `tools/guard/`, so enabling a pack is a guard change: review it
-  like one, commit it, and re-baseline.
+- **`scan_data.py --tracked`** scans only the files git tracks, as CI does, so git-ignored
+  exports are never read; `--all` walks the whole working tree. Check its exit code; don't pipe
+  it. The default pack is always on. The NZ bank-account and IRD formats and the nCino
+  `LLC_BI__` record names are opt-in packs: they apply only if `tools/guard/scan_packs.json`
+  names `nz` or `ncino`, and the shipped file names the default pack only. That file sits under
+  `tools/guard/`, so enabling a pack is a guard change: review it like one, commit it, and
+  re-baseline.
 - **Run the re-baseline yourself,** in a real terminal, before opening Claude Code in the repo.
 
 ## 2. The policy file and modes
@@ -168,7 +168,7 @@ Change it only through a reviewed PR. The assistant cannot write `tools/guard/`.
 | --- | --- | --- | --- |
 | `advise` | Everyone, when the kill switch is pulled | Nothing; read-only commands only | Committed `.claude/settings.json` |
 | `normal` | Every squad member (the committed default) | `ai-context/`, `index/` | Committed `.claude/settings.json` |
-| `build` | A developer on one story | `normal`, plus the story's build-package scope once the WS8 guard patch is in your copy | A personal `.claude/settings.local.json`, after `start.py` |
+| `build` | A developer on one story | `normal`, plus the exact paths in the story's committed build package, tests first | A personal `.claude/settings.local.json`, after `start.py` |
 | `maintain` | A framework maintainer | Framework paths (`framework/`, `tools/` except `tools/guard/`, `docs/`, rendered trees, ...) | A personal `.claude/settings.local.json` |
 
 - **The committed mode is the ceiling.** A committed `advise` always wins. A local mode applies
@@ -240,7 +240,7 @@ GitHub renames settings from time to time).
 | Require approval of the most recent reviewable push | On |
 | Require status checks to pass before merging | On |
 | Require branches to be up to date before merging | On |
-| Required status checks | The jobs of `.github/workflows/framework-ci.yml`: `guard-and-lint (ubuntu-latest)`, `guard-and-lint (windows-latest)`, `impact-checks`, `secrets`, plus your org-facing jobs (section 6) |
+| Required status checks | The pull-request jobs of `.github/workflows/framework-ci.yml`: `guard-and-lint (ubuntu-latest)`, `guard-and-lint (windows-latest)`, `impact-checks`, `secrets`, plus your org-facing jobs (section 6). Not `live-consistency`: it never runs on a pull request, so as a required check it would stay pending |
 | Require conversation resolution before merging | On |
 | Do not allow bypassing the above settings | On (administrators included) |
 | Allow force pushes | Off |
@@ -334,7 +334,9 @@ yours.
 
 Keep the framework's own jobs beside them. `guard-and-lint` runs on Ubuntu and Windows: the guard
 test, the data scan, lint, the render check, the index and impact tests. `impact-checks` runs the
-PR check from the base branch. `secrets` runs gitleaks. Drop the demo-only steps (the filler
+PR check from the base branch. `secrets` runs gitleaks. `live-consistency` is optional and
+manual only; on a fresh runner the guard has no baseline, so it is not expected to produce skill
+outputs. Drop the demo-only steps (the filler
 `--check`, the answer-key tests) and point the index build at your `sourceRoot`. The workflow is a
 control path: it changes only by a reviewed PR from a code owner.
 
@@ -375,9 +377,9 @@ that a human applies, in order:
 
 1. **One patch set per change,** under `ai-context/<workstream>/patches/`, with an `APPLY.md`
    that gives the order, the commands and the owner decisions.
-2. **Each patch is cut on the previous one.** In this repo the order is WS11, then WS10, then
-   WS8, then the publish patches. Each is cut against the ones before it, so they apply only in
-   that order.
+2. **Each patch is cut on the previous one.** In this repo WS11, WS10, WS8 and the publish
+   patches went on in that order. Each was cut against the ones before it, so they applied only
+   in that order.
 3. **The human applies, reviews and commits** the guard files and their tests together, from a
    prepared commit message (`git commit -F ...`).
 4. **Re-baseline** from a real terminal after each commit that touches the guard or git config.
