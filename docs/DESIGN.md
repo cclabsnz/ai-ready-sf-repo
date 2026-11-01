@@ -291,7 +291,7 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 ### Squads, identity and overlap kinds
 
-- **Squads:** `impacts/squads.json` (`{"version": 1, "squads": [...]}`) lists the squad names. A record's `squad` must be listed there. `CODEOWNERS` is human-owned and holds placeholder teams until WS9.
+- **Squads:** `impacts/squads.json` (`{"version": 1, "squads": [...]}`) lists the squad names. A record's `squad` must be listed there. `CODEOWNERS` is human-owned and names the maintainer on every control path.
 - **Component identity:** the `api` string alone, since index node ids are API names. `type` is shown but is not part of the key.
 - **Overlap kinds:**
   - A **conflict** is when both stories `new`, `modify` or `delete` the same component.

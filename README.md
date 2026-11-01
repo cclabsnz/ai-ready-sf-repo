@@ -132,8 +132,7 @@ workspace):
 - the confirmations the code walkthroughs need (items 10 and 11: confirm the DEMO-202 story,
   design and impact, run `package.py` and commit the package, then run `start.py` in a terminal;
   the greenfield walkthrough needs the same for DEMO-301);
-- picking the plugin layout, placing the drafted files (LICENSE, the corrected CODEOWNERS, the
-  plugin manifest, the issue and PR templates) and tagging the first release;
+- picking the plugin layout, placing the drafted plugin manifest and tagging the first release;
 - the live `run_all.py` series and any golden outputs from them.
 
 ## The day-one workflow

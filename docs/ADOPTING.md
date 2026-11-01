@@ -221,9 +221,8 @@ line, so the narrower control paths come after `/tools/`:
 ```
 
 `docs/DESIGN.md` ("What the guard guarantees") names the control paths: `tools/guard/`,
-`.claude/settings.json`, `.github/` and `CODEOWNERS`. This repo's own `CODEOWNERS` lacks
-`/.github/workflows/`, `/tools/guard/` and `/CODEOWNERS` today. The corrected version is drafted
-for the owner, so don't copy the current file as a model.
+`.claude/settings.json`, `.github/` and `CODEOWNERS`. This repo's own `CODEOWNERS` covers them,
+with a single maintainer; replace the handle with your guild team.
 
 ### Branch protection on your default branch
 

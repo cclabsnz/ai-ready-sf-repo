@@ -130,9 +130,9 @@ The first published version. Each entry names what a workstream delivered; the c
 ### Versioned install and public-repo readiness (WS7, WS9)
 
 - This changelog, `CONTRIBUTING.md` and `SECURITY.md` are added.
-- The Claude Code plugin manifest, LICENSE, CODEOWNERS and the issue and PR templates are
-  drafted for the owner to place. A plugin layout proposal is drafted too; the owner picks the
-  layout. Until then a full copy-in is the install route.
+- The MIT LICENSE, a CODEOWNERS covering the control paths, and issue and PR templates are
+  added. The Claude Code plugin manifest and a layout proposal are drafted for the owner, who
+  picks the layout; until then a full copy-in is the install route.
 - An owner role replaces the placeholder owner in the knowledge files.
 - `docs/DESIGN.md` loses its byline.
 

@@ -81,9 +81,10 @@ re-baseline from a terminal. Say in your PR description which owner patches it d
 
 ## Review rules
 
-- Every PR is reviewed by a human. CODEOWNERS routes `framework/`, `tools/` and the rendered trees
-  to the maintainers. Routing the remaining control paths (workflows, GitHub hooks, `impacts/`,
-  CODEOWNERS itself) waits on the maintainers placing the drafted CODEOWNERS.
+- Every PR is reviewed by a human. CODEOWNERS routes `framework/`, `tools/`, `impacts/`, the
+  rendered trees and the control paths (`tools/guard/`, workflows, GitHub hooks, CODEOWNERS
+  itself) to the maintainers. GitHub enforces it once branch protection requires code-owner
+  review on the remote.
 - Changes to the guard, settings, CI, GitHub hooks and CODEOWNERS need a second reviewer.
   Branch protection can enforce that only with at least two maintainers. Until this public
   repository has a second maintainer, the second-reviewer rule is not enforced here, and a change

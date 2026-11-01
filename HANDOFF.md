@@ -52,8 +52,7 @@ no guard; see "Copilot today" in `docs/DESIGN.md`.
   and run the full-history scans before the repository goes public;
 - confirm the DEMO-202 story, design and impact, build and commit its package, and start a
   build session, so the code walkthrough can run (and the same for the greenfield DEMO-301);
-- pick the plugin layout, place the drafted files (LICENSE, the corrected CODEOWNERS, the plugin
-  manifest, the issue and PR templates) and tag the first release;
+- pick the plugin layout, place the drafted plugin manifest and tag the first release;
 - run the live `run_all.py` series and any skill runs under Claude Code; no model has run
   story-refine, solution-design or implement-story here yet.
 
