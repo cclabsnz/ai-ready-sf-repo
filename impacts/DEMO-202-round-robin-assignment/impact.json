@@ -1,12 +1,33 @@
 {
+  "chosenOption": "OPT-2",
   "components": [
+    {
+      "api": "CaseTrigger",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:1",
+      "hop": 0,
+      "impact": "High",
+      "path": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger",
+      "type": "ApexTrigger"
+    },
+    {
+      "api": "CaseTriggerHandler",
+      "changeType": "modify",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:13",
+      "hop": 0,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls",
+      "type": "ApexClass"
+    },
     {
       "api": "CaseAssignmentService",
       "changeType": "modify",
       "confidence": "Confirmed",
-      "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:1",
+      "evidence": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls:10",
       "hop": 0,
-      "impact": "Medium",
+      "impact": "High",
       "path": "demo/org/force-app/main/default/classes/CaseAssignmentService.cls",
       "type": "ApexClass"
     },
@@ -21,16 +42,6 @@
       "type": "ApexClass"
     },
     {
-      "api": "CaseTriggerHandler",
-      "changeType": "modify",
-      "confidence": "Confirmed",
-      "evidence": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls:16",
-      "hop": 1,
-      "impact": "Medium",
-      "path": "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls",
-      "type": "ApexClass"
-    },
-    {
       "api": "CaseTriggerHandler_Test",
       "changeType": "modify",
       "confidence": "Confirmed",
@@ -41,44 +52,134 @@
       "type": "ApexClass"
     },
     {
-      "api": "CaseTrigger",
+      "api": "Round_Robin_State__c",
+      "changeType": "new",
+      "confidence": "Inferred",
+      "evidence": null,
+      "hop": null,
+      "impact": "Medium",
+      "path": null,
+      "type": "CustomObject"
+    },
+    {
+      "api": "Round_Robin_State__c.Last_Assigned_User__c",
+      "changeType": "new",
+      "confidence": "Inferred",
+      "evidence": null,
+      "hop": null,
+      "impact": "Low",
+      "path": null,
+      "type": "CustomField"
+    },
+    {
+      "api": "Service_Agent",
       "changeType": "modify",
+      "confidence": "Inferred",
+      "evidence": "demo/org/force-app/main/default/permissionsets/Service_Agent.permissionset-meta.xml:49",
+      "hop": 1,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/permissionsets/Service_Agent.permissionset-meta.xml",
+      "type": "PermissionSet"
+    },
+    {
+      "api": "Team_Lead",
+      "changeType": "modify",
+      "confidence": "Inferred",
+      "evidence": "demo/org/force-app/main/default/permissionsets/Team_Lead.permissionset-meta.xml:49",
+      "hop": 1,
+      "impact": "Medium",
+      "path": "demo/org/force-app/main/default/permissionsets/Team_Lead.permissionset-meta.xml",
+      "type": "PermissionSet"
+    },
+    {
+      "api": "Case",
+      "changeType": "review",
       "confidence": "Confirmed",
-      "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:2",
-      "hop": 2,
+      "evidence": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:1",
+      "hop": 0,
       "impact": "Medium",
       "path": "demo/org/force-app/main/default/triggers/CaseTrigger.trigger",
-      "type": "ApexTrigger"
+      "type": "CustomObject"
+    },
+    {
+      "api": "Case.Premium_Support",
+      "changeType": "review",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/objects/Case/recordTypes/Premium_Support.recordType-meta.xml:2",
+      "hop": 1,
+      "impact": "Low",
+      "path": "demo/org/force-app/main/default/objects/Case/recordTypes/Premium_Support.recordType-meta.xml",
+      "type": "RecordType"
     },
     {
       "api": "Escalation_Agents",
       "changeType": "review",
-      "confidence": "Inferred",
-      "evidence": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:1",
+      "confidence": "Confirmed",
+      "evidence": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml:3",
       "hop": null,
       "impact": "Low",
       "path": "demo/org/force-app/main/default/queues/Escalation_Agents.queue-meta.xml",
       "type": "Queue"
+    },
+    {
+      "api": "CaseAccountSummaryController_Test",
+      "changeType": "review",
+      "confidence": "Inferred",
+      "evidence": "demo/org/force-app/main/default/classes/CaseAccountSummaryController_Test.cls:64",
+      "hop": null,
+      "impact": "Low",
+      "path": "demo/org/force-app/main/default/classes/CaseAccountSummaryController_Test.cls",
+      "type": "ApexClass"
     }
   ],
-  "confirmedBy": "Service Ops lead",
+  "confirmedBy": "Product Owner",
   "decisions": [
     {
-      "ownerRole": "Service Ops lead",
-      "text": "Where the round-robin position is stored so it survives between transactions: a custom setting, custom metadata or a field."
+      "ownerRole": "Product Owner",
+      "text": "Confirm OPT-2 as the chosen option at promotion (promote.py --option OPT-2). This record assesses the assistant's provisional recommendation only; nothing here is binding."
+    },
+    {
+      "ownerRole": "Product Owner",
+      "text": "Residual of OQ-11/AC-7: a creator who explicitly sets themselves as owner looks the same as the default owner, so that case is round-robin assigned. Accept this, as OQ-11's wording implies, or state otherwise."
+    },
+    {
+      "ownerRole": "Tech Lead",
+      "text": "How 'owner is still the creator' is tested in before insert (Inferred: CreatedById is not yet set there, so the check is OwnerId against UserInfo.getUserId()); new tests must cover explicit owner kept and default owner assigned."
+    },
+    {
+      "ownerRole": "Tech Lead",
+      "text": "Locking approach for the single Round_Robin_State__c row (SELECT ... FOR UPDATE or other) so concurrent saves do not read the same position, and its contention at peak volume."
+    },
+    {
+      "ownerRole": "Tech Lead",
+      "text": "CaseAccountSummaryController_Test.cls:64 inserts a Case with the default owner, so it runs assignment and depends on org Escalation_Agents membership: leave it, set agentPoolOverride, or set an explicit owner."
+    },
+    {
+      "ownerRole": "Salesforce Admin",
+      "text": "Which case creators beyond Service_Agent and Team_Lead (integration, automated users) create cases with the default owner and so need access to Round_Robin_State__c under user-mode DML."
+    },
+    {
+      "ownerRole": "Salesforce Admin",
+      "text": "Precedence against case assignment rules or Omni-Channel routing (OQ-10): assignment rules run after triggers and can overwrite the owner set in before insert."
+    },
+    {
+      "ownerRole": "Tech Lead",
+      "text": "Zero hits in index for Logger: whether to add a project logger for assignment failures, given the apex-no-system-debug rule."
     }
   ],
+  "designOption": "OPT-2",
   "provenance": {
-    "assistantVersion": "n/a",
+    "assistantVersion": "unknown",
     "frameworkVersion": "0.1.0",
     "hops": 2,
     "indexStamp": {
-      "builtAt": "2026-10-30T00:39:07+00:00",
-      "commit": "7432f06090ecc18cb9c4c4cbfe4ddd6430142cfd",
-      "indexVersion": "0.4.0",
+      "builtAt": "2026-11-01T21:14:07+00:00",
+      "commit": "01c0744d0f6ffc08b769c0bb102497ccd0c519c2",
+      "indexVersion": "0.5.0",
       "namespaces": []
     },
-    "model": "none (derived from reviewed answer key)"
+    "model": "claude-opus-5-5",
+    "recommendedBy": "assistant"
   },
   "schemaVersion": 1,
   "slug": "round-robin-assignment",
@@ -86,7 +187,13 @@
   "status": "in-flight",
   "storyId": "DEMO-202",
   "unknowns": [
-    "New cases are assigned on insert; today assign() only runs on before update (CaseTriggerHandler.cls:16).",
-    "Case assignment rules that run on insert in the target org may override the owner this story sets (Unverifiable here: org configuration, not metadata in this repo)."
+    "OQ-8 (deferred, Salesforce Admin): case volumes per day, at peak and in bulk loads; assignee visibility under org sharing settings.",
+    "OQ-10 (deferred, Salesforce Admin): whether case assignment rules, Omni-Channel or another tool sets the owner of new cases, and which wins.",
+    "Unverifiable (Salesforce Admin, with OQ-10): Web-to-Case and Email-to-Case set the default owner from org settings, not from the running user, so under AC-7 those cases may never match 'owner is still the creator' and may not be round-robin assigned.",
+    "Escalation_Agents queue membership is org data; no members in source, so the real pool size is unknown.",
+    "Linked parent feature text was not supplied; scope boundary taken from the confirmed story only.",
+    "No data-dictionary extract: the type of Round_Robin_State__c.Last_Assigned_User__c is assumed (User lookup) and capped at Inferred.",
+    "CaseTrigger active status is not in the index (story EC-1).",
+    "No managed-package namespace applies: index stamp namespaces is empty and no seed term maps to LLC_BI, nFORCE, nFUSE, nRetail or FinServ."
   ]
 }
