@@ -52,6 +52,16 @@ jobs:
         run: python tools/evals/test_run_skill.py
       - name: Committed impact records are valid
         run: python tools/impacts/validate.py --all
+      - name: Acceptance-criteria check tests
+        run: python tools/stories/test_check_ac.py
+      - name: Story validator tests
+        run: python tools/stories/test_validate_story.py
+      - name: Story writer tests
+        run: python tools/stories/test_write_story.py
+      - name: Index edge-seeds tests
+        run: python tools/index/test_edge_seeds.py
+      - name: Committed stories are valid
+        run: python tools/stories/validate_story.py --all
   impact-checks:
     runs-on: ubuntu-latest
     permissions:

@@ -1133,6 +1133,11 @@ def pnpm_targets(args):
 SCRIPT_FLAGS = {  # argparse options of the framework scripts that choose where they write: name -> takes a value
     "build_index.py": {"--root": True, "--out": True, "--version": False, "--help": False},
     "write_report.py": {"--id": True, "--slug": True, "--classified": True, "--root": True, "--help": False},
+    "write_story.py": {"--id": True, "--slug": True, "--draft": True, "--root": True, "--help": False},
+}
+STORY_OUTPUTS = {  # files the --id/--slug writers put in ai-context/<--id>-<--slug>/
+    "write_report.py": ("impact.json", "impact.md"),
+    "write_story.py": ("story.json", "story.md"),
 }
 
 
@@ -1170,8 +1175,10 @@ def script_targets(script, args):
     """(paths a framework script writes through its flags, False), or None when unknown. Other scripts: ([], False).
 
     build_index.py writes <--root>/<--out>/{metadata,inventory}.json. write_report.py writes
-    ai-context/<--id>-<--slug>/impact.md under --root, and runs <--root>/tools/index/query.py, so a --root other
-    than "." is unknown. query.py prints to stdout only.
+    ai-context/<--id>-<--slug>/{impact.json,impact.md} under --root, and runs <--root>/tools/index/query.py, so a --root other
+    than "." is unknown. write_story.py writes ai-context/<--id>-<--slug>/{story.json,story.md} under --root and
+    reads the index and register from it; a --root other than "." is unknown for it too. query.py prints to
+    stdout only.
     """
     name = script.replace("\\", "/").rsplit("/", 1)[-1]
     if name not in SCRIPT_FLAGS:
@@ -1193,7 +1200,7 @@ def script_targets(script, args):
     for i in vals["--id"]:
         for s in vals["--slug"]:
             d = os.path.join("ai-context", f"{i}-{s}")
-            out += [os.path.join(d, ""), os.path.join(d, "impact.md")]
+            out += [os.path.join(d, "")] + [os.path.join(d, f) for f in STORY_OUTPUTS[name]]
     return out, False
 
 

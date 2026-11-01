@@ -532,6 +532,13 @@ ALLOWLIST_CASES = [
     Case("impacts write blocked in normal", write("impacts/DEMO-1-a/impact.json"), 2),
     Case("impacts write blocked in build", write("impacts/DEMO-1-a/impact.json"), 2, env_mode="build"),
     Case("impacts write allowed in maintain", write("impacts/DEMO-1-a/impact.json"), 0, env_mode="maintain"),
+    # WS11 stories: validate_story and check_ac are framework scripts; query.py edge-seeds stays read-only;
+    # promote --story is maintain-only, like promote (the product owner confirms a story).
+    Case("check_ac allowed in normal", bash("python3 tools/stories/check_ac.py ai-context/DEMO-1-a/story.json"), 0),
+    Case("check_ac blocked in advise", bash("python3 tools/stories/check_ac.py ai-context/DEMO-1-a/story.json"), 2, env_mode="advise", stderr_has="ADVISE mode"),
+    Case("edge-seeds allowed in advise", bash("python3 tools/index/query.py edge-seeds Case"), 0, env_mode="advise"),
+    Case("story promote blocked in normal", bash("python3 tools/impacts/promote.py ai-context/X --story --confirmed-by lead"), 2, stderr_has=NOT_ON_LIST),
+    Case("story promote blocked in build", bash("python3 tools/impacts/promote.py ai-context/X --story --confirmed-by lead"), 2, env_mode="build", stderr_has=NOT_ON_LIST),
     # Salesforce CLI levels.
     Case("normal: sf --version allowed", bash("sf --version"), 0),
     Case("build: sf version allowed", bash("sf version"), 0, env_mode="build"),
@@ -981,6 +988,7 @@ DASH_O = {"ai-context/-o": "", "ai-context/s.json": "{}\n"}
 PRE_SH = {"ai-context/--pre=sh": "", "ai-context/evil": ""}
 DASH_DELETE = {"ai-context/-delete": ""}
 WRITE_REPORT = "python3 framework/skills/story-impact/scripts/write_report.py"
+WRITE_STORY = "python3 framework/skills/story-refine/scripts/write_story.py"
 BUILD_INDEX = "python3 tools/index/build_index.py"
 # Final review fix wave (C1, I1-I5, minors, extras). C2 has its own runner (check_walk_budget, check_deadline).
 FINAL_CASES = [
@@ -1034,6 +1042,9 @@ FINAL_CASES = [
     Case("I3: write_report --sl= abbreviation blocked", bash(f"{WRITE_REPORT} --id 1 --sl=../x --classified ai-context/c.json"), 2),
     Case("I3: write_report --root elsewhere blocked", bash(f"{WRITE_REPORT} --id 1 --slug x --classified ai-context/c.json --root ai-context/x"), 2),
     Case("I3: write_report ordinary run allowed", bash(f"{WRITE_REPORT} --id 1 --slug risk-rating --classified ai-context/c.json"), 0),
+    Case("write_story with --root elsewhere blocked", bash(f"{WRITE_STORY} --id 1 --slug x --draft ai-context/d.json --root ai-context/x"), 2),
+    Case("write_story slug traversal blocked", bash(f"{WRITE_STORY} --id 1 --slug ../../tools/guard --draft ai-context/d.json"), 2),
+    Case("write_story allowed in normal", bash(f"{WRITE_STORY} --id 1 --slug risk-rating --draft ai-context/d.json"), 0),
     Case("I3: query.py has no write flags", bash("python3 tools/index/query.py stamp --index tools/guard --root ."), 0),
     # I4: every tool goes through the guard.
     Case("I4: mcp write tool on tools/guard blocked", tool("mcp__filesystem__write_file", path="tools/guard/x"), 2),
@@ -1739,6 +1750,18 @@ def check_glob_scan():
     return ok
 
 
+def check_story_outputs():
+    """The guard lists every file the --id/--slug writers put in ai-context/<id>-<slug>/ (write_report.py:212-213)."""
+    g = guard_module()
+    d = os.path.join("ai-context", "1-x")
+    got = g.script_targets("framework/skills/story-impact/scripts/write_report.py",
+                           ["--id", "1", "--slug", "x", "--classified", "ai-context/c.json"])
+    want = ([os.path.join(d, ""), os.path.join(d, "impact.json"), os.path.join(d, "impact.md")], False)
+    good = got == want
+    print(f"[{'PASS' if good else 'FAIL'}] write_report impact.json path modelled{'' if good else f' {got} != {want}'}")
+    return good
+
+
 def check_hook_matcher():
     """I4: the hook runs for every tool, so MCP and future tools cannot skip the guard."""
     name = "settings hook matcher covers every tool"
@@ -1782,6 +1805,7 @@ def main():
     results.append(check_walk_budget())
     results.append(check_deadline())
     results.append(check_glob_scan())
+    results.append(check_story_outputs())
     results.append(check_rebaseline_cli())
     results.append(check_fsmonitor_not_run())
     results.append(report(NO_PYTHON_CASE, *run_without_python(NO_PYTHON_CASE)))

@@ -216,6 +216,7 @@
       "(python3?|py -3) tools/build/lint\\.py( .*)?",
       "(python3?|py -3) tools/guard/(test_guard|scan_data)\\.py( .*)?",
       "(python3?|py -3) tools/impacts/(validate|render_register|pr_check)\\.py( .*)?",
+      "(python3?|py -3) tools/stories/(validate_story|check_ac)\\.py( .*)?",
       "(python3?|py -3) framework/skills/[a-z0-9-]+/scripts/[a-z0-9_]+\\.py( .*)?"
     ],
     "dev_tooling": [
