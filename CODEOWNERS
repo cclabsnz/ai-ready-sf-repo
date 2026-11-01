@@ -1,8 +1,14 @@
-# Framework guild reviews every change to the AI framework and its rendered outputs.
-/framework/            @org/ai-framework-guild
-/tools/                @org/ai-framework-guild
-/.claude/              @org/ai-framework-guild
-/.github/instructions/ @org/ai-framework-guild
-/.github/agents/       @org/ai-framework-guild
-/.github/skills/       @org/ai-framework-guild
-/.github/hooks/        @org/ai-framework-guild
+# Maintainers review every change to the AI framework, its rendered outputs and its controls.
+# GitHub applies the LAST matching pattern, so the narrower control paths come after /tools/.
+/framework/            @cclabsnz
+/tools/                @cclabsnz
+/impacts/              @cclabsnz
+/.claude/              @cclabsnz
+/.github/instructions/ @cclabsnz
+/.github/agents/       @cclabsnz
+/.github/skills/       @cclabsnz
+/.github/knowledge/    @cclabsnz
+/.github/hooks/        @cclabsnz
+/.github/workflows/    @cclabsnz
+/tools/guard/          @cclabsnz
+/CODEOWNERS            @cclabsnz
