@@ -619,9 +619,9 @@ def case_shared_scope_fixtures_package_verdicts():
 def case_drift_package_vs_guard_scope_core():
     # The drift check behind "package.py mirrors scope_core's validation": over the shared fixtures, the
     # guard's own tools/guard/scope_core.py and package.validate_package give the same verdict. SKIP while the
-    # core is absent (the WS8 guard patch not applied); a present core without _validate fails.
+    # core is absent; a present core without _validate fails.
     if not os.path.isfile(SCOPE_CORE):
-        raise SkipTest("tools/guard/scope_core.py is absent (WS8 guard patch not applied)")
+        raise SkipTest("tools/guard/scope_core.py is absent")
     import types
     with open(SCOPE_CORE, "rb") as fh:
         source = fh.read()

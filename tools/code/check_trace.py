@@ -39,7 +39,7 @@ CHECKOUT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 DEFAULT_CORE = os.path.join(CHECKOUT, "tools", "guard", "trace_core.py")
 STORY_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-MISSING_CORE = "trace core not found at %s; apply the WS8 guard patch (ai-context/ws8/patches)"
+MISSING_CORE = "trace core not found at %s; it is missing from tools/guard/, and the guard owner must restore it"
 CORE_API = ("read_tests", "source_test_paths", "criteria_problem", "missing_criteria", "unknown_refs")
 
 

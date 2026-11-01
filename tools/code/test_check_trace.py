@@ -275,12 +275,12 @@ def case_json_shape_and_determinism():
 def case_missing_core_exits_2():
     root = make_root({TEST_A: "// AC-1\n", TEST_B: "// AC-2\n"})
     code, out, err = run([STORY, "--root", root], core=os.path.join(TMP, "no_core.py"))
-    assert code == 2 and "apply the WS8 guard patch (ai-context/ws8/patches)" in err, (code, out, err)
+    assert code == 2 and "missing from tools/guard/, and the guard owner must restore it" in err, (code, out, err)
     assert "Traceback" not in err, err
     # The real script with its own default core, while tools/guard/trace_core.py is absent.
     if not os.path.isfile(REAL_CORE):
         code, out, err = run_script([STORY, "--root", root])
-        assert code == 2 and "apply the WS8 guard patch (ai-context/ws8/patches)" in err, (code, out, err)
+        assert code == 2 and "missing from tools/guard/, and the guard owner must restore it" in err, (code, out, err)
         assert REAL_CORE in err and out == "", (out, err)
 
 
@@ -384,7 +384,7 @@ def case_symlinked_test_escaping_root_exits_2():
 
 def case_real_core_when_present():
     if not os.path.isfile(REAL_CORE):
-        raise Skip("tools/guard/trace_core.py is absent (WS8 guard patch not applied)")
+        raise Skip("tools/guard/trace_core.py is absent")
     # The AC-1 / AC-10 boundary, both ways. AC-1 is referenced (AC-10 does not hide it), so --skeletons passes;
     # AC-10 is not in a package holding AC-1 and AC-2, so the full check reports it as an unknown reference.
     root = make_root({TEST_A: "// AC-1 and AC-10\n", TEST_B: "// AC-2\n"})

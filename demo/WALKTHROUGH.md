@@ -40,8 +40,9 @@ Where an output contains `<n>`, the number depends on the commit; this page neve
   - `maintain` only: `tools/demo/walkthrough_check.py` (with or without `--show`),
     `tools/demo/answer_to_draft.py`, `tools/evals/consistency.py`, `demo/measure/score.py`,
     `tools/impacts/package.py` and `tools/impacts/promote.py`;
-  - no mode at all, so run them yourself: `tools/guard/guard.py --rebaseline`,
-    `tools/impacts/start.py` and `tools/evals/run_all.py`.
+  - no mode at all, so run them yourself: `git checkout v<version>` (`checkout` is not on the
+    guard's git allowlist), `tools/guard/guard.py --rebaseline`, `tools/impacts/start.py` and
+    `tools/evals/run_all.py`.
 
   The rest (`test_guard.py`, `build_index.py`, `query.py`, `register.py`, `render_register.py`,
   `run_skill.py`, `check_rules.py --from-config` and `check_trace.py <storyId>`) run in `normal`.

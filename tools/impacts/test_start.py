@@ -128,7 +128,7 @@ def case_refuses_two_folders():
 def case_core_missing_exits_2():
     root = make_repo()
     code, out, err = run([STORY, "--root", root], core_dir=tmpdir())
-    assert code == 2 and "apply the WS8 guard patch (ai-context/ws8/patches)" in err, (code, err)
+    assert code == 2 and "missing from tools/guard/, and the guard owner must restore it" in err, (code, err)
 
 
 def case_core_error_exits_1():
@@ -234,7 +234,7 @@ def case_core_loaded_without_bytecode():
 
 def case_real_core():
     if not os.path.isfile(REAL_CORE):
-        raise Skip("tools/guard/scope_core.py absent (guard patch not applied)")
+        raise Skip("tools/guard/scope_core.py is absent")
     root = make_repo()
     code, out, err = run([STORY, "--root", root])
     assert code in (0, 1) and "Traceback" not in err, (code, err)

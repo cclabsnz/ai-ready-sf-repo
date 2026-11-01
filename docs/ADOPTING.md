@@ -336,8 +336,12 @@ Keep the framework's own jobs beside them. `guard-and-lint` runs on Ubuntu and W
 test, the data scan, lint, the render check, the index and impact tests. `impact-checks` runs the
 PR check from the base branch. `secrets` runs gitleaks. `live-consistency` is optional and
 manual only; on a fresh runner the guard has no baseline, so it is not expected to produce skill
-outputs. Drop the demo-only steps (the filler
-`--check`, the answer-key tests) and point the index build at your `sourceRoot`. The workflow is a
+outputs. Drop the steps that need `demo/` or `fixtures/`, which you left out in section 1:
+the fixtures index build, the filler generator tests and the filler `--check`, the answer-key
+tests (`test_check_answers.py`, `test_answer_to_draft.py`), and the walkthrough check
+(`walkthrough_check.py`, `test_walkthrough_check.py`). Keep `demo/measure/test_score.py` and
+`test_timing.py` only if you copy `demo/measure/` (section 7). Point the index build at your
+`sourceRoot`. The workflow is a
 control path: it changes only by a reviewed PR from a code owner.
 
 ## 7. Measuring your own baseline

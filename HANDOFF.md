@@ -39,15 +39,21 @@ no guard; see "Copilot today" in `docs/DESIGN.md`.
 
 - settle the owner decisions listed in `ai-context/ws8/patches/APPLY.md` and
   `ai-context/publish/patches/APPLY.md` (the WS11, WS10, WS8 and publish patches themselves are
-  applied): `maintain` writing the source root, the CI trace check staying report-only,
-  `pnpm format` and `pnpm lint` in `build`, the `live-consistency` job, the `nz` and `ncino`
-  scan packs for this repo, and a schedule;
+  applied):
+  - `maintain` writing the source root;
+  - when the CI trace check runs (only on a changed `build-package.json`, or whenever a PR
+    touches a committed package's scope paths) and whether it fails the job;
+  - committed is not reviewed: an optional check that the package is identical at `origin/main`;
+  - always blocking `.active-story` also blocks a Bash write whose target is the `ai-context`
+    folder itself, in every mode; narrow it or keep it;
+  - `pnpm format` and `pnpm lint` in `build`;
+  - the `live-consistency` job, the `nz` and `ncino` scan packs for this repo, and a schedule;
 - set up GitHub (private vulnerability reporting, branch protection with the required checks)
   and run the full-history scans before the repository goes public;
 - confirm the DEMO-202 story, design and impact, build and commit its package, and start a
   build session, so the code walkthrough can run (and the same for the greenfield DEMO-301);
-- pick the plugin layout, place the drafted files (LICENSE, CODEOWNERS, the plugin manifest,
-  the issue and PR templates) and tag the first release;
+- pick the plugin layout, place the drafted files (LICENSE, the corrected CODEOWNERS, the plugin
+  manifest, the issue and PR templates) and tag the first release;
 - run the live `run_all.py` series and any skill runs under Claude Code; no model has run
   story-refine, solution-design or implement-story here yet.
 

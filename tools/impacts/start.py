@@ -40,7 +40,7 @@ DEFAULT_CORE_DIR = os.path.join(CHECKOUT, "tools", "guard")
 STORY_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 NO_TTY = "run start.py yourself in a terminal; the assistant cannot start a build session"
-MISSING_CORE = "scope core not found at %s; apply the WS8 guard patch (ai-context/ws8/patches)"
+MISSING_CORE = "scope core not found at %s; it is missing from tools/guard/, and the guard owner must restore it"
 
 
 class Refused(Exception):

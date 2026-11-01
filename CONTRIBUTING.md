@@ -78,6 +78,7 @@ The assistant can never write `tools/guard/`, `.claude/settings.json`, `.github/
 under `ai-context/<work>/patches/`, with an `APPLY.md` that gives the order and the commands. A
 human applies them, reviews them and commits the guard files together, then runs the tripwire
 re-baseline from a terminal. Say in your PR description which owner patches it depends on or adds.
+
 ## Review rules
 
 - Every PR is reviewed by a human. CODEOWNERS routes `framework/`, `tools/` and the rendered trees

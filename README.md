@@ -46,8 +46,8 @@ Six principles, in order of precedence:
   `impact.md` plus a draft record, `impact.json`) and `pr-reference-check` (invented or mistyped
   API names in a diff). story-refine, solution-design and story-impact make up the
   [day-one workflow](#the-day-one-workflow) up to confirmation; `implement-story` (tests first,
-  then code, inside a story's committed build package, run by the `builder` agent) continues it
-  into code once a story has a committed build package (see [Scoped code writing](#scoped-code-writing)).
+  then code, run by the `builder` agent) continues it into code once a story has a committed
+  build package (see [Scoped code writing](#scoped-code-writing)).
 - **Starting points** (`tools/onboard/`, `tools/config/`, WS10): `.ai-framework.json` names the
   repo's starting point (`existing` or `greenfield`) and its source root, read by one module,
   `tools/config/framework_config.py`. `build_index.py --from-config` indexes that source root.
@@ -114,18 +114,26 @@ workspace and not published in this repo, and in [docs/DESIGN.md](docs/DESIGN.md
 **Waits on the owner** (the maintainers' queue, `ai-context/OWNER-QUEUE.md`, in their git-ignored
 workspace):
 
-- the owner decisions listed with the applied guard and CI patches (`ai-context/ws8/patches/APPLY.md`
-  and `ai-context/publish/patches/APPLY.md`): whether `maintain` keeps write access to the
-  source root, whether the CI trace check stays report-only, whether `build` keeps
-  `pnpm format` and `pnpm lint`, what to do with the `live-consistency` job, whether this repo
-  enables the `nz` and `ncino` scan packs, and whether to add a schedule;
+- the owner decisions left open by the applied guard and CI patches:
+  - whether `maintain` keeps write access to the source root;
+  - when the CI trace check runs (only when a PR changes a `build-package.json`, or whenever a
+    PR touches a committed package's scope paths) and whether it fails the job instead of
+    reporting;
+  - whether "committed at `HEAD`" should be tightened toward "reviewed", for example by
+    requiring the package to be identical at `origin/main`;
+  - whether to narrow a side effect of always blocking `ai-context/.active-story`: a Bash write
+    whose target is the `ai-context` folder itself (`rm -r ai-context`, or `cp x ai-context/`
+    in `maintain`) is blocked in every mode;
+  - whether `build` keeps `pnpm format` and `pnpm lint`, which run the adopter's own scripts;
+  - what to do with the `live-consistency` job, whether this repo enables the `nz` and `ncino`
+    scan packs, and whether to add a schedule;
 - the GitHub settings (private vulnerability reporting, branch protection with the required
   checks) and the full-history scans before the repository goes public;
 - the confirmations the code walkthroughs need (items 10 and 11: confirm the DEMO-202 story,
   design and impact, run `package.py` and commit the package, then run `start.py` in a terminal;
   the greenfield walkthrough needs the same for DEMO-301);
-- picking the plugin layout, placing the drafted files (LICENSE, CODEOWNERS, the plugin
-  manifest, the issue and PR templates) and tagging the first release;
+- picking the plugin layout, placing the drafted files (LICENSE, the corrected CODEOWNERS, the
+  plugin manifest, the issue and PR templates) and tagging the first release;
 - the live `run_all.py` series and any golden outputs from them.
 
 ## The day-one workflow
@@ -920,7 +928,8 @@ python3 tools/guard/scan_data.py --tracked
 ```
 
 - **`--tracked`** scans only the files `git ls-files` lists, so git-ignored folders such as
-  `ai-context/` and `data/` are never read. Outside a git work tree, or without git, it exits 2,
+  `ai-context/` and `data/` are never read. It reads the work-tree copy of each tracked file, not
+  the staged or committed version, so a local edit is scanned as edited. Outside a git work tree, or without git, it exits 2,
   never "clean". Exit 0 is clean and exit 1 lists each hit as `<path>:<line>: <pattern>`.
 - **`--all`** walks the whole working tree under the current folder, skipping only `.git`,
   `node_modules` and any folder named `index`. On a maintainer's machine it also reads
@@ -1003,7 +1012,7 @@ mode, tests first. The full design is
 **What the guard enforces in `build`.** A write outside `ai-context/` and `index/` must be under
 the `sourceRoot` committed in `.ai-framework.json`, and must equal a path in the active story's
 build package committed at `HEAD`. `AI_FRAMEWORK_STORY` must equal `ai-context/.active-story`,
-which only `start.py` writes. Code stays blocked until every criterion id is named in a
+which `start.py` writes and the assistant can never write. Code stays blocked until every criterion id is named in a
 `scope.tests` file (tests first), and a hard-linked target is refused.
 
 **The rule check on the demo.** Run it in your terminal, or in Claude Code in `normal`, `build`
@@ -1056,9 +1065,10 @@ baselined findings are in, and why, is in [demo/README.md](demo/README.md#signs-
 **What waits on the owner:**
 
 - the confirmations for the code walkthrough (`ai-context/OWNER-QUEUE.md` items 10 and 11);
-- the open decisions in `ai-context/ws8/patches/APPLY.md`: whether `maintain` keeps write access
-  to the source root, whether the CI trace check stays report-only, and whether `build` keeps
-  `pnpm format` and `pnpm lint`, which run the adopter's own scripts.
+- the open WS8 decisions, listed under "Waits on the owner" in [Status](#status): `maintain`
+  writing the source root, when the CI trace check runs and whether it fails the job, committed
+  versus reviewed packages, the `.active-story` side effect on writes to the `ai-context` folder
+  itself, and `pnpm format` and `pnpm lint` in `build`.
 
 **Honest limits.** Apex compiles and runs only in your org-connected CI; nothing here compiles
 it. The scope lock binds `build` mode only (`maintain` can already write `demo/`). Tests-first is

@@ -62,7 +62,7 @@ The guard has four modes, set by `AI_FRAMEWORK_MODE`. Committed `.claude/setting
 | Mode | Who | Writes allowed | Bash rule | Salesforce CLI level |
 | --- | --- | --- | --- | --- |
 | `advise` | Everyone, when the programme pulls the kill switch | None | Read-only commands only (`cat`, `ls`, `grep`, read-only `git`, `find` without actions, `query.py`). Redirects only to `/dev/null` or a file descriptor; no `$`, brace or command substitution | `none` |
-| `normal` | The default for every squad member | `ai-context/`, `index/` | Read-only commands plus the framework scripts (index build and query, evals, lint, `test_guard.py`, `scan_data.py`, skill scripts). Every write target the command makes must also be under the mode's write paths | `offline` |
+| `normal` | The default for every squad member | `ai-context/`, `index/` | Read-only commands plus the framework scripts (index build and query, `run_skill.py` and `run_agent.py`, lint, `test_guard.py`, `scan_data.py`, the impact, story and design validators, `check_ac.py`, `framework_config.py`, `check_rules.py --from-config`, `check_trace.py <storyId>`, skill scripts). Every write target the command makes must also be under the mode's write paths | `offline` |
 | `build` | A developer, by personal override (`tools/impacts/start.py` gives the session its story scope) | Same as `normal`, plus source writes to the exact paths in the active story's committed build package, tests first (see "Scoped code writing"). With no active story, no source write is allowed | `normal` plus dev tooling: `git add` and `git commit` (local only), `pnpm exec` prettier, eslint, jest and sfdx-lwc-jest, `pnpm lint`, `pnpm format`, `pnpm test` | `offline` |
 | `maintain` | A framework maintainer, by personal override | The framework paths listed under `maintain` in `policy.json` (for example `framework/`, `tools/`, `docs/`, `README.md`), plus `ai-context/` and `index/` | `normal` plus the maintainer allowlist (`maintainer_tools` in `policy.json`): `cp`, `mv`, `mkdir`, `rm`, `touch`, `rmdir`, `sed`, `diff`, `cmp`, `tar` in list mode, `git add` and `git commit`, `pnpm exec` prettier, eslint and jest, and Python scripts under `tools/`, `framework/`, `fixtures/`, `demo/` and `ai-context/` | `offline` |
 
@@ -319,7 +319,7 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 ### Where the checks run
 
-The WS1 and WS2 owner patches are applied (`3fb9e73`), and the later owner patches after them, so the following holds.
+The WS1 and WS2 owner patches are applied (`3fb9e73`), and so are the later owner patches, so the following holds.
 
 - **On a laptop.** The left check runs whenever story-impact writes. The writer calls the register in-process. `register.py` is read-only, so it runs in every mode. `validate.py`, `render_register.py` and `pr_check.py` are framework scripts (`normal`, `build`, `maintain`). `promote.py` is `maintain`-only.
 - **In CI.** `.github/workflows/framework-ci.yml`:
@@ -334,7 +334,7 @@ The WS1 and WS2 owner patches are applied (`3fb9e73`), and the later owner patch
 ### Honest limits
 
 - **Identity is the `api` string only.** Two records match only when they spell an API name the same way. Two components of different types with one name count as one. A renamed component shows no overlap with its old name.
-- **The CI index root comes from the base branch.** `impact-checks` reads `sourceRoot` from the base branch's `.ai-framework.json`, so a PR that moves the source to a folder the base branch lacks fails the job until that change is merged. The workflow's `paths` filter skips `pkg-*/` and `manifest/`, and an adopter whose `sourceRoot` lies outside the listed paths adds it there.
+- **The CI index root comes from the base branch.** `impact-checks` reads `sourceRoot` from the base branch's `.ai-framework.json` (`framework_config.py source-root --root base`, which exits 2 when that folder is missing from the base checkout, `tools/config/framework_config.py:98-99`). A PR that moves the source out of the base branch's `sourceRoot` is therefore checked at the old path until the move is merged. Inferred: the index and rule-check steps then look at a folder the PR no longer has, and `check_rules.py` returns no findings for a missing folder rather than failing (`tools/code/check_rules.py:263-264`), so such a PR gets no rule check from this job. The workflow's `paths` filter skips `pkg-*/` and `manifest/`, and an adopter whose `sourceRoot` lies outside the listed paths adds it there.
 - **The PR comment step is Unverifiable until a remote exists.** It is unclear whether `gh pr comment --edit-last` edits the right comment (it edits the token user's last comment, which may come from another workflow). Fork PRs, the `files` field of `gh pr list` and the base checkout are also unchecked. `APPLY.md` lists each one.
 - **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks `CaseTrigger`, `CaseTriggerHandler` and `CaseTriggerHandler_Test` as `review`, so its overlaps with DEMO-202 are watches.
 - **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because the register was empty when it was drafted.
@@ -441,7 +441,7 @@ The WS11 owner patches (`ai-context/ws11/patches/`) are applied. Under `tools/gu
 | --- | --- |
 | `query.py edge-seeds` | Every mode (`read_only`). The skill's `>` redirect into `ai-context/` is a write, which `advise` blocks |
 | `write_story.py` | `normal`, `build`, `maintain` (the `framework/skills/<skill>/scripts/` pattern). The guard models its output: `story.json` and `story.md` in `ai-context/<id>-<slug>/`. A `--root` other than `.`, or a `/`, `\` or `..` in `--id` or `--slug`, blocks. The script's own realpath check remains the control on the actual write |
-| `check_ac.py`, `validate_story.py` run directly | `normal`, `build`, `maintain`. `write_story.py` also calls both in-process |
+| `check_ac.py`, `validate_story.py` run directly | `normal`, `build`, `maintain`. `write_story.py` also calls both in-process (Inferred from the policy; no run has shown it) |
 | `promote.py --story` | `maintain` only; a human step by working rule |
 | `tools/stories/test_*.py`, `tools/index/test_edge_seeds.py` | `maintain` only (or a human terminal) |
 
