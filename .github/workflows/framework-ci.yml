@@ -75,6 +75,21 @@ jobs:
         run: python tools/designs/test_write_design.py
       - name: Committed designs are valid
         run: python tools/designs/validate_design.py --all
+      - name: Trace check tests
+        run: python tools/code/test_check_trace.py
+      - name: Apex rule check tests
+        run: python tools/code/test_check_rules.py
+      - name: Change writer tests
+        run: python tools/code/test_write_change.py
+      - name: Build package tests
+        run: python tools/impacts/test_package.py
+      - name: Build session start tests
+        run: python tools/impacts/test_start.py
+      - name: Agent trajectory eval (builder sample)
+        run: python tools/evals/run_agent.py --log framework/agents/evals/builder-sample-run.jsonl --spec framework/agents/evals/builder.json
+      # Exits 1 when the configured source root has a rule finding that tools/code/baseline.json does not hold.
+      - name: Apex rule check (baseline)
+        run: python tools/code/check_rules.py --from-config
   impact-checks:
     runs-on: ubuntu-latest
     permissions:
@@ -154,6 +169,60 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr comment "$PR_NUMBER" --edit-last --body-file pr-check.md || gh pr comment "$PR_NUMBER" --body-file pr-check.md
+      # check_trace runs for every build package this PR adds or changes. As with pr_check, the code comes from the
+      # base branch (check_trace.py and the guard-owned trace_core.py it loads beside itself) and only the data (the
+      # package and the test files) from the PR. Until the base branch has both, this PR's own copies run and the
+      # summary says so. Like every framework check by default, it reports and exits 0: a gap or an unusable
+      # package is a warning plus the JSON in the step summary. Failing the job on a gap is an owner decision.
+      - name: Trace check for changed build packages
+        run: |
+          code=0
+          checker=base/tools/code/check_trace.py
+          note=""
+          if [ ! -f "$checker" ] || [ ! -f base/tools/guard/trace_core.py ]; then
+            checker=tools/code/check_trace.py
+            note="Note: the trace check ran from this PR's own copy of check_trace.py and its core, because the base branch lacks one of them."
+          fi
+          grep -E '^impacts/[^/]+/build-package\.json$' changed.txt > packages.txt || true
+          : > trace.md
+          if [ -s packages.txt ] && [ -n "$note" ]; then printf '%s\n\n' "$note" >> trace.md; fi
+          while IFS= read -r pkg; do
+            if [ ! -f "$pkg" ]; then continue; fi
+            folder="$(dirname "$pkg")"
+            id="$(basename "$folder" | grep -oE '^[A-Z][A-Z0-9]*-[0-9]+' || true)"
+            printf '### Trace check: %s\n\n' "$pkg" >> trace.md
+            if [ -z "$id" ]; then
+              echo "The folder name holds no story id." >> trace.md
+              code=1
+              continue
+            fi
+            printf '```json\n' >> trace.md
+            python "$checker" "$id" --root . >> trace.md 2>> trace.err || code=1
+            printf '```\n\n' >> trace.md
+          done < packages.txt
+          if [ -s trace.err ]; then cat trace.err; fi
+          if [ -s trace.md ]; then cat trace.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "$code" != "0" ]; then echo "::warning::check_trace found gaps or an unusable build package; see the step summary"; fi
+      # The base branch's check_rules scans this PR's source root (read from the base config, as the index step does)
+      # with this PR's tools/code/baseline.json, and compares that baseline with the base branch's copy: a new finding
+      # or a grown baseline exits 1 and fails the job. --from-config is not used here, because it would scan the base
+      # checkout instead of the PR. --root is the PR workspace, so the relative --compare-baseline path resolves to
+      # the base checkout's file. Skipped while the base branch has no check_rules; the comparison is skipped while
+      # it has no baseline.
+      - name: Apex rule check against the base baseline
+        run: |
+          if [ ! -f base/tools/code/check_rules.py ]; then
+            echo "The base branch has no tools/code/check_rules.py yet; the rule check is skipped."
+            exit 0
+          fi
+          src=demo/org
+          if [ -f base/tools/config/framework_config.py ]; then src="$(python base/tools/config/framework_config.py source-root --root base)"; fi
+          if [ -f base/tools/code/baseline.json ]; then
+            python base/tools/code/check_rules.py --root . --source-root "$src" --compare-baseline base/tools/code/baseline.json
+          else
+            echo "The base branch has no tools/code/baseline.json; the baseline comparison is skipped."
+            python base/tools/code/check_rules.py --root . --source-root "$src"
+          fi
       - name: Exit with the check's code
         env:
           CODE: ${{ steps.check.outputs.code }}

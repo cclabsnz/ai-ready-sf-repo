@@ -11,6 +11,15 @@ Policy:
   - No network commands (git push, curl, wget, ssh) and no sfdx. The Salesforce CLI (sf) runs only at the
     mode's level (policy.json sf.mode_level), never an always_blocked command.
   - Writes only to the active mode's paths (policy.json), never to always_blocked_writes.
+  - Scope lock (modes with scoped_source, i.e. build): a write outside the mode's paths is allowed only under the
+    sourceRoot committed at HEAD in .ai-framework.json, and only to a path listed exactly in the active story's
+    committed build package (impacts/<id>-<slug>/build-package.json at HEAD; the story is ai-context/.active-story,
+    which must equal AI_FRAMEWORK_STORY). Tests first: a non-test path in scope stays blocked until every
+    criteria[].id is referenced by a scope.tests file that is not a -meta.xml companion (trace_core.source_test_paths;
+    at most MAX_TESTS_READ bytes are read). A hard-linked target
+    is refused. A missing config means no source root (never a "." default).
+    The package and config are read by tools/guard/scope_core.py, the references by tools/guard/trace_core.py, both
+    loaded by explicit path, lazily, and only once git_state_problem is clean.
   - Outside advise, every Bash command must also be on the mode's bash_allow list.
   - In every mode, a "$", a brace or a "[[:class:]]" bracket outside single quotes blocks the line: the shell
     could expand it into an option or path the guard never sees. So does a heredoc, whose body the quote masker
@@ -43,6 +52,7 @@ import shlex
 import subprocess
 import sys
 import time
+import types
 import urllib.parse
 
 # ---- Policy, mode and limits ----
@@ -52,10 +62,16 @@ MODES = ("advise", "normal", "build", "maintain")
 DEADLINE_SECONDS = 7
 DEADLINE = [time.monotonic() + DEADLINE_SECONDS]  # reset at the start of main()
 GIT_TIMEOUT = 3
-NO_SCOPE_MSG = "no active story scope; run tools/impacts/start.py <storyId> (WS8)"
+NO_SCOPE_MSG = ("no active story scope (ai-context/.active-story is absent); a human runs "
+                "tools/impacts/start.py <storyId> in a terminal, adds the env lines it prints and restarts the session")
+OUT_OF_SCOPE_MSG = ("write to {rel!r} is not in the build package of the active story {story}; file a scope request "
+                    "(ai-context/<id>-<slug>/scope-request.md), re-assess and re-promote")
+TESTS_FIRST_MSG = ("tests first: write to {rel!r} waits until every criterion has a referencing test in scope.tests; "
+                   "missing: {ids}")
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Found through __file__ because the wrapper runs us with -I (no cwd, no script dir on sys.path).
-POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.json")
+GUARD_DIR = os.path.dirname(os.path.abspath(__file__))
+POLICY_PATH = os.path.join(GUARD_DIR, "policy.json")
 
 
 def block(msg):
@@ -365,8 +381,148 @@ def rebaseline(start):
 
 # ---- Write paths ----
 
-def active_scope(root):
-    return []  # WS8 fills this from the active story
+ACTIVE_STORY = "ai-context/.active-story"
+MAX_ACTIVE_STORY = 256
+MAX_TESTS_READ = 16 * 1024 * 1024  # total bytes tests-first may read in one guard call
+CORES = {}
+
+
+def load_core(name):
+    """A guard-owned core, tools/guard/<name>.py, loaded by explicit path from this file's folder, never through
+    sys.path. The source is compiled here, so no .pyc is read or written: __pycache__ is git-ignored, and the
+    tripwire could not see a planted one. Raises on any failure; callers fail closed."""
+    if name not in CORES:
+        path = os.path.join(GUARD_DIR, name + ".py")
+        with open(path, "rb") as f:
+            source = f.read()
+        mod = types.ModuleType("guard_" + name)
+        mod.__file__ = path
+        exec(compile(source, path, "exec"), mod.__dict__)
+        CORES[name] = mod
+    return CORES[name]
+
+
+def under_source(rel, src):
+    """True when rel (repo-relative, a directory with a trailing "/") is the source root or below it."""
+    return src == "." or rel == src or rel.startswith(src + "/")
+
+
+class Scope:
+    """The active story's committed scope, loaded lazily and at most once per guard call.
+
+    Nothing runs until write_block_reason asks, which happens only for a target outside the mode's writes in a
+    scoped_source mode. Read-only commands and writes to ai-context/ never get here. Every git call (through
+    scope_core) waits until git_state_problem(root) is None, because git runs whatever a planted core.fsmonitor
+    names. sourceRoot and the package come from HEAD; work-tree copies of either are ignored.
+    """
+
+    def __init__(self, root, story_env):
+        self.root = root
+        self.story_env = (story_env or "").strip()
+        self._src = self._pkg = self._missing = None
+
+    def _git_untrusted(self):
+        problem = git_state_problem(self.root)
+        if problem is None:
+            return None
+        if problem == "config":
+            return "the build scope is not read: " + CONFIG_MSG
+        if problem == "baseline":
+            return "the build scope is not read: " + REBASELINE_MSG
+        return "cannot verify .git (not a git checkout?), so the build scope is not read; failing closed."
+
+    def source_root(self):
+        """(sourceRoot relative to root, None) or (None, reason)."""
+        if self._src is None:
+            reason = self._git_untrusted()
+            if reason:
+                self._src = (None, reason)
+            else:
+                try:
+                    self._src = load_core("scope_core").source_root_from_head(self.root, timeout=git_timeout())
+                except Exception as e:
+                    self._src = (None, f"the scope core cannot be loaded ({type(e).__name__}); failing closed.")
+        return self._src
+
+    def _active_story(self):
+        """(the content of ai-context/.active-story without its newline, None) or (None, reason)."""
+        path = os.path.join(self.root, *ACTIVE_STORY.split("/"))
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as f:
+                data = f.read(MAX_ACTIVE_STORY + 1)
+        except FileNotFoundError:
+            return None, NO_SCOPE_MSG
+        except OSError:
+            return None, f"{ACTIVE_STORY} cannot be read (a symlink, a folder or unreadable); failing closed."
+        if len(data) > MAX_ACTIVE_STORY:
+            return None, f"{ACTIVE_STORY} is longer than {MAX_ACTIVE_STORY} bytes; failing closed."
+        text = data.decode("utf-8", "replace")
+        return (text[:-1] if text.endswith("\n") else text), None
+
+    def load(self):
+        """({"story", "paths", "tests", "ids"}, None) for the active story's valid committed package, else (None, reason)."""
+        if self._pkg is None:
+            self._pkg = self._load()
+        return self._pkg
+
+    def _load(self):
+        active, reason = self._active_story()
+        if reason:
+            return None, reason
+        src, reason = self.source_root()
+        if reason:
+            return None, f"no scoped writes: {reason}"
+        if not self.story_env:
+            return None, (f"AI_FRAMEWORK_STORY is not set in this session, so {ACTIVE_STORY} ({active!r}) is not "
+                          "trusted; a human adds the env lines start.py printed and restarts the session.")
+        if self.story_env != active:
+            return None, (f"AI_FRAMEWORK_STORY {self.story_env!r} does not match {ACTIVE_STORY} {active!r}; a human "
+                          "reruns tools/impacts/start.py in a terminal and restarts the session.")
+        reason = self._git_untrusted()
+        if reason:
+            return None, reason
+        try:
+            pkg, reason = load_core("scope_core").read_package(self.root, active, timeout=git_timeout())
+        except Exception as e:
+            return None, f"the scope core cannot be loaded ({type(e).__name__}); failing closed."
+        if reason:
+            return None, f"active story {active!r}: {reason}"
+        scope = pkg["scope"]
+        tests = set(scope["tests"])
+        paths = set(scope["modify"]) | {c["path"] for c in scope["create"]} | tests
+        return {"story": active, "paths": paths, "tests": tests, "ids": [c["id"] for c in pkg["criteria"]]}, None
+
+    def missing_criteria(self):
+        """(criterion ids no scope.tests file references yet, None) or (None, reason). Read per guard call, so
+        deleting a reference closes the gate again."""
+        if self._missing is None:
+            view, reason = self.load()
+            if reason:
+                self._missing = (None, reason)
+            else:
+                try:
+                    core = load_core("trace_core")
+                    # -meta.xml companions cannot carry ids; check_trace.py excludes the same files through this helper.
+                    paths = sorted(core.source_test_paths(view["tests"]))
+                    total = 0
+                    for p in paths:
+                        try:
+                            total += min(os.lstat(os.path.join(self.root, *p.split("/"))).st_size, core.MAX_READ)
+                        except OSError:
+                            pass  # absent: read_tests skips it too
+                    if total > MAX_TESTS_READ:
+                        self._missing = (None, f"the scope.tests files hold more than {MAX_TESTS_READ // (1024 * 1024)} MB "
+                                               "to read for tests-first; failing closed.")
+                        return self._missing
+                    texts = {}
+                    for p in paths:  # one file at a time, so the deadline is checked as the reading goes
+                        check_deadline()
+                        texts.update(core.read_tests(self.root, [p]))
+                    self._missing = (core.missing_criteria(view["ids"], texts), None)
+                except Exception as e:
+                    self._missing = (None, f"the trace core failed ({type(e).__name__}); failing closed.")
+        return self._missing
 
 
 def write_block_reason(rel, mode, policy, scope):
@@ -387,11 +543,39 @@ def write_block_reason(rel, mode, policy, scope):
         return None
     if mode == "advise":
         return "framework is in ADVISE mode: no writes. Output the content in your reply instead."
+    outside = f"write to {rel!r} is outside {allowed} in {mode.upper()} mode. The build is read-only; hand code to the squad."
     if cfg.get("scoped_source"):
-        if scope and rel.startswith(tuple(scope)):
-            return None
-        return NO_SCOPE_MSG
-    return f"write to {rel!r} is outside {allowed} in {mode.upper()} mode. The build is read-only; hand code to the squad."
+        outside = (f"write to {rel!r} is outside {allowed} and outside the committed sourceRoot in {mode.upper()} mode. "
+                   "Under the sourceRoot, only the active story's build package is writable.")
+        if scope is None:
+            return NO_SCOPE_MSG
+        # The order keeps each message honest: outside the source root, no active story, then the scope itself.
+        src, _ = scope.source_root()
+        if src is not None and not under_source(rel, src):
+            return outside
+        view, reason = scope.load()
+        if reason:
+            return reason
+        # Exact match: an entry never stands for its prefixes, companions (-meta.xml) or anything below it.
+        if rel not in view["paths"]:
+            return OUT_OF_SCOPE_MSG.format(rel=rel, story=view["story"])
+        # A hard link shares its content with another path, so writing it would also change a file outside scope.
+        try:
+            nlink = os.lstat(os.path.join(scope.root, *rel.split("/"))).st_nlink
+        except FileNotFoundError:
+            nlink = 1  # a create: nothing is linked yet
+        except OSError:
+            return f"write to {rel!r}: its link count cannot be read; failing closed."
+        if nlink > 1:
+            return f"write to {rel!r} is a hard link (link count {nlink}), which would also change another path; failing closed."
+        if rel not in view["tests"]:
+            missing, reason = scope.missing_criteria()
+            if reason:
+                return reason
+            if missing:
+                return TESTS_FIRST_MSG.format(rel=rel, ids=", ".join(missing))
+        return None
+    return outside
 
 
 # ---- Bash parsing ----
@@ -1134,13 +1318,21 @@ SCRIPT_FLAGS = {  # argparse options of the framework scripts that choose where 
     "build_index.py": {"--root": True, "--out": True, "--from-config": False, "--version": False, "--help": False},
     "write_report.py": {"--id": True, "--slug": True, "--classified": True, "--root": True, "--help": False},
     "write_story.py": {"--id": True, "--slug": True, "--draft": True, "--root": True, "--help": False},
-    "write_design.py": {"--id": True, "--slug": True, "--draft": True, "--index": True, "--root": True,
-                        "--model": True, "--assistant-version": True, "--help": False},
+    "write_design.py": {"--id": True, "--slug": True, "--draft": True, "--index": True, "--source-root": True,
+                        "--root": True, "--model": True, "--assistant-version": True, "--help": False},
+    "write_change.py": {"--id": True, "--slug": True, "--draft": True, "--package": True, "--root": True,
+                        "--help": False},
+    "start.py": {"--root": True, "--help": False},
 }
+# tools/impacts/start.py switches a session into build: it writes ai-context/.active-story and the human pastes the
+# env lines it prints into .claude/settings.local.json. Both are modelled as its targets, so any run the assistant
+# asks for is blocked by always_blocked_writes in every mode, whatever its flags say.
+START_TARGETS = (".claude/settings.local.json", ACTIVE_STORY)
 STORY_OUTPUTS = {  # files the --id/--slug writers put in ai-context/<--id>-<--slug>/
     "write_report.py": ("impact.json", "impact.md"),
     "write_story.py": ("story.json", "story.md"),
     "write_design.py": ("design.json", "design.md"),
+    "write_change.py": ("change.json", "change.md"),
 }
 
 
@@ -1196,9 +1388,17 @@ def script_targets(script, args, cwd=None):
     than "." is unknown. write_story.py writes ai-context/<--id>-<--slug>/{story.json,story.md} under --root and
     reads the index and register from it; a --root other than "." is unknown for it too. write_design.py writes
     ai-context/<--id>-<--slug>/{design.json,design.md} under --root, reads its index from --index and evidence
-    from --root, and is held to the same rules as write_story.py. query.py prints to stdout only.
+    from --root, and is held to the same rules as write_story.py; --source-root only names what it reads.
+    write_change.py (implement-story) writes ai-context/<--id>-<--slug>/{change.json,change.md} under --root and
+    reads the build package and the tests from it, under the same rules; --package only names what it reads. Any
+    start.py (matched by file name, case folded) writes START_TARGETS, whatever its flags. query.py prints to stdout only.
     """
     name = script.replace("\\", "/").rsplit("/", 1)[-1]
+    if name.lower() == "start.py":
+        # Relative to the working folder and to the script's own checkout (three folders above its realpath); one
+        # always-blocked target is enough to block the command.
+        checkout = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(os.path.join(cwd or "", script)))))
+        return list(START_TARGETS) + [os.path.join(checkout, *t.split("/")) for t in START_TARGETS], False
     if name not in SCRIPT_FLAGS:
         return [], False
     vals = script_flag_values(args, SCRIPT_FLAGS[name])
@@ -1546,6 +1746,8 @@ def main():
     inp = payload.get("tool_input", {}) or {}
     root = project_dir()
     mode = resolve_mode(committed_mode(root), os.environ.get("AI_FRAMEWORK_MODE", "").strip().lower())
+    # Lazy: building it reads nothing. Only a scoped write outside the mode's paths makes it read files or run git.
+    scope = Scope(root, os.environ.get("AI_FRAMEWORK_STORY"))
 
     if tool == "Bash":
         cmd = inp.get("command", "")
@@ -1589,7 +1791,7 @@ def main():
                 block("hook input has a non-string cwd; failing closed")
             if cwd != root and not cwd.startswith(root + os.sep):
                 block(f"the shell's working directory {cwd!r} is outside the project; run it as a human.")
-            reason = bash_block_reason(segments, mode, policy, active_scope(root), root, cwd)
+            reason = bash_block_reason(segments, mode, policy, scope, root, cwd)
             if reason:
                 block(with_commit_advice(reason, cmd, mode, policy) if reason == UNKNOWN_WRITE_MSG else reason)
 
@@ -1609,7 +1811,7 @@ def main():
         if reason:
             block(reason)
         for rel in rels:
-            reason = write_block_reason(rel, mode, policy, active_scope(root))
+            reason = write_block_reason(rel, mode, policy, scope)
             if reason:
                 block(reason)
 

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WRAPPER = os.path.join(HERE, "guard.cmd" if os.name == "nt" else "guard.sh")
+CORE_FILES = ("trace_core.py", "scope_core.py")  # WS8: guard-owned cores the guard loads by path from its own folder
 INTERPRETERS = ("python3", "python", "py")
 
 
@@ -56,6 +57,10 @@ class Case:
     after: tuple[tuple[str, ...], ...] = ()  # git commands run in the project after the dirty files are written
     worktree: bool = False  # run from a linked worktree, whose .git is a file
     env: dict[str, str] = field(default_factory=dict)  # extra environment for the guard
+    # WS8: files written after the commit and before `after` (None removes one), so they are in the work tree but
+    # not at HEAD: an untracked ai-context/.active-story, or a working-copy edit to a committed file.
+    post_files: dict[str, str | None] = field(default_factory=dict)
+    stderr_lacks: str = ""  # WS8: text the guard's message must not contain
 
 
 def bash(cmd):
@@ -995,6 +1000,7 @@ DASH_DELETE = {"ai-context/-delete": ""}
 WRITE_REPORT = "python3 framework/skills/story-impact/scripts/write_report.py"
 WRITE_STORY = "python3 framework/skills/story-refine/scripts/write_story.py"
 WRITE_DESIGN = "python3 framework/skills/solution-design/scripts/write_design.py"
+WRITE_CHANGE = "python3 framework/skills/implement-story/scripts/write_change.py"
 BUILD_INDEX = "python3 tools/index/build_index.py"
 # Final review fix wave (C1, I1-I5, minors, extras). C2 has its own runner (check_walk_budget, check_deadline).
 FINAL_CASES = [
@@ -1056,6 +1062,8 @@ FINAL_CASES = [
     Case("write_story allowed in normal", bash(f"{WRITE_STORY} --id 1 --slug risk-rating --draft ai-context/d.json"), 0),
     Case("write_design with --root elsewhere blocked", bash(f"{WRITE_DESIGN} --id 1 --slug x --draft ai-context/d.json --root ai-context/x"), 2),
     Case("write_design allowed in normal", bash(f"{WRITE_DESIGN} --id 1 --slug risk-rating --draft ai-context/d.json"), 0),
+    Case("write_change allowed in build", bash(f"{WRITE_CHANGE} --id DEMO-1 --slug risk-rating --draft ai-context/d.json"), 0, env_mode="build"),
+    Case("write_change with --root elsewhere blocked", bash(f"{WRITE_CHANGE} --id DEMO-1 --slug x --draft ai-context/d.json --root ai-context/x"), 2, env_mode="build"),
     Case("I3: query.py has no write flags", bash("python3 tools/index/query.py stamp --index tools/guard --root ."), 0),
     # I4: every tool goes through the guard.
     Case("I4: mcp write tool on tools/guard blocked", tool("mcp__filesystem__write_file", path="tools/guard/x"), 2),
@@ -1184,6 +1192,1074 @@ SYMLINK_CASES = [
          stderr_has="must resolve under"),
 ]
 
+# ---- WS8: scope lock, tests-first, .active-story and start.py ----
+# A synthetic story in a temp repo whose committed sourceRoot is force-app. The package is committed at HEAD; the
+# active story file is written after the commit (untracked, as start.py leaves it), and the env names the same story.
+S = "ZED-7-sample-change"
+S_PKG_PATH = f"impacts/{S}/build-package.json"
+S_DIR = "force-app/main/default/classes"
+S_CLS = f"{S_DIR}/ZedThing.cls"
+S_META = f"{S_CLS}-meta.xml"
+S_TEST = f"{S_DIR}/ZedThing_Test.cls"
+S_TEST2 = f"{S_DIR}/ZedOther_Test.cls"
+S_NEW = f"{S_DIR}/ZedNew.cls"
+S_OTHER = f"{S_DIR}/Other.cls"
+S_CFG = {"startingPoint": "existing", "sourceRoot": "force-app"}
+SKEL = "@IsTest private class ZedThing_Test {\n    // AC-1\n    // AC-2\n}\n"
+S_STORY = {"ai-context/.active-story": S + "\n"}
+S_ENV = {"AI_FRAMEWORK_STORY": S}
+
+
+def s_pkg(**over):
+    pkg = {
+        "schemaVersion": 1, "storyId": "ZED-7", "slug": "sample-change",
+        "criteria": [{"id": "AC-1", "given": "g", "when": "w", "then": "t", "examples": []},
+                     {"id": "AC-2", "given": "g", "when": "w", "then": "t", "examples": []}],
+        "scope": {"modify": [S_CLS], "create": [{"api": "ZedNew", "type": "ApexClass", "path": S_NEW}], "tests": [S_TEST]},
+        "rules": [], "done": [],
+    }
+    pkg.update(over)
+    return pkg
+
+
+def s_scope(**over):
+    scope = {"modify": [S_CLS], "create": [{"api": "ZedNew", "type": "ApexClass", "path": S_NEW}], "tests": [S_TEST]}
+    scope.update(over)
+    return scope
+
+
+def s_files(pkg=None, cfg=S_CFG, skeleton=SKEL, extra=None):
+    """Committed files: the config (dict or raw text; None omits it), the package (default s_pkg()) and the test file."""
+    files = {S_CLS: "public with sharing class ZedThing {}\n", S_OTHER: "public with sharing class Other {}\n"}
+    if cfg is not None:
+        files[".ai-framework.json"] = cfg if isinstance(cfg, str) else json.dumps(cfg)
+    pkg = s_pkg() if pkg is None else pkg
+    files[S_PKG_PATH] = pkg if isinstance(pkg, str) else json.dumps(pkg)
+    if skeleton is not None:
+        files[S_TEST] = skeleton
+    files.update(extra or {})
+    return files
+
+
+def sc(name, payload, want, files=None, post=None, env=None, env_mode="build", **kw):
+    """A build-mode case with the synthetic story committed, skeletons in place and the story active."""
+    return Case(f"WS8 {name}", payload, want, env_mode=env_mode, files=s_files() if files is None else files,
+                post_files=S_STORY if post is None else post, env=S_ENV if env is None else env, **kw)
+
+
+def edits(path, tool):
+    return {"tool_name": tool, "tool_input": {"file_path": path, "old_string": "a", "new_string": "b"}}
+
+
+BIG_TESTS = [f"{S_DIR}/ZedBig{n}_Test.cls" for n in range(9)]  # nine files of just over 2 MB: past the 16 MB read cap
+CHECK_TRACE = "python3 tools/code/check_trace.py"
+CHECK_RULES = "python3 tools/code/check_rules.py"
+START = "python3 tools/impacts/start.py"
+
+SCOPE_CASES = [
+    # Source root and active story
+    sc("build: no active story, write under source root", write(S_CLS), 2, post={}, env={}, stderr_has="no active story scope"),
+    sc("build: docs/x.md gets the outside message, not no-scope", write("docs/x.md"), 2, stderr_has="outside",
+       stderr_lacks="no active story"),
+    sc("build: docs/x.md with no active story gets the outside message", write("docs/x.md"), 2, post={}, env={},
+       stderr_has="outside", stderr_lacks="no active story"),
+    Case("WS8 build: write ai-context/x.md with no config and no story", write("ai-context/x.md"), 0, env_mode="build"),
+    sc("build: .ai-framework.json missing blocks a source write (no '.' default)", write(S_CLS), 2,
+       files=s_files(cfg=None), stderr_has="no source root"),
+    sc("build: sourceRoot with .. blocks", write(S_CLS), 2, files=s_files(cfg={"sourceRoot": "../force-app"}), stderr_has="'..'"),
+    sc("build: absolute sourceRoot blocks", write(S_CLS), 2, files=s_files(cfg={"sourceRoot": "/force-app"}), stderr_has="absolute"),
+    sc("build: sourceRoot that is not a folder blocks", write(S_CLS), 2, files=s_files(cfg={"sourceRoot": "nowhere"}),
+       stderr_has="not a directory"),
+    sc("build: config with an unknown key blocks", write(S_CLS), 2,
+       files=s_files(cfg={"sourceRoot": "force-app", "sourceRoots": ["x"]}), stderr_has="unknown key"),
+    sc("build: sourceRoot changed only in the work tree is ignored (HEAD wins)", write(S_CLS), 2,
+       files=s_files(cfg={"sourceRoot": "docs"}, extra={"docs/.keep": ""}),
+       post=dict(S_STORY, **{".ai-framework.json": json.dumps(S_CFG)}), stderr_has="outside"),
+    sc("build: .active-story names an unknown story", write(S_CLS), 2, post={"ai-context/.active-story": "ZED-9-other-thing\n"},
+       env={"AI_FRAMEWORK_STORY": "ZED-9-other-thing"}, stderr_has="not committed"),
+    sc("build: .active-story value with ..", write(S_CLS), 2, post={"ai-context/.active-story": "ZED-7-../x\n"},
+       env={"AI_FRAMEWORK_STORY": "ZED-7-../x"}, stderr_has="is not <storyId>-<slug>"),
+    sc("build: .active-story value with /", write(S_CLS), 2, post={"ai-context/.active-story": "ZED-7-a/b\n"},
+       env={"AI_FRAMEWORK_STORY": "ZED-7-a/b"}, stderr_has="is not <storyId>-<slug>"),
+    sc("build: two impacts folders match the id", write(S_CLS), 2,
+       files=s_files(extra={"impacts/ZED-7-other-change/build-package.json": json.dumps(s_pkg(slug="other-change"))}),
+       stderr_has="two or more"),
+    sc("build: package in the tree but not at HEAD", write(S_CLS), 2,
+       after=(("rm", "-q", "--cached", S_PKG_PATH), ("commit", "-q", "-m", "x")), stderr_has="commit"),
+    sc("build: package invalid JSON", write(S_CLS), 2, files=s_files(pkg="{not json"), stderr_has="not valid JSON"),
+    sc("build: package missing scope", write(S_CLS), 2, files=s_files(pkg={k: v for k, v in s_pkg().items() if k != "scope"}),
+       stderr_has="scope is not an object"),
+    sc("build: package entry with ..", write(S_CLS), 2,
+       files=s_files(pkg=s_pkg(scope=s_scope(modify=[S_CLS, "force-app/../tools/x.cls"]))), stderr_has="'..'"),
+    sc("build: package entry outside sourceRoot", write(S_CLS), 2,
+       files=s_files(pkg=s_pkg(scope=s_scope(modify=[S_CLS, "docs/x.cls"]))), stderr_has="outside sourceRoot"),
+    sc("build: package entry under impacts/", write(S_CLS), 2,
+       files=s_files(pkg=s_pkg(scope=s_scope(modify=[S_CLS, f"impacts/{S}/notes.md"]))), stderr_has="reserved"),
+    # Scope lock
+    sc("build: write to a scope.tests file before any skeleton", write(S_TEST), 0, files=s_files(skeleton=None)),
+    sc("build: write to a scope.modify file after skeletons exist", write(S_CLS), 0),
+    sc("build: write to a scope.create path after skeletons exist", write(S_NEW), 0),
+    sc("build: Edit on an in-scope file", edits(S_CLS, "Edit"), 0),
+    sc("build: MultiEdit on an in-scope file", edits(S_CLS, "MultiEdit"), 0),
+    sc("build: write to a source file not in scope", write(S_OTHER), 2, stderr_has="scope request"),
+    sc("build: A.cls in scope, A.cls-meta.xml not: write the meta", write(S_META), 2, stderr_has="scope request"),
+    sc("build: A.cls in scope: write A.clsX (prefix-match regression)", write(S_CLS + "X"), 2, stderr_has="scope request"),
+    sc("build: in-scope path spelled with ./", write("./" + S_CLS), 0),
+    sc("build: in-scope path spelled with a/../", write(f"{S_DIR}/../classes/ZedThing.cls"), 0),
+    sc("build: a scope entry that is always-blocked rejects the package", write(S_CLS), 2,
+       files=s_files(cfg={"sourceRoot": "."}, pkg=s_pkg(scope=s_scope(modify=[S_CLS, "tools/guard/x.py"]))), stderr_has="reserved"),
+    sc("build: working-tree edit widening the committed package is ignored", write(S_OTHER), 2,
+       post=dict(S_STORY, **{S_PKG_PATH: json.dumps(s_pkg(scope=s_scope(modify=[S_CLS, S_OTHER])))}), stderr_has="scope request"),
+    sc("normal: in-scope path still blocked (the lock binds build only)", write(S_CLS), 2, env_mode=None, stderr_has="outside"),
+    sc("maintain: in-scope path under force-app still blocked", write(S_CLS), 2, env_mode="maintain", stderr_has="outside"),
+    sc("committed advise + local build + in-scope write", write(S_CLS), 2, committed_mode="advise", stderr_has="ADVISE"),
+    # Tests first
+    sc("build: non-test in-scope write before any skeleton names the missing ids", write(S_CLS), 2,
+       files=s_files(skeleton=None), stderr_has="missing: AC-1, AC-2"),
+    sc("build: one of two criteria referenced", write(S_CLS), 2, files=s_files(skeleton="// AC-1\n"), stderr_has="missing: AC-2"),
+    sc("build: AC-10 present, AC-1 required", write(S_CLS), 2, files=s_files(skeleton="// AC-10\n// AC-2\n"),
+       stderr_has="missing: AC-1"),
+    sc("build: all ids referenced across scope.tests files", write(S_CLS), 0,
+       files=s_files(pkg=s_pkg(scope=s_scope(tests=[S_TEST, S_TEST2])), skeleton="// AC-1\n", extra={S_TEST2: "// AC-2\n"})),
+    sc("build: ids referenced only in an out-of-scope file", write(S_CLS), 2,
+       files=s_files(skeleton="// none yet\n", extra={f"{S_DIR}/Notes.cls": "// AC-1 AC-2\n"}), stderr_has="tests first"),
+    sc("build: ids referenced in a *_Test file outside scope.tests", write(S_CLS), 2,
+       files=s_files(skeleton=None, extra={S_TEST2: "// AC-1 AC-2\n"}), stderr_has="tests first"),
+    # check_trace.py excludes -meta.xml from coverage (trace_core.source_test_paths); the guard must agree.
+    sc("build: tests-first ignores meta files", write(S_CLS), 2,
+       files=s_files(pkg=s_pkg(scope=s_scope(tests=[S_TEST, S_TEST + "-meta.xml"])), skeleton=None,
+                     extra={S_TEST + "-meta.xml": "<x>AC-1 AC-2</x>\n"}), stderr_has="missing: AC-1, AC-2"),
+    sc("build: tests-first with a meta companion in scope.tests passes once the test names the ids", write(S_CLS), 0,
+       files=s_files(pkg=s_pkg(scope=s_scope(tests=[S_TEST, S_TEST + "-meta.xml"])),
+                     extra={S_TEST + "-meta.xml": "<x/>\n"})),
+    sc("build: package with empty criteria[] is invalid", write(S_TEST), 2, files=s_files(pkg=s_pkg(criteria=[])),
+       stderr_has="criteria"),
+    # .active-story, AI_FRAMEWORK_STORY and robustness
+    sc("build: AI_FRAMEWORK_STORY differs from .active-story", write(S_CLS), 2, env={"AI_FRAMEWORK_STORY": "ZED-8-other"},
+       stderr_has="does not match"),
+    sc("build: AI_FRAMEWORK_STORY not set", write(S_CLS), 2, env={}, stderr_has="not set"),
+    sc("build: package blob over the size cap", write(S_CLS), 2, files=s_files(pkg=s_pkg(pad="x" * (1024 * 1024))),
+       stderr_has="1048576"),
+    sc("build: tests-first reading over the 16 MB cap blocks", write(S_CLS), 2,
+       files=s_files(pkg=s_pkg(scope=s_scope(tests=BIG_TESTS))),
+       post=dict(S_STORY, **{p: "// AC-1 AC-2\n" + "x" * (2 * 1024 * 1024) for p in BIG_TESTS}), stderr_has="16 MB"),
+    sc("build: the outside message in build does not say the build is read-only", write("docs/x.md"), 2,
+       stderr_has="outside the committed sourceRoot", stderr_lacks="read-only"),
+    Case("WS8 maintain: write tools/guard/scope_core.py blocked", write("tools/guard/scope_core.py"), 2, env_mode="maintain",
+         stderr_has="never allowed"),
+    Case("WS8 maintain: write tools/guard/trace_core.py blocked", write("tools/guard/trace_core.py"), 2, env_mode="maintain",
+         stderr_has="never allowed"),
+    Case("WS8 tripwire: an edited scope core blocks writes", write("ai-context/x.md"), 2, dirty=("tools/guard/scope_core.py",),
+         stderr_has="guard files changed"),
+    Case("WS8 tripwire: an edited trace core blocks writes", write("ai-context/x.md"), 2, dirty=("tools/guard/trace_core.py",),
+         stderr_has="guard files changed"),
+] + [Case(f"WS8 {m or 'normal'}: Write ai-context/.active-story blocked", write("ai-context/.active-story"), 2, env_mode=m,
+          stderr_has="never allowed") for m in (None, "build", "maintain")]
+
+# Bash cases. Each also runs with every allowlist opened (no_allowlist_variants), so the write-target layer is tested
+# alone; legacy is what that pass expects when only the allowlist blocks.
+SCOPE_BASH_CASES = [
+    sc("build: echo into a scope.tests file", bash(f"echo x > {S_TEST}"), 0),
+    sc("build: echo into an out-of-scope source file", bash(f"echo x > {S_OTHER}"), 2, stderr_has="scope request"),
+    sc("build: redirect into a non-test scope file before skeletons", bash(f"echo x > {S_CLS}"), 2, files=s_files(skeleton=None),
+       stderr_has="tests first"),
+    sc("build: prettier --write an in-scope file", bash(f"pnpm exec prettier --write {S_CLS}"), 0),
+    sc("build: prettier --write the source folder", bash("pnpm exec prettier --write force-app"), 2),
+    sc("build: sf apex generate into the source folder", bash(f"sf apex generate class --name A -d {S_DIR}"), 2),
+    sc("build: sed -i on an in-scope file (allowlist)", bash(f"sed -i s/a/b/ {S_TEST}"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    sc("build: cp onto an in-scope file (allowlist)", bash(f"cp ai-context/a {S_TEST}"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    sc("build: check_trace allowed", bash(f"{CHECK_TRACE} ZED-7"), 0),
+    sc("build: check_trace --skeletons allowed", bash(f"{CHECK_TRACE} --skeletons ZED-7"), 0),
+    sc("build: check_rules --from-config allowed", bash(f"{CHECK_RULES} --from-config"), 0),
+    sc("build: check_rules --compare-baseline allowed", bash(f"{CHECK_RULES} --from-config --compare-baseline base/tools/code/baseline.json"), 0),
+    sc("build: check_trace with --core blocked", bash(f"{CHECK_TRACE} --core ai-context/x.py ZED-7"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    sc("build: cd then check_trace blocked", bash(f"cd ai-context/x && {CHECK_TRACE} ZED-7"), 2,
+       files=s_files(extra=SUB), stderr_has="project root"),
+    Case("WS8 normal: check_trace allowed", bash(f"{CHECK_TRACE} --skeletons ZED-7"), 0),
+    Case("WS8 normal: py -3 check_trace allowed", bash("py -3 tools/code/check_trace.py ZED-7"), 0),
+    Case("WS8 normal: check_rules allowed", bash(f"{CHECK_RULES} --from-config --compare-baseline base/tools/code/baseline.json"), 0),
+    Case("WS8 normal: check_rules with an unlisted flag blocked", bash(f"{CHECK_RULES} --write-baseline"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    Case("WS8 normal: check_rules --compare-baseline with a dash value blocked",
+         bash(f"{CHECK_RULES} --from-config --compare-baseline --write-baseline"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    Case("WS8 normal: check_trace with --core blocked", bash(f"{CHECK_TRACE} --core ai-context/x.py ZED-7"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    Case("WS8 normal: check_trace with --root blocked", bash(f"{CHECK_TRACE} ZED-7 --root ai-context/x"), 2, stderr_has=NOT_ON_LIST, legacy=0),
+    Case("WS8 normal: cd then check_trace blocked", bash(f"cd ai-context/x && {CHECK_TRACE} ZED-7"), 2, files=SUB, stderr_has="project root"),
+    Case("WS8 normal: write_design with --source-root allowed",
+         bash(f"{WRITE_DESIGN} --id 1 --slug x --draft ai-context/d.json --source-root demo/org"), 0),
+    Case("WS8 normal: write_design --s ambiguous blocked",
+         bash(f"{WRITE_DESIGN} --id 1 --slug x --draft ai-context/d.json --s demo"), 2, stderr_has="cannot determine"),
+] + [Case(f"WS8 {m or 'normal'}: echo into ai-context/.active-story blocked", bash("echo X > ai-context/.active-story"), 2,
+          env_mode=m, stderr_has="never allowed") for m in (None, "build", "maintain")] + [
+    Case(f"WS8 {m or 'normal'}: start.py blocked (models settings.local.json and .active-story)", bash(f"{START} ZED-7"), 2,
+         env_mode=m, stderr_has="never allowed") for m in (None, "build", "maintain")] + [
+    Case("WS8 maintain: py -3 start.py with --root blocked", bash("py -3 tools/impacts/start.py ZED-7 --root ai-context/x"), 2,
+         env_mode="maintain", stderr_has="never allowed"),
+]
+
+
+def s_project(files=None, story=True):
+    """A committed project with the synthetic story (and, when story, its .active-story file). Returns the realpath."""
+    project = make_project("normal", s_files() if files is None else files)
+    if story:
+        put(project, "ai-context/.active-story", S + "\n")
+    return os.path.realpath(project)
+
+
+def guard_policy():
+    with open(os.path.join(HERE, "policy.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def checker():
+    """(check, results): check(name, good, detail) prints one line and records it."""
+    results = []
+
+    def check(name, good, detail=""):
+        print(f"[{'PASS' if good else 'FAIL'}] {name}{'' if good else ' ' + str(detail)}")
+        results.append(bool(good))
+    return check, results
+
+
+def guarded(check, name, fn):
+    """Run one direct check; an exception (a guard without the WS8 change) is a FAIL, never a crash."""
+    try:
+        fn()
+    except Exception as e:
+        check(name, False, f"{type(e).__name__}: {e}")
+
+
+def check_scope_lazy():
+    """Read-only commands, and writes inside the mode's paths, build no scope: no file read, no git call."""
+    g = guard_module()
+    check, results = checker()
+    project = s_project()
+    saved_run, calls = subprocess.run, []
+
+    def spy(cmd, *a, **kw):
+        calls.append(cmd)
+        return saved_run(cmd, *a, **kw)
+
+    def body():
+        policy = guard_policy()
+        g.DEADLINE[0] = time.monotonic() + 60
+        subprocess.run = spy
+        scope = g.Scope(project, S)
+        segs = g.parse_bash(f"ls {S_DIR} && cat {S_CLS} && git status", strict=False)
+        r1 = g.bash_block_reason(segs, "build", policy, scope, project, project)
+        r2 = g.write_block_reason("ai-context/x.md", "build", policy, scope)
+        check("WS8 lazy scope: read-only Bash and an ai-context write run no git and load no scope",
+              r1 is None and r2 is None and not calls and scope._src is None and scope._pkg is None,
+              f"{r1!r} {r2!r} calls={calls} src={scope._src!r}")
+        r3 = g.write_block_reason(S_CLS, "build", policy, scope)
+        n = len(calls)
+        r4 = g.write_block_reason(S_CLS, "build", policy, scope)
+        check("WS8 lazy scope: an in-scope write loads the scope once (memoised)", r3 is None and r4 is None and n > 0 and len(calls) == n,
+              f"{r3!r} {r4!r} calls {n} then {len(calls)}")
+
+    try:
+        guarded(check, "WS8 lazy scope", body)
+    finally:
+        subprocess.run = saved_run
+        drop(project)
+    return all(results)
+
+
+def check_scope_git_failure():
+    """git missing, failing or timing out while the scope loads blocks (in-process: an empty PATH would stop the wrapper first)."""
+    g = guard_module()
+    check, results = checker()
+    project = s_project()
+    saved_run = subprocess.run
+
+    def body():
+        policy = guard_policy()
+        g.DEADLINE[0] = time.monotonic() + 60
+        check("WS8 scope git: the in-scope write is allowed when git works",
+              g.write_block_reason(S_CLS, "build", policy, g.Scope(project, S)) is None)
+        for label, exc in (("timeout", subprocess.TimeoutExpired("git", 3)), ("git missing", FileNotFoundError("git"))):
+            def fake(cmd, *a, _exc=exc, **kw):
+                raise _exc
+            subprocess.run = fake
+            try:
+                reason = g.write_block_reason(S_CLS, "build", policy, g.Scope(project, S))
+            finally:
+                subprocess.run = saved_run
+            check(f"WS8 scope git: {label} while loading the scope fails closed", reason is not None and "failing closed" in reason,
+                  repr(reason))
+
+    try:
+        guarded(check, "WS8 scope git", body)
+    finally:
+        subprocess.run = saved_run
+        drop(project)
+    return all(results)
+
+
+def check_scope_git_gate():
+    """The scope's own gate: with the git config changed since the baseline (a planted core.fsmonitor), Scope runs no
+    git at all. In-process, because through the wrapper the tripwire stops such a write before Scope is reached."""
+    g = guard_module()
+    check, results = checker()
+    project = s_project()
+
+    def body():
+        policy = guard_policy()
+        g.DEADLINE[0] = time.monotonic() + 60
+        append(project, ".git/config", FSMON)
+        src, reason = g.Scope(project, S).source_root()
+        check("WS8 scope git gate: sourceRoot is not read while git state differs from the baseline",
+              src is None and "build scope is not read" in (reason or ""), f"{src!r} {reason!r}")
+        reason = g.write_block_reason(S_CLS, "build", policy, g.Scope(project, S))
+        check("WS8 scope git gate: an in-scope write is refused while git state differs from the baseline",
+              reason is not None and "build scope is not read" in reason, repr(reason))
+        check("WS8 scope git gate: the planted fsmonitor did not run", not os.path.exists(os.path.join(project, "PWNED")))
+
+    try:
+        guarded(check, "WS8 scope git gate", body)
+    finally:
+        drop(project)
+    return all(results)
+
+
+def check_scope_fsmonitor():
+    """With a planted core.fsmonitor and an active story, neither a read-only command nor a scoped write runs it."""
+    check, results = checker()
+    for payload, want in ((bash(f"ls {S_DIR}"), 0), (write(S_CLS), 2), (bash(f"echo x > {S_TEST}"), 2)):
+        project = s_project()
+        try:
+            append(project, ".git/config", FSMON)
+            code, err = send(WRAPPER, payload, case_env(project, "build", S_ENV), project)
+            ran = os.path.exists(os.path.join(project, "PWNED"))
+            name = payload["tool_input"].get("command") or payload["tool_input"].get("file_path")
+            check(f"WS8 planted fsmonitor not run in build with an active story: {name}", not ran and code == want,
+                  f"ran={ran} exit {code} (want {want}) {err.strip()!r}")
+        finally:
+            drop(project)
+    return all(results)
+
+
+def check_scope_symlink():
+    """A symlink inside the source root that points at an out-of-scope file is judged by its target."""
+    check, results = checker()
+    project = s_project()
+    try:
+        link = f"{S_DIR}/Link.cls"
+        try:
+            os.symlink(os.path.join(project, *S_OTHER.split("/")), os.path.join(project, *link.split("/")))
+        except OSError as e:
+            print(f"[SKIP] WS8 build: symlink inside the source root: cannot create symlinks here ({e})")
+            return True
+        code, err = send(WRAPPER, write(link), case_env(project, "build", S_ENV), project)
+        check("WS8 build: symlink inside the source root to an out-of-scope file blocked", code == 2 and "scope request" in err,
+              f"exit {code} {err.strip()!r}")
+    finally:
+        drop(project)
+    return all(results)
+
+
+def check_scope_hardlink():
+    """An in-scope target that is a hard link (link count above 1) is refused: the write would change the other path too."""
+    check, results = checker()
+    project = s_project()
+    try:
+        try:
+            os.link(os.path.join(project, *S_CLS.split("/")), os.path.join(project, "ai-context", "linked.cls"))
+        except (OSError, AttributeError) as e:
+            print(f"[SKIP] WS8 build: hard-linked in-scope target: cannot create hard links here ({e})")
+            return True
+        for payload in (write(S_CLS), bash(f"echo x > {S_CLS}")):
+            code, err = send(WRAPPER, payload, case_env(project, "build", S_ENV), project)
+            name = payload["tool_input"].get("command") or payload["tool_input"].get("file_path")
+            check(f"WS8 build: hard-linked in-scope target refused: {name}", code == 2 and "hard link" in err,
+                  f"exit {code} {err.strip()!r}")
+        os.remove(os.path.join(project, "ai-context", "linked.cls"))
+        code, err = send(WRAPPER, write(S_CLS), case_env(project, "build", S_ENV), project)
+        check("WS8 build: the same target is allowed once the link is gone", code == 0, f"exit {code} {err.strip()!r}")
+    finally:
+        drop(project)
+    return all(results)
+
+
+def check_start_modelled():
+    """start.py writes settings.local.json and .active-story (as modelled), and matches no allowlist group in any mode."""
+    g = guard_module()
+    check, results = checker()
+
+    def body():
+        policy = guard_policy()
+        root = os.path.realpath(os.getcwd())
+        got = g.script_targets("tools/impacts/start.py", ["ZED-7"], root)
+        want = {".claude/settings.local.json", "ai-context/.active-story"}
+        check("WS8 start.py targets include settings.local.json and .active-story", got is not None and want <= set(got[0]), repr(got))
+        for words in (["python3", "tools/impacts/start.py", "ZED-7"], ["py", "-3", "tools/impacts/start.py", "ZED-7"],
+                      ["python3", "tools/impacts/start.py"]):
+            for mode, cfg in policy["modes"].items():
+                patterns = [p for grp in cfg["bash_allow"] for p in policy["bash_groups"][grp]]
+                check(f"WS8 start.py matches no {mode} allowlist group: {' '.join(words)}", not g.segment_matches(words, patterns))
+        maintain = [p for grp in policy["modes"]["maintain"]["bash_allow"] for p in policy["bash_groups"][grp]]
+        check("WS8 maintain still runs other tools/impacts scripts", g.segment_matches(["python3", "tools/impacts/starter.py"], maintain))
+
+    guarded(check, "WS8 start.py modelled", body)
+    return all(results)
+
+
+def check_source_root_drift():
+    """The guard's sourceRoot reading (scope_core via Scope) equals tools/config/framework_config.source_root for a set of
+    committed configs. Excluded, by design: a missing file or a missing sourceRoot key (framework_config defaults to ".",
+    the guard reads no source root), and startingPoint/impactChecks values, which only framework_config validates."""
+    g = guard_module()
+    check, results = checker()
+    path = os.path.join(HERE, "..", "config", "framework_config.py")
+
+    def body():
+        spec = importlib.util.spec_from_file_location("framework_config_for_drift", path)
+        fc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fc)
+        configs = [{"sourceRoot": "force-app"}, {"sourceRoot": "force-app/"}, {"sourceRoot": "./force-app"}, {"sourceRoot": "."},
+                   {"startingPoint": "greenfield", "sourceRoot": "force-app/main"}, {"sourceRoot": "nowhere"},
+                   {"sourceRoot": "../x"}, {"sourceRoot": "/abs"}, {"sourceRoot": ""}, {"sourceRoot": 3},
+                   {"sourceRoot": "force-app", "extra": 1}, "[1]", '{"sourceRoot": "force-app"', {"sourceRoot": "README.md"}]
+        for cfg in configs:
+            text = cfg if isinstance(cfg, str) else json.dumps(cfg)
+            project = make_project("normal", {".ai-framework.json": text, "README.md": "x\n"})
+            try:
+                real = os.path.realpath(project)
+                try:
+                    theirs = os.path.relpath(fc.source_root(real), real).replace(os.sep, "/")
+                except ValueError:
+                    theirs = None
+                ours, _ = g.Scope(real, None).source_root()
+                check(f"WS8 drift: sourceRoot reading agrees for {text}", ours == theirs, f"guard {ours!r} framework_config {theirs!r}")
+            finally:
+                drop(project)
+        project = make_project("normal", {"README.md": "x\n"})
+        try:
+            real = os.path.realpath(project)
+            ours, reason = g.Scope(real, None).source_root()
+            check("WS8 drift: the documented divergence holds (missing config: guard none, framework_config '.')",
+                  ours is None and "no source root" in (reason or "") and os.path.realpath(fc.source_root(real)) == real,
+                  f"{ours!r} {reason!r}")
+        finally:
+            drop(project)
+
+    guarded(check, "WS8 drift: sourceRoot reading", body)
+    return all(results)
+
+
+def check_package_drift():
+    """scope_core (beside this file) and tools/impacts/package.py's validate_package give the same verdict, equal to the
+    recorded one, over the shared fixtures in tools/impacts/scope_fixtures.json. tools/impacts/test_package.py runs the
+    same comparison from the other side. package.py is loaded by path; SKIP when it or the fixtures are absent."""
+    check, results = checker()
+    impacts = os.path.normpath(os.path.join(HERE, "..", "impacts"))
+    pkg_path, fx_path = os.path.join(impacts, "package.py"), os.path.join(impacts, "scope_fixtures.json")
+    if not (os.path.isfile(pkg_path) and os.path.isfile(fx_path)):
+        print("[SKIP] WS8 drift: package.py vs scope_core: tools/impacts/package.py or scope_fixtures.json absent")
+        return True
+
+    def body():
+        import copy
+        import types
+        saved_path, saved_mods = list(sys.path), set(sys.modules)
+        try:
+            spec = importlib.util.spec_from_file_location("package_for_drift", pkg_path)
+            pkg_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(pkg_mod)
+        finally:
+            sys.path[:] = saved_path
+            for name in set(sys.modules) - saved_mods:  # package.py's own imports (validate, register, ...) leave again
+                sys.modules.pop(name, None)
+        core = types.ModuleType("scope_core_for_drift")
+        core_path = os.path.join(HERE, "scope_core.py")
+        with open(core_path, "rb") as f:
+            exec(compile(f.read(), core_path, "exec"), core.__dict__)
+        with open(fx_path, encoding="utf-8") as f:
+            doc = json.load(f)
+        active = f"{doc['storyId']}-{doc['slug']}"
+        top = tempfile.mkdtemp(prefix="guard-drift-")
+        try:
+            os.makedirs(os.path.join(top, "src"))
+            os.makedirs(os.path.join(top, "elsewhere"))
+            try:
+                os.symlink(os.path.join(top, "elsewhere"), os.path.join(top, "src", "link"))
+                can_link = True
+            except OSError:
+                can_link = False
+            real = os.path.realpath(top)
+            ran = 0
+            for case in doc["cases"]:
+                if case["name"] == "symlinked-entry" and not can_link:
+                    print("[SKIP] WS8 drift: symlinked-entry: cannot create symlinks here")
+                    continue
+                pkg = copy.deepcopy(case["pkg"])
+                fill = case.get("fill")
+                if fill:
+                    pkg["scope"][fill["key"]] = [fill["pattern"] % n for n in range(fill["count"])]
+                src = case["sourceRoot"]
+                theirs = pkg_mod.validate_package(copy.deepcopy(pkg), src, root=real) == []
+                ours = core._validate(real, src, active, copy.deepcopy(pkg)) is None
+                ran += 1
+                check(f"WS8 drift: package.py and scope_core agree on {src} {case['name']}",
+                      ours == theirs == case["accept"], f"scope_core {ours} package.py {theirs} recorded {case['accept']}")
+            check("WS8 drift: the shared fixtures hold accepted and rejected cases",
+                  ran >= 10 and any(c["accept"] for c in doc["cases"]) and not all(c["accept"] for c in doc["cases"]))
+        finally:
+            shutil.rmtree(top, ignore_errors=True)
+
+    guarded(check, "WS8 drift: package.py vs scope_core", body)
+    return all(results)
+
+
+def core_unit_cases(tmp, empty_hooks):
+    """The trace_core and scope_core unit tests (staged in WS8 Task 3), loading the cores beside this file by
+    explicit path. Nested, so their helpers stay local. Returns {name: function}."""
+    TMP, EMPTY_HOOKS = tmp, empty_hooks
+
+    def load(name):
+        path = os.path.join(HERE, name + ".py")
+        spec = importlib.util.spec_from_file_location("ws8_" + name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+    def trace():
+        return load("trace_core")
+
+
+    def scope():
+        return load("scope_core")
+
+
+    # ---- temp git repos ----
+
+    ACTIVE = "ZED-7-sample-change"
+    SRC = "force-app"
+    CLS = "force-app/main/default/classes/ZedThing.cls"
+    CLS_META = "force-app/main/default/classes/ZedThing.cls-meta.xml"
+    TEST = "force-app/main/default/classes/ZedThing_Test.cls"
+    NEW = "force-app/main/default/classes/ZedNew.cls"
+
+
+    def git_env():
+        return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+    def git(repo, *args):
+        cmd = ["git", "-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+               "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + EMPTY_HOOKS, "-c", "core.fsmonitor=false"]
+        p = subprocess.run(cmd + list(args), capture_output=True, text=True, env=git_env(), stdin=subprocess.DEVNULL)
+        assert p.returncode == 0, (args, p.stdout, p.stderr)
+        return p.stdout
+
+
+    def package(**over):
+        pkg = {
+            "schemaVersion": 1,
+            "storyId": "ZED-7",
+            "slug": "sample-change",
+            "criteria": [{"id": "AC-1", "given": "g", "when": "w", "then": "t", "examples": []},
+                         {"id": "AC-2", "given": "g", "when": "w", "then": "t", "examples": []}],
+            "scope": {"modify": [CLS, CLS_META], "create": [{"api": "ZedNew", "type": "ApexClass", "path": NEW}],
+                      "tests": [TEST]},
+            "rules": [],
+            "done": [],
+        }
+        pkg.update(over)
+        return pkg
+
+
+    def make_repo(files=None, cfg=None, pkg=None, folder=ACTIVE, commit=True, dirs=(SRC + "/main/default/classes",)):
+        """A committed temp repo. files: {path: text}. cfg/pkg: dict, raw str, or None to omit."""
+        repo = tempfile.mkdtemp(prefix="repo_", dir=TMP)
+        git(repo, "init", "-q")
+        all_files = {"README.md": "fixture\n"}
+        if cfg is not None:
+            all_files[".ai-framework.json"] = cfg if isinstance(cfg, str) else json.dumps(cfg)
+        if pkg is not None:
+            all_files["impacts/%s/build-package.json" % folder] = pkg if isinstance(pkg, str) else json.dumps(pkg)
+        all_files.update(files or {})
+        for d in dirs:
+            os.makedirs(os.path.join(repo, d), exist_ok=True)
+            all_files.setdefault(d + "/.keep", "")
+        for rel, text in all_files.items():
+            write(repo, rel, text)
+        if commit:
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", "fixture")
+        return repo
+
+
+    def write(repo, rel, text):
+        path = os.path.join(repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+
+
+    CFG = {"startingPoint": "existing", "sourceRoot": SRC}
+
+
+    def read(repo, active=ACTIVE):
+        return scope().read_package(repo, active)
+
+
+    def rejects(repo, needle, active=ACTIVE):
+        pkg, err = read(repo, active)
+        assert pkg is None, pkg
+        assert err and needle in err, (needle, err)
+
+
+    def rejects_pkg(needle, cfg=CFG, **over):
+        rejects(make_repo(cfg=cfg, pkg=package(**over)), needle)
+
+
+    def with_scope(**kw):
+        s = {"modify": [CLS], "create": [], "tests": [TEST]}
+        s.update(kw)
+        return s
+
+
+    # ---- trace_core ----
+
+    def test_prefix_ids_not_confused():
+        t = trace()
+        assert t.missing_criteria(["AC-1"], {"a": "covers AC-10 and AC-11"}) == ["AC-1"]
+        assert t.missing_criteria(["AC-1"], {"a": "covers AC-1."}) == []
+        assert t.missing_criteria(["AC-10"], {"a": "covers AC-1"}) == ["AC-10"]
+        assert t.missing_criteria(["AC-1"], {"a": "XAC-1 and AC-1_x and AC-1a"}) == ["AC-1"]
+
+
+    def test_boundaries_reject_unicode_letters_and_dash_digit():
+        t = trace()
+        for text in ["ÄAC-1", "éAC-1", "1AC-1", "AC-1-2", "AC-1-0 only", "AC-1é", "AC-1٣"]:
+            assert t.missing_criteria(["AC-1"], {"a": text}) == ["AC-1"], text
+            assert t.unknown_refs([], {"a": text}) == [], text
+        for text in ["AC-1-x", "AC-1 - 2", "(AC-1)", "AC-1: x", "«AC-1»", "AC-1."]:
+            assert t.missing_criteria(["AC-1"], {"a": text}) == [], text
+
+
+    def test_missing_criteria_sorted_unique():
+        t = trace()
+        assert t.missing_criteria(["EC-1", "AC-10", "AC-2", "AC-2"], {}) == ["AC-2", "AC-10", "EC-1"]
+        # an id that is not AC-n / EC-n can never be referenced: always missing, never raises
+        assert t.missing_criteria(["OQ-1", "AC-1"], {"a": "AC-1 OQ-1"}) == ["OQ-1"]
+
+
+    def test_trace_core_is_linear_in_text():
+        t = trace()
+        import time
+        # Worst case: no package id is referenced, so a per-id search would scan every byte once per id.
+        line = "".join("    System.assertEquals(1, x); // AC-%d EC-%d\n" % (i, i) for i in range(2001, 6001))
+        body = (line * (t.MAX_READ // len(line) + 1))[:t.MAX_READ]
+        texts = {"f%d" % i: body for i in range(10)}
+        ids = ["AC-%d" % i for i in range(1, 2001)]
+        start = time.monotonic()
+        missing = t.missing_criteria(ids, texts)
+        unknown = t.unknown_refs(ids, texts)
+        took = time.monotonic() - start
+        assert len(missing) == 2000 and len(unknown) == 8000, (len(missing), len(unknown))
+        assert took < 2.0, "2000 ids x 10 files of 2 MB took %.2f s" % took
+
+
+    def test_criteria_problem_matches_scope_core():
+        t = trace()
+        cases = [[{"id": "AC-1"}, {"id": "EC-2"}], [], "AC-1", None, [{"id": "AC-1"}, {"id": "AC-1"}], [{"id": "OQ-1"}],
+                 [{"id": "AC-1 "}], [{"id": "AC-1\n"}], ["AC-1"], [{"id": 1}], [{}], [{"id": "ac-1"}], [{"id": "AC-"}]]
+        for crit in cases:
+            mine = t.criteria_problem(crit)
+            pkg, err = read(make_repo(cfg=CFG, pkg=package(criteria=crit)))
+            assert (mine is None) == (err is None), (crit, mine, err)
+            if err is not None:
+                assert "criteri" in err, (crit, err)
+
+
+    def test_missing_criteria_order_and_union():
+        t = trace()
+        texts = {"a": "// AC-2", "b": "EC-3 here"}
+        assert t.missing_criteria(["AC-1", "AC-2", "EC-3", "AC-4"], texts) == ["AC-1", "AC-4"]
+        assert t.missing_criteria(["AC-1"], {}) == ["AC-1"]
+        assert t.missing_criteria([], {"a": "AC-1"}) == []
+
+
+    def test_unknown_ref_fails():
+        t = trace()
+        texts = {"a": "AC-1 AC-3 EC-2", "b": "AC-3 and AC-10"}
+        assert t.unknown_refs(["AC-1"], texts) == ["AC-3", "AC-10", "EC-2"]
+        assert t.unknown_refs(["AC-1", "AC-3", "AC-10", "EC-2"], texts) == []
+        assert t.unknown_refs(["AC-1"], {"a": "OQ-1 is not a criterion"}) == []
+
+
+    def test_unknown_refs_same_boundary_as_matching():
+        t = trace()
+        # "-" before the id is not a boundary in either function: X-AC-1 is neither a ref nor a match.
+        assert t.unknown_refs([], {"a": "X-AC-1 ZAC-2 AC-3_b"}) == []
+        assert t.missing_criteria(["AC-1"], {"a": "X-AC-1"}) == ["AC-1"]
+
+
+    def test_id_in_out_of_scope_file_ignored():
+        t = trace()
+        repo = make_repo(files={TEST: "// nothing yet\n", "force-app/main/default/classes/Other_Test.cls": "// AC-1\n"},
+                         cfg=CFG)
+        texts = t.read_tests(repo, [TEST])
+        assert list(texts) == [TEST], texts
+        assert t.missing_criteria(["AC-1"], texts) == ["AC-1"]
+
+
+    def test_read_tests_skips_missing_dirs_and_symlinks():
+        t = trace()
+        repo = make_repo(files={TEST: "AC-1\n", "outside.txt": "AC-2\n"}, cfg=CFG)
+        link = "force-app/main/default/classes/Link_Test.cls"
+        os.symlink(os.path.join(repo, "outside.txt"), os.path.join(repo, link))
+        texts = t.read_tests(repo, [TEST, "force-app/nope_Test.cls", "force-app", link])
+        assert list(texts) == [TEST], texts
+
+
+    def test_read_tests_cap_and_replace():
+        t = trace()
+        cap = t.MAX_READ
+        assert cap == 2 * 1024 * 1024, cap
+        repo = make_repo(cfg=CFG)
+        path = os.path.join(repo, TEST)
+        with open(path, "wb") as fh:
+            fh.write(b"\xff\xfe AC-1 " + b"x" * cap + b" AC-2")
+        texts = t.read_tests(repo, [TEST])
+        assert t.missing_criteria(["AC-1", "AC-2"], texts) == ["AC-2"], "past the cap must not count"
+        assert "�" in texts[TEST]
+
+
+    def test_read_tests_rejects_escaping_paths():
+        t = trace()
+        repo = make_repo(files={TEST: "AC-1\n"}, cfg=CFG)
+        texts = t.read_tests(repo, ["../x", "/etc/hosts", "a/../" + TEST])
+        assert texts == {}, texts
+
+
+    def test_source_test_paths_drops_meta_companions():
+        t = trace()
+        meta = TEST + "-meta.xml"
+        assert t.META_SUFFIX == "-meta.xml"
+        assert t.source_test_paths([meta, TEST, "a/x-meta.xmlX", 3, "b/Y_Test.cls"]) == [TEST, "a/x-meta.xmlX", "b/Y_Test.cls"]
+        assert t.source_test_paths([]) == []
+        repo = make_repo(files={TEST: "// AC-1\n", meta: "<x>AC-2</x>\n"}, cfg=CFG)
+        texts = t.read_tests(repo, t.source_test_paths([TEST, meta]))
+        assert list(texts) == [TEST], texts
+        assert t.missing_criteria(["AC-1", "AC-2"], texts) == ["AC-2"], "an id only in a -meta.xml covers nothing"
+
+
+    # ---- scope_core: happy path ----
+
+    def test_scope_core_reads_valid_package():
+        repo = make_repo(cfg=CFG, pkg=package())
+        pkg, err = read(repo)
+        assert err is None, err
+        assert pkg["scope"]["modify"] == [CLS, CLS_META]
+        assert [c["id"] for c in pkg["criteria"]] == ["AC-1", "AC-2"]
+
+
+    def test_scope_core_source_root_from_head():
+        s = scope()
+        assert s.source_root_from_head(make_repo(cfg=CFG)) == (SRC, None)
+        assert s.source_root_from_head(make_repo(cfg={"sourceRoot": "force-app/"}))[0] == SRC
+        assert s.source_root_from_head(make_repo(cfg={"sourceRoot": "."}))[0] == "."
+
+
+    def test_scope_core_missing_config_is_no_source_root():
+        s = scope()
+        src, err = s.source_root_from_head(make_repo())
+        assert src is None and "no source root" in err, err
+        src, err = s.source_root_from_head(make_repo(cfg={"startingPoint": "existing"}))
+        assert src is None and "no source root" in err, err
+        rejects(make_repo(pkg=package()), "no source root")
+
+
+    def test_scope_core_rejects_bad_config():
+        s = scope()
+        for cfg, needle in [("[1]", "not a JSON object"), ("{", "not valid JSON"), ({"sourceRoot": SRC, "x": 1}, "unknown key"),
+                            ({"sourceRoot": ""}, "non-empty string"), ({"sourceRoot": 3}, "non-empty string"),
+                            ({"sourceRoot": "../x"}, ".."), ({"sourceRoot": "/abs"}, "absolute"),
+                            ({"sourceRoot": "force-app\\x"}, "backslash"), ({"sourceRoot": "nope"}, "not a directory"),
+                            ('{"sourceRoot": "a", "sourceRoot": "force-app"}', "duplicate key")]:
+            src, err = s.source_root_from_head(make_repo(cfg=cfg))
+            assert src is None and err and needle in err, (cfg, needle, err)
+
+
+    def test_scope_core_rejects_source_root_symlink_outside():
+        outside = tempfile.mkdtemp(prefix="outside_", dir=TMP)
+        repo = make_repo(cfg={"sourceRoot": "linked"})
+        os.symlink(outside, os.path.join(repo, "linked"))
+        src, err = scope().source_root_from_head(repo)
+        assert src is None and "outside the repo" in err, err
+
+
+    # ---- scope_core: rejections ----
+
+    def test_scope_core_rejects_dotdot():
+        rejects_pkg("..", scope=with_scope(modify=["force-app/main/../../tools/x.cls"]))
+
+
+    def test_scope_core_rejects_absolute():
+        rejects_pkg("absolute", scope=with_scope(modify=["/force-app/main/default/classes/ZedThing.cls"]))
+
+
+    def test_scope_core_rejects_outside_source_root():
+        rejects_pkg("outside sourceRoot", scope=with_scope(modify=["docs/x.md"]))
+
+
+    def test_scope_core_rejects_under_impacts():
+        # sourceRoot "." makes every path "source", so only the reserved-prefix rule can fire.
+        for path in ["impacts/ZED-7-sample-change/build-package.json", "tools/guard/x.py", "Tools/Guard/x.py",
+                     "framework/rules/x.md", ".claude/settings.json", ".github/workflows/ci.yml",
+                     "ai-context/.active-story", ".ai-framework.json", "a/.git/config", "docs/CODEOWNERS"]:
+            rejects_pkg("reserved", cfg={"sourceRoot": "."}, scope=with_scope(modify=[path]))
+
+
+    def test_scope_core_dot_source_root_allows_plain_paths():
+        repo = make_repo(cfg={"sourceRoot": "."}, pkg=package())
+        pkg, err = read(repo)
+        assert err is None, err
+
+
+    def test_scope_core_rejects_bad_entry_syntax():
+        for entry, needle in [("force-app\\a.cls", "backslash"), ("force-app/*.cls", "glob"), ("force-app/a?.cls", "glob"),
+                              ("force-app/[a].cls", "glob"), ("", "empty"), ("force-app//a.cls", "empty"),
+                              ("force-app/./a.cls", "'.'"), ("force-app/main/", "empty"), (3, "string"),
+                              (SRC, "outside sourceRoot"), ("force-app/a\nb.cls", "control")]:
+            rejects_pkg(needle, scope=with_scope(modify=[entry]))
+
+
+    def test_scope_core_rejects_duplicate_entry():
+        rejects_pkg("duplicate", scope=with_scope(modify=[CLS, CLS]))
+
+
+    def test_scope_core_rejects_symlinked_entry():
+        repo = make_repo(cfg=CFG, pkg=package(scope=with_scope(modify=["force-app/link/ZedThing.cls"])))
+        os.symlink(os.path.join(repo, "force-app/main/default/classes"), os.path.join(repo, "force-app/link"))
+        rejects(repo, "symlink")
+
+
+    def test_scope_core_rejects_create_shape():
+        rejects_pkg("object", scope=with_scope(create=[NEW]))
+        rejects_pkg("path", scope=with_scope(create=[{"api": "ZedNew", "type": "ApexClass"}]))
+        rejects_pkg("api", scope=with_scope(create=[{"type": "ApexClass", "path": NEW}]))
+        rejects_pkg("outside sourceRoot", scope=with_scope(create=[{"api": "X", "type": "ApexClass", "path": "docs/X.cls"}]))
+
+
+    def test_scope_core_rejects_bad_shape():
+        rejects_pkg("scope", scope=None)
+        rejects_pkg("scope.tests", scope={"modify": [CLS], "create": []})
+        rejects_pkg("scope.modify", scope=with_scope(modify="force-app/a.cls"))
+        rejects_pkg("schemaVersion", schemaVersion=2)
+        rejects(make_repo(cfg=CFG, pkg="[1]"), "not a JSON object")
+
+
+    def test_scope_core_rejects_criteria():
+        rejects_pkg("duplicate criterion", criteria=[{"id": "AC-1"}, {"id": "AC-1"}])
+        rejects_pkg("criteria", criteria=[])
+        rejects_pkg("criteria", criteria="AC-1")
+        rejects_pkg("criterion id", criteria=[{"id": "OQ-1"}])
+        rejects_pkg("criterion id", criteria=[{"id": "AC-1 "}])
+        rejects_pkg("criterion", criteria=["AC-1"])
+
+
+    def test_scope_core_rejects_story_mismatch():
+        rejects_pkg("storyId", storyId="ZED-8")
+        rejects_pkg("slug", slug="other-change")
+
+
+    def test_scope_core_rejects_invalid_json():
+        rejects(make_repo(cfg=CFG, pkg="{not json"), "not valid JSON")
+        rejects(make_repo(cfg=CFG, pkg='{"storyId": "ZED-7", "storyId": "ZED-7"}'), "duplicate key")
+
+
+    def test_scope_core_rejects_invalid_utf8():
+        repo = make_repo(cfg=CFG, pkg=package())
+        path = os.path.join(repo, "impacts", ACTIVE, "build-package.json")
+        with open(path, "wb") as fh:
+            fh.write(b'{"x": "\xff"}')
+        git(repo, "commit", "-q", "-am", "bad utf8")
+        rejects(repo, "UTF-8")
+
+
+    def test_scope_core_rejects_not_at_head():
+        repo = make_repo(cfg=CFG)
+        write(repo, "impacts/%s/build-package.json" % ACTIVE, json.dumps(package()))
+        rejects(repo, "commit")
+        # in the tree, removed from the index and HEAD
+        repo = make_repo(cfg=CFG, pkg=package())
+        git(repo, "rm", "-q", "--cached", "impacts/%s/build-package.json" % ACTIVE)
+        git(repo, "commit", "-q", "-m", "x")
+        assert os.path.exists(os.path.join(repo, "impacts", ACTIVE, "build-package.json"))
+        rejects(repo, "commit")
+
+
+    def test_scope_core_rejects_two_matching_folders():
+        repo = make_repo(cfg=CFG, pkg=package(),
+                         files={"impacts/ZED-7-other-change/build-package.json": json.dumps(package(slug="other-change"))})
+        rejects(repo, "two or more")
+        # ZED-70-* does not match ZED-7
+        repo = make_repo(cfg=CFG, pkg=package(), files={"impacts/ZED-70-sample-change/notes.md": "x\n"})
+        pkg, err = read(repo)
+        assert err is None, err
+
+
+    def test_scope_core_rejects_oversize():
+        big = package(pad="x" * (1024 * 1024))
+        rejects(make_repo(cfg=CFG, pkg=big), "1048576")
+        many = ["force-app/main/default/classes/C%d.cls" % i for i in range(2001)]
+        rejects_pkg("2000", scope=with_scope(modify=many))
+
+
+    def test_scope_core_rejects_invalid_active():
+        repo = make_repo(cfg=CFG, pkg=package())
+        for active in ["ZED-7", "ZED-7-../x", "ZED-7-a/b", "zed-7-x", "ZED-7-X", "ZED-7-a b", "ZED-7-a\nHEAD:x", "", None]:
+            rejects(repo, "active story", active=active)
+
+
+    def test_scope_core_unknown_story():
+        rejects(make_repo(cfg=CFG, pkg=package()), "commit", active="ZED-9-sample-change")
+
+
+    def test_scope_core_reads_head_not_worktree():
+        # 1. a work-tree edit widening the committed package is ignored
+        repo = make_repo(cfg=CFG, pkg=package())
+        wide = package(scope=with_scope(modify=[CLS, "force-app/main/default/classes/Wide.cls"]))
+        write(repo, "impacts/%s/build-package.json" % ACTIVE, json.dumps(wide))
+        pkg, err = read(repo)
+        assert err is None and pkg["scope"]["modify"] == [CLS, CLS_META], (err, pkg)
+        # 2. a work-tree edit to sourceRoot is ignored
+        repo = make_repo(cfg=CFG, pkg=package(), dirs=(SRC + "/main/default/classes", "docs"))
+        write(repo, ".ai-framework.json", json.dumps({"sourceRoot": "docs"}))
+        assert scope().source_root_from_head(repo) == (SRC, None)
+        pkg, err = read(repo)
+        assert err is None, err
+        # 3. a package deleted from the work tree is still read from HEAD
+        repo = make_repo(cfg=CFG, pkg=package())
+        os.remove(os.path.join(repo, "impacts", ACTIVE, "build-package.json"))
+        pkg, err = read(repo)
+        assert err is None and pkg["storyId"] == "ZED-7", err
+
+
+    def test_scope_core_ignores_git_env():
+        repo = make_repo(cfg=CFG, pkg=package())
+        old = dict(os.environ)
+        try:
+            os.environ["GIT_DIR"] = os.path.join(TMP, "no-such-git-dir")
+            os.environ["GIT_CONFIG_PARAMETERS"] = "'core.fsmonitor'='false'"
+            pkg, err = read(repo)
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        assert err is None, err
+
+
+    def test_scope_core_git_failure_is_an_error():
+        repo = make_repo(cfg=CFG, pkg=package())
+        old = os.environ.get("PATH", "")
+        try:
+            os.environ["PATH"] = os.path.join(TMP, "empty-path")
+            pkg, err = read(repo)
+        finally:
+            os.environ["PATH"] = old
+        assert pkg is None and "git" in err, err
+        pkg, err = scope().read_package(repo, ACTIVE, timeout=0.000001)
+        assert pkg is None and err, err
+
+
+    def test_scope_core_schema_version_exact_int():
+        for bad in [True, 1.0, "1", 2, None]:
+            rejects_pkg("schemaVersion", schemaVersion=bad)
+        # schemaVersion absent
+        pkg = package()
+        del pkg["schemaVersion"]
+        rejects(make_repo(cfg=CFG, pkg=pkg), "schemaVersion")
+
+
+    BAD_CHARS = ["\x00", "\x1f", "\x7f", "\x85", "\x9f", "‪", "‮", "⁦", "⁩"]
+
+
+    def test_scope_core_source_root_control_chars_no_exception():
+        s = scope()
+        for ch in BAD_CHARS:
+            cfg = {"sourceRoot": "force" + ch + "app"}
+            src, err = s.source_root_from_head(make_repo(cfg=cfg))
+            assert src is None and err and "control character" in err, (repr(ch), err)
+            rejects(make_repo(cfg=cfg, pkg=package()), "control character")
+
+
+    def test_scope_core_entry_control_chars():
+        for ch in BAD_CHARS:
+            rejects_pkg("control character", scope=with_scope(modify=["force-app/main/default/classes/A" + ch + ".cls"]))
+            rejects_pkg("control character", scope=with_scope(
+                create=[{"api": "A", "type": "ApexClass", "path": "force-app/main/default/classes/B" + ch + ".cls"}]))
+        # an ordinary non-ASCII letter is not a control character
+        repo = make_repo(cfg=CFG, pkg=package(scope=with_scope(modify=["force-app/main/default/classes/Zé.cls"])))
+        pkg, err = read(repo)
+        assert err is None, err
+
+
+    def test_scope_core_public_functions_never_raise():
+        s = scope()
+        pkg, err = s.read_package(None, ACTIVE)
+        assert pkg is None and err == "read_package failed: TypeError", err
+        src, err = s.source_root_from_head(None)
+        assert src is None and err == "source_root_from_head failed: TypeError", err
+        pkg, err = s.read_package(make_repo(cfg=CFG, pkg=package()), ACTIVE, timeout="soon")
+        assert pkg is None and err.startswith("read_package failed: "), err
+
+
+    def test_scope_core_git_env():
+        s = scope()
+        old = dict(os.environ)
+        try:
+            os.environ["GIT_DIR"] = "/nowhere"
+            os.environ["GIT_NO_LAZY_FETCH"] = "0"
+            env = s._git_env()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+        assert env["GIT_NO_LAZY_FETCH"] == "1", env.get("GIT_NO_LAZY_FETCH")
+        assert sorted(k for k in env if k.startswith("GIT_")) == ["GIT_NO_LAZY_FETCH"], env
+
+
+    def test_scope_core_no_commits_yet():
+        repo = make_repo(cfg=CFG, pkg=package(), commit=False)
+        rejects(repo, "commit")
+
+    return {n: f for n, f in locals().items() if n.startswith("test_") and callable(f)}
+
+
+def check_core_units():
+    """The trace_core and scope_core unit tests, against the cores beside this file."""
+    check, results = checker()
+    tmp = tempfile.mkdtemp(prefix="guard-cores-")
+    try:
+        hooks = os.path.join(tmp, "_nohooks")
+        os.makedirs(hooks)
+        try:
+            cases = core_unit_cases(tmp, hooks)
+        except Exception as e:
+            check("WS8 core unit tests load", False, f"{type(e).__name__}: {e}")
+            return False
+        probe = os.path.join(tmp, "probe")
+        try:
+            os.symlink(tmp, probe)
+            can_link = True
+        except OSError:
+            can_link = False
+        for name in sorted(cases):
+            if "symlink" in name and not can_link:
+                print(f"[SKIP] WS8 core {name}: cannot create symlinks here")
+                continue
+            try:
+                cases[name]()
+                check(f"WS8 core {name}", True)
+            except Exception as e:
+                check(f"WS8 core {name}", False, f"{type(e).__name__}: {str(e)[:300]}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return all(results)
+
 
 def git(project, *args):
     subprocess.run(GIT + list(args), cwd=project, check=True, capture_output=True)
@@ -1279,8 +2355,10 @@ def make_dirty(project, dirty):
 
 
 def case_env(project, env_mode, extra=None):
-    env = dict(os.environ, **(extra or {}))
+    env = dict(os.environ)
     env.pop("AI_FRAMEWORK_MODE", None)
+    env.pop("AI_FRAMEWORK_STORY", None)  # only a case's own extra environment may name a story
+    env.update(extra or {})
     env["CLAUDE_PROJECT_DIR"] = project
     if env_mode is not None:
         env["AI_FRAMEWORK_MODE"] = env_mode
@@ -1307,7 +2385,7 @@ def guard_copy(policy):
     """A temp copy of the wrapper and guard.py next to a policy.json merged with `policy`. Returns (dir, wrapper)."""
     copy = tempfile.mkdtemp(prefix="guard-policy-")
     try:
-        for name in (os.path.basename(WRAPPER), "guard.py"):
+        for name in (os.path.basename(WRAPPER), "guard.py") + CORE_FILES:
             shutil.copy(os.path.join(HERE, name), os.path.join(copy, name))
         wrapper = os.path.join(copy, os.path.basename(WRAPPER))
         os.chmod(wrapper, 0o755)
@@ -1328,6 +2406,11 @@ def run_case(case):
         for rel, text in case.git_append.items():
             append(project, rel, text)
         make_dirty(project, case.dirty)
+        for rel, text in case.post_files.items():
+            if text is None:
+                os.remove(os.path.join(project, *rel.split("/")))
+            else:
+                put(project, rel, text)
         for args in case.after:
             git(project, *args)
         payload = case.payload
@@ -1475,7 +2558,7 @@ def run_hook_command(case, mode=None, command=None):
     project = make_project(case.committed_mode, case.files)
     try:
         dest = os.path.join(project, "tools", "guard")
-        for name in ("guard.sh", "guard.cmd", "guard.py", "policy.json"):
+        for name in ("guard.sh", "guard.cmd", "guard.py", "policy.json") + CORE_FILES:
             shutil.copy(os.path.join(HERE, name), os.path.join(dest, name))
         if mode is not None:
             os.chmod(os.path.join(dest, "guard.sh"), mode)
@@ -1819,7 +2902,7 @@ def hook_command_results():
 
 
 def report(case, code, err):
-    ok = code == case.want and case.stderr_has in err
+    ok = code == case.want and case.stderr_has in err and not (case.stderr_lacks and case.stderr_lacks in err)
     note = "" if ok else f" stderr: {err.strip()!r}"
     print(f"[{'PASS' if ok else 'FAIL'}] {case.name}: exit {code} (want {case.want}){note}")
     return ok
@@ -1828,8 +2911,19 @@ def report(case, code, err):
 def main():
     results = []
     for case in (CASES + ALLOWLIST_CASES + FIX_CASES + FIX2_CASES + FIX3_CASES + FIX4_CASES + TRIPWIRE_CASES + REBASELINE_CASES
-                 + ROUND2_CASES + FINAL_CASES + EXTRA_CASES + list(no_allowlist_variants(CASES))):
+                 + ROUND2_CASES + FINAL_CASES + EXTRA_CASES + list(no_allowlist_variants(CASES))
+                 + SCOPE_CASES + SCOPE_BASH_CASES + list(no_allowlist_variants(SCOPE_BASH_CASES))):
         results.append(report(case, *run_case(case)))
+    results.append(check_core_units())
+    results.append(check_source_root_drift())
+    results.append(check_package_drift())
+    results.append(check_scope_lazy())
+    results.append(check_scope_git_failure())
+    results.append(check_scope_git_gate())
+    results.append(check_scope_fsmonitor())
+    results.append(check_scope_symlink())
+    results.append(check_scope_hardlink())
+    results.append(check_start_modelled())
     results.append(check_settings_deny())
     results.append(check_hook_matcher())
     results.append(check_walk_budget())
