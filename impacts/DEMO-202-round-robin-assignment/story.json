@@ -59,6 +59,16 @@
       "source": "edge-case",
       "then": "The 2 cases are owned by 2 different agents from the pool.",
       "when": "A user creates 2 cases of record type \"Premium_Support\" in one save"
+    },
+    {
+      "examples": [
+        "\"Synthetic Case 41\" created by \"Creator X\" with owner \"Agent Z\". Owner stays \"Agent Z\"."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\"",
+      "id": "AC-7",
+      "source": "stated",
+      "then": "The case is owned by \"Agent Z\".",
+      "when": "\"Creator X\" creates 1 case with owner set to \"Agent Z\""
     }
   ],
   "benefit": "Even workload across agents, with no manual triage (Product Owner, OQ-2)",
@@ -123,7 +133,8 @@
   "inScope": [
     "Setting the owner of newly created cases by round-robin across the active users of the Escalation_Agents queue (OQ-3, OQ-5)",
     "Premium_Support cases join the same rotation (OQ-6)",
-    "Keeping the rotation position between transactions, so the next case goes to the next agent (AC-2)"
+    "Keeping the rotation position between transactions, so the next case goes to the next agent (AC-2)",
+    "Cases created with an explicit owner other than the creator keep that owner (OQ-11)"
   ],
   "nonFunctional": [
     "Volumes, timing and peak load are not stated; no number is assumed (OQ-8)",
@@ -209,6 +220,14 @@
       "id": "OQ-10",
       "ownerRole": "Salesforce Admin",
       "text": "Does the org already use case assignment rules, Omni-Channel routing or another tool that sets the owner of new cases? If so, which one wins? This is org configuration, not in this repo."
+    },
+    {
+      "answer": "Honour an explicit owner. Round-robin assigns only cases whose owner is still the creator.",
+      "deferred": false,
+      "deferredBy": null,
+      "id": "OQ-11",
+      "ownerRole": "Product Owner",
+      "text": "Should round-robin replace an owner set explicitly at creation (by a user, an integration or a test), or only assign cases whose owner is still the default, the creator?"
     }
   ],
   "outOfScope": [

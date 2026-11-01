@@ -16,6 +16,7 @@ Status: confirmed. Confirmed by: Product Owner. Squad: Service Ops. Seeds: `Case
 | AC-4 | The agent pool holds active user "Agent A" and inactive user "Agent C" | A user creates 3 cases in one save | No case is owned by "Agent C". | Cases "Synthetic Case 21" to "Synthetic Case 23" created together. All 3 owned by "Agent A". | assistant-proposed |
 | AC-5 | The agent pool holds only inactive user "Agent C" | A user creates 1 case | The case is saved with its default owner. | "Synthetic Case 31" created by "Creator X" with no active pool member. Owner stays "Creator X" and no error is shown. | stated |
 | AC-6 | The agent pool holds 2 active users, "Agent A" and "Agent B" | A user creates 2 cases of record type "Premium_Support" in one save | The 2 cases are owned by 2 different agents from the pool. | "Synthetic Premium 1" and "Synthetic Premium 2" created together. Owners: "Agent A" for one case, "Agent B" for the other. | edge-case |
+| AC-7 | The agent pool holds 2 active users, "Agent A" and "Agent B" | "Creator X" creates 1 case with owner set to "Agent Z" | The case is owned by "Agent Z". | "Synthetic Case 41" created by "Creator X" with owner "Agent Z". Owner stays "Agent Z". | stated |
 
 ## Edge cases
 
@@ -51,6 +52,7 @@ Status: confirmed. Confirmed by: Product Owner. Squad: Service Ops. Seeds: `Case
 | OQ-8 | What are the expected case volumes (per day and at peak, including bulk loads), and can each assigned agent see the case under the org's sharing settings? Both are org configuration, not in this repo. | Salesforce Admin | none | yes | Product Owner |
 | OQ-9 | Should assignment take agent availability, capacity or skills into account (out of office, open case limits), or is plain rotation enough? | Product Owner | No. Plain rotation; availability, capacity and skills are out of scope for this story. | no | none |
 | OQ-10 | Does the org already use case assignment rules, Omni-Channel routing or another tool that sets the owner of new cases? If so, which one wins? This is org configuration, not in this repo. | Salesforce Admin | none | yes | Product Owner |
+| OQ-11 | Should round-robin replace an owner set explicitly at creation (by a user, an integration or a test), or only assign cases whose owner is still the default, the creator? | Product Owner | Honour an explicit owner. Round-robin assigns only cases whose owner is still the creator. | no | none |
 
 ## Scope
 
@@ -59,6 +61,7 @@ Status: confirmed. Confirmed by: Product Owner. Squad: Service Ops. Seeds: `Case
 - Setting the owner of newly created cases by round-robin across the active users of the Escalation_Agents queue (OQ-3, OQ-5)
 - Premium_Support cases join the same rotation (OQ-6)
 - Keeping the rotation position between transactions, so the next case goes to the next agent (AC-2)
+- Cases created with an explicit owner other than the creator keep that owner (OQ-11)
 
 ### Out of scope
 
