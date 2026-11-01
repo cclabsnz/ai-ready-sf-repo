@@ -339,7 +339,11 @@ manual only; on a fresh runner the guard has no baseline, so it is not expected 
 outputs. Drop the steps that need `demo/` or `fixtures/`, which you left out in section 1:
 the fixtures index build, the filler generator tests and the filler `--check`, the answer-key
 tests (`test_check_answers.py`, `test_answer_to_draft.py`), and the walkthrough check
-(`walkthrough_check.py`, `test_walkthrough_check.py`). Keep `demo/measure/test_score.py` and
+(`walkthrough_check.py`, `test_walkthrough_check.py`), and the index tests that read `fixtures/`
+or build `demo/org` (`test_index.py`, `test_parsers.py`). Other tool tests name `demo/org` paths
+(for example `test_run_skill.py`, `test_pr_check.py`, `test_consistency.py`); run the copied
+workflow once on a branch and drop or adapt any step that still fails for want of `demo/` or
+`fixtures/`. Keep `demo/measure/test_score.py` and
 `test_timing.py` only if you copy `demo/measure/` (section 7). Point the index build at your
 `sourceRoot`. The workflow is a
 control path: it changes only by a reviewed PR from a code owner.
