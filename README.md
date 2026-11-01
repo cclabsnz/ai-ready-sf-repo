@@ -962,7 +962,7 @@ only the `live-consistency` job runs then; the other jobs run on pull requests o
     lacks;
   - `test_consistency.py`, `test_run_all.py` (an injected runner; `claude` never starts), the
     `demo/measure/` tests, `test_walkthrough_check.py` and `walkthrough_check.py`.
-- **`secrets`:** a gitleaks scan of the history.
+- **`secrets`:** a gitleaks secret scan.
 - **`impact-checks`,** on pull requests:
   - It builds the index from the base branch's `sourceRoot` (`framework_config.py source-root
     --root base`), falling back to `demo/org` when the base branch has no `framework_config.py`.

@@ -319,7 +319,7 @@ The register is every `impacts/*/impact.json` that validates as promoted and who
 
 ### Where the checks run
 
-The WS1 and WS2 owner patches are applied (`3fb9e73`), and the WS10 CI patch after them, so the following holds.
+The WS1 and WS2 owner patches are applied (`3fb9e73`), and the later owner patches after them, so the following holds.
 
 - **On a laptop.** The left check runs whenever story-impact writes. The writer calls the register in-process. `register.py` is read-only, so it runs in every mode. `validate.py`, `render_register.py` and `pr_check.py` are framework scripts (`normal`, `build`, `maintain`). `promote.py` is `maintain`-only.
 - **In CI.** `.github/workflows/framework-ci.yml`:
@@ -329,7 +329,7 @@ The WS1 and WS2 owner patches are applied (`3fb9e73`), and the WS10 CI patch aft
     - It builds the index from the head's checkout at the base branch's `sourceRoot` (`demo/org` here).
     - It runs the base branch's `pr_check.py` with `--root .` and `--base-root base`, so the check code, settings and register all come from base. Only the PR that first adds `pr_check.py` runs its own copy, and its result says so.
     - It writes the result to the step summary and posts or edits one PR comment.
-    - It exits with `pr_check.py`'s code.
+    - It exits with `pr_check.py`'s code. The rule check against the base baseline, an earlier step, can also fail the job (see "Scoped code writing").
 
 ### Honest limits
 
@@ -677,7 +677,7 @@ The runs committed in `demo/expected/consistency-fixture/` are hand-built to sho
 
 `demo/WALKTHROUGH.md` goes through the framework on the demo org, from the guard test to the scores against the answer key. It labels each step **deterministic (no Claude Code)**, **needs Claude Code** or **needs owner confirmations**, so a reader can see which outputs are fixed and which vary from run to run.
 
-`tools/demo/walkthrough_check.py` re-runs the deterministic steps and diffs each one against `demo/expected/<NN>-<step>.txt`. It normalises line endings, the repo path, temp folders, timestamps and commit hashes, and it sorts the consumers list by hop and api. It builds its index in a temp folder and writes nothing else. Exit 1 on any difference. `--show <step>` prints one step's normalised output, which a maintainer reviews and saves over the expected file after a deliberate change. It leaves out the guard test, which takes minutes and depends on the machine's shells. CI runs it on Ubuntu and Windows, but no runner has run it yet, and the Windows commands on the walkthrough page have not been run (Inferred).
+`tools/demo/walkthrough_check.py` re-runs the deterministic steps and diffs each one against `demo/expected/<NN>-<step>.txt`. It normalises line endings, the repo path, temp folders, timestamps and commit hashes, and it sorts the consumers list by hop and api. It builds its index in a temp folder and writes nothing else. Exit 1 on any difference. `--show <step>` prints one step's normalised output, which a maintainer reviews and saves over the expected file after a deliberate change. It leaves out the guard test, which takes minutes and depends on the machine's shells. CI runs `walkthrough_check.py` on Ubuntu and Windows, but no runner has run it yet, and the Windows commands on the walkthrough page have not been run (Inferred).
 
 ### Adoption guide
 
