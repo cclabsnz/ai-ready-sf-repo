@@ -24,8 +24,7 @@ Status: confirmed. Confirmed by: Product Owner. Squad: Service Ops. Seeds: `Case
 |---|---|---|---|---|---|---|
 | EC-1 | automation | `Case` | trigger CaseTrigger (status not in index) | `demo/org/force-app/main/default/triggers/CaseTrigger.trigger:1` | Confirmed | none: CaseTrigger runs on before update and after update only (CaseTrigger.trigger:1), so assignment at creation needs an insert context; the update re-assignment stays unchanged (OQ-3). |
 | EC-2 | bulk | `Case` | a bulk change of 200 records or more | `demo/org/force-app/main/default/triggers/CaseTrigger.trigger:1` | Confirmed | AC-3 |
-| EC-3 | org-only | `Case` | sharing settings and real data volumes are org configuration, not in this repo | none | Unverifiable | none: Assignee visibility and real volumes cannot be seen in the repo; raised for the Salesforce Admin as OQ-8. |
-| EC-4 | record-type | `Case` | record type Case.Premium_Support | `demo/org/force-app/main/default/objects/Case/recordTypes/Premium_Support.recordType-meta.xml:2` | Confirmed | AC-6 |
+| EC-3 | record-type | `Case` | record type Case.Premium_Support | `demo/org/force-app/main/default/objects/Case/recordTypes/Premium_Support.recordType-meta.xml:2` | Confirmed | AC-6 |
 
 ## Dropped seeds
 
@@ -33,6 +32,7 @@ Status: confirmed. Confirmed by: Product Owner. Squad: Service Ops. Seeds: `Case
 |---|---|---|---|
 | automation | `Case` | flow Case_Escalate_Premium (Active) | Record-triggered on Update with Escalation_Level__c "Level 2" (flow-meta.xml:52-61) and only sends a notification; it never sets the owner, so new-case assignment does not meet it (Inferred). |
 | automation | `Case` | validation rule Case.Escalation_Needs_Level (active) | Formula reads only IsEscalated and Escalation_Level__c (validationRule-meta.xml:6-12); assignment changes the owner only, so it cannot trip the rule (Inferred). |
+| org-only | `Case` | sharing settings and real data volumes are org configuration, not in this repo | Sharing and real volumes are org configuration (Unverifiable), so no test in this repo can show them; raised for the Salesforce Admin as OQ-8, deferred by the Product Owner. |
 
 ## Overlaps with other stories
 

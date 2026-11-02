@@ -85,6 +85,12 @@
       "component": "Case",
       "detail": "validation rule Case.Escalation_Needs_Level (active)",
       "reason": "Formula reads only IsEscalated and Escalation_Level__c (validationRule-meta.xml:6-12); assignment changes the owner only, so it cannot trip the rule (Inferred)."
+    },
+    {
+      "category": "org-only",
+      "component": "Case",
+      "detail": "sharing settings and real data volumes are org configuration, not in this repo",
+      "reason": "Sharing and real volumes are org configuration (Unverifiable), so no test in this repo can show them; raised for the Salesforce Admin as OQ-8, deferred by the Product Owner."
     }
   ],
   "edgeCases": [
@@ -109,23 +115,13 @@
       "reason": null
     },
     {
-      "becameCriterion": null,
-      "category": "org-only",
-      "component": "Case",
-      "confidence": "Unverifiable",
-      "detail": "sharing settings and real data volumes are org configuration, not in this repo",
-      "evidence": null,
-      "id": "EC-3",
-      "reason": "Assignee visibility and real volumes cannot be seen in the repo; raised for the Salesforce Admin as OQ-8."
-    },
-    {
       "becameCriterion": "AC-6",
       "category": "record-type",
       "component": "Case",
       "confidence": "Confirmed",
       "detail": "record type Case.Premium_Support",
       "evidence": "demo/org/force-app/main/default/objects/Case/recordTypes/Premium_Support.recordType-meta.xml:2",
-      "id": "EC-4",
+      "id": "EC-3",
       "reason": null
     }
   ],
