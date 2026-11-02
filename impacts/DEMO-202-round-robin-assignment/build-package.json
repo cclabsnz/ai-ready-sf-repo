@@ -1,0 +1,179 @@
+{
+  "criteria": [
+    {
+      "examples": [
+        "Pool: \"Agent A\", \"Agent B\". Cases \"Synthetic Case 1\" and \"Synthetic Case 2\" created together. Owners: \"Agent A\" for one case, \"Agent B\" for the other."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\"",
+      "id": "AC-1",
+      "then": "The 2 cases are owned by 2 different agents from the pool.",
+      "when": "A user creates 2 cases in one save"
+    },
+    {
+      "examples": [
+        "Save 1 creates \"Synthetic Case 10\", owned by \"Agent A\". Save 2 creates \"Synthetic Case 11\", owned by \"Agent B\"."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\", and the last case assigned went to \"Agent A\"",
+      "id": "AC-2",
+      "then": "The case is owned by \"Agent B\".",
+      "when": "A user creates 1 case in a later, separate save"
+    },
+    {
+      "examples": [
+        "200 cases \"Synthetic Bulk 1\" to \"Synthetic Bulk 200\" loaded together. \"Agent A\" owns 100. \"Agent B\" owns 100."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\", with no prior assignments",
+      "id": "AC-3",
+      "then": "Each of the 2 agents owns 100 of the 200 cases.",
+      "when": "A data load creates 200 cases in one transaction"
+    },
+    {
+      "examples": [
+        "Cases \"Synthetic Case 21\" to \"Synthetic Case 23\" created together. All 3 owned by \"Agent A\"."
+      ],
+      "given": "The agent pool holds active user \"Agent A\" and inactive user \"Agent C\"",
+      "id": "AC-4",
+      "then": "No case is owned by \"Agent C\".",
+      "when": "A user creates 3 cases in one save"
+    },
+    {
+      "examples": [
+        "\"Synthetic Case 31\" created by \"Creator X\" with no active pool member. Owner stays \"Creator X\" and no error is shown."
+      ],
+      "given": "The agent pool holds only inactive user \"Agent C\"",
+      "id": "AC-5",
+      "then": "The case is saved with its default owner.",
+      "when": "A user creates 1 case"
+    },
+    {
+      "examples": [
+        "\"Synthetic Premium 1\" and \"Synthetic Premium 2\" created together. Owners: \"Agent A\" for one case, \"Agent B\" for the other."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\"",
+      "id": "AC-6",
+      "then": "The 2 cases are owned by 2 different agents from the pool.",
+      "when": "A user creates 2 cases of record type \"Premium_Support\" in one save"
+    },
+    {
+      "examples": [
+        "\"Synthetic Case 41\" created by \"Creator X\" with owner \"Agent Z\". Owner stays \"Agent Z\"."
+      ],
+      "given": "The agent pool holds 2 active users, \"Agent A\" and \"Agent B\"",
+      "id": "AC-7",
+      "then": "The case is owned by \"Agent Z\".",
+      "when": "\"Creator X\" creates 1 case with owner set to \"Agent Z\""
+    },
+    {
+      "examples": [
+        "demo/org/force-app/main/default/triggers/CaseTrigger.trigger:1"
+      ],
+      "given": "Case",
+      "id": "EC-1",
+      "then": "trigger CaseTrigger (status not in index)",
+      "when": "automation"
+    }
+  ],
+  "design": {
+    "chosenOption": "OPT-2",
+    "reasons": [
+      "Provisional, pending confirmation by a named owner: OPT-2 is the only option that keeps the rotation position between transactions independent of record visibility, which AC-2 needs; OPT-3 depends on the creator seeing the latest case under with sharing and USER_MODE (CaseAssignmentService.cls:10, :51, :62).",
+      "Reuses the existing pool, inactive-user filter and empty-pool behaviour (CaseAssignmentService.cls:30-31, :42-67) for AC-4 and AC-5, and the existing dispatcher (CaseTriggerHandler.cls:13-24), while leaving the update path unchanged per OQ-3.",
+      "A stored state record gives a single row that can be locked for concurrent saves (governor-limits trade-off); the lock approach and the new permission-set access (security trade-off) remain for the Tech Lead and Salesforce Admin to confirm."
+    ],
+    "rejected": [
+      {
+        "id": "OPT-1",
+        "title": "Do nothing"
+      },
+      {
+        "id": "OPT-3",
+        "title": "Insert-time assignment that derives the next agent from the latest assigned case"
+      }
+    ]
+  },
+  "done": [
+    "python3 tools/code/check_trace.py --skeletons DEMO-202",
+    "python3 tools/code/check_rules.py --from-config",
+    "python3 tools/code/check_trace.py DEMO-202"
+  ],
+  "provenance": {
+    "confirmedBy": {
+      "design": "Product Owner",
+      "impact": "Product Owner",
+      "story": "Product Owner"
+    },
+    "design": "81f3dd23725fcf64a14770c7d03380ca60534d35",
+    "frameworkVersion": "0.1.0",
+    "impact": "990e2f2ad51997bf61b944af615e827b68eb991c",
+    "indexStamp": {
+      "builtAt": "2026-11-01T21:14:07+00:00",
+      "commit": "01c0744d0f6ffc08b769c0bb102497ccd0c519c2",
+      "indexVersion": "0.5.0",
+      "namespaces": []
+    },
+    "story": "ecec7ad1395bab36f3573805c3cba20c61347696"
+  },
+  "rules": [
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-sharing"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-user-mode"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-no-soql-dml-in-loop"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-no-system-debug"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-no-seealldata"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-no-assert-true"
+    },
+    {
+      "check": "python3 tools/code/check_rules.py",
+      "id": "apex-test-naming"
+    }
+  ],
+  "schemaVersion": 1,
+  "scope": {
+    "create": [
+      {
+        "api": "Round_Robin_State__c",
+        "path": "demo/org/force-app/main/default/objects/Round_Robin_State__c/Round_Robin_State__c.object-meta.xml",
+        "type": "CustomObject"
+      },
+      {
+        "api": "Round_Robin_State__c.Last_Assigned_User__c",
+        "path": "demo/org/force-app/main/default/objects/Round_Robin_State__c/fields/Last_Assigned_User__c.field-meta.xml",
+        "type": "CustomField"
+      }
+    ],
+    "modify": [
+      "demo/org/force-app/main/default/classes/CaseAssignmentService.cls",
+      "demo/org/force-app/main/default/classes/CaseAssignmentService.cls-meta.xml",
+      "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls",
+      "demo/org/force-app/main/default/classes/CaseTriggerHandler.cls-meta.xml",
+      "demo/org/force-app/main/default/permissionsets/Service_Agent.permissionset-meta.xml",
+      "demo/org/force-app/main/default/permissionsets/Team_Lead.permissionset-meta.xml",
+      "demo/org/force-app/main/default/triggers/CaseTrigger.trigger",
+      "demo/org/force-app/main/default/triggers/CaseTrigger.trigger-meta.xml"
+    ],
+    "tests": [
+      "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls",
+      "demo/org/force-app/main/default/classes/CaseAssignmentService_Test.cls-meta.xml",
+      "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls",
+      "demo/org/force-app/main/default/classes/CaseTriggerHandler_Test.cls-meta.xml"
+    ]
+  },
+  "slug": "round-robin-assignment",
+  "storyId": "DEMO-202"
+}
