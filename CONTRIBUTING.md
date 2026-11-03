@@ -62,8 +62,11 @@ from the scan blocks the commit.
 default pack of patterns is always on. The `nz` and `ncino` packs apply only when
 `tools/guard/scan_packs.json` names them, and this repo ships that file with the default pack
 only. Fix the data, and don't add an exemption for real-looking values.
-Also run the tests for every tool you touch (`python3 tools/<area>/test_<name>.py`) and the skill's
-eval cases (`python3 tools/evals/run_skill.py`).
+Also run the tests for every tool you touch (`python3 tools/<area>/test_<name>.py`). For a skill
+change, run the skill on each eval case's input in Claude Code, then check what it wrote:
+`python3 tools/evals/run_skill.py --skill <skill> --case <case id> --output <the file the skill wrote>`
+(add `--package <build-package.json>` for implement-story). No CI step runs eval cases, so this is on
+you.
 
 ## Every behaviour change gets a guard or eval case
 

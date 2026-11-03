@@ -110,26 +110,49 @@ def find_users(topic):
     return users
 
 
-def main():
+OUTPUTS = ("CLAUDE.md", ".claude/knowledge", ".claude/skills", ".claude/agents",
+           ".github/instructions", ".github/knowledge", ".github/skills", ".github/agents")
+
+
+def tree_differs(a_dir, b_dir):
+    """True when the two folders differ anywhere below them: a name on one side only, a file and a folder
+    of the same name, or a file whose bytes differ. Every level is walked and every file read in full."""
+    cmp = filecmp.dircmp(a_dir, b_dir)
+    if cmp.left_only or cmp.right_only or cmp.common_funny or cmp.funny_files:
+        return True
+    for name in cmp.common_files:
+        if not filecmp.cmp(os.path.join(a_dir, name), os.path.join(b_dir, name), shallow=False):
+            return True
+    return any(tree_differs(os.path.join(a_dir, d), os.path.join(b_dir, d)) for d in cmp.common_dirs)
+
+
+def stale_outputs(committed_root, fresh_root):
+    """The OUTPUTS entries under committed_root that differ from a fresh render under fresh_root."""
+    diffs = []
+    for rel in OUTPUTS:
+        a_path, b_path = os.path.join(committed_root, rel), os.path.join(fresh_root, rel)
+        if os.path.isdir(b_path):
+            if not os.path.isdir(a_path) or tree_differs(a_path, b_path):
+                diffs.append(rel)
+        elif not (os.path.isfile(a_path) and filecmp.cmp(a_path, b_path, shallow=False)):
+            diffs.append(rel)
+    return diffs
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if not a.check:
         render(ROOT)
         print("rendered .claude/ and .github/ from framework/")
         return 0
     tmp = tempfile.mkdtemp()
-    render(tmp)
-    diffs = []
-    for rel in ("CLAUDE.md", ".claude/knowledge", ".claude/skills", ".claude/agents",
-                ".github/instructions", ".github/knowledge", ".github/skills", ".github/agents"):
-        a_path, b_path = os.path.join(ROOT, rel), os.path.join(tmp, rel)
-        if os.path.isdir(b_path):
-            cmp = filecmp.dircmp(a_path, b_path) if os.path.isdir(a_path) else None
-            if cmp is None or cmp.diff_files or cmp.left_only or cmp.right_only:
-                diffs.append(rel)
-        elif not (os.path.exists(a_path) and filecmp.cmp(a_path, b_path, shallow=False)):
-            diffs.append(rel)
+    try:
+        render(tmp)
+        diffs = stale_outputs(ROOT, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     if diffs:
         print("rendered outputs are stale: " + ", ".join(diffs) + ". Run tools/build/render.py and commit.")
         return 1

@@ -53,7 +53,7 @@ The control plane is built and tested before the first skill, because every late
 | Secrets | gitleaks (or the platform's native scanner) pre-commit and in CI | Keys, tokens and credentials in commits |
 | Kill switch | One line in `.claude/settings.json` (`"env": {"AI_FRAMEWORK_MODE": "advise"}`) that the guard reads: in `advise` mode every write is blocked and only read-only Bash runs, and the model is told to output recommendations only. The committed value is the ceiling: committed `advise` always wins over any local override | Programme-wide pause in minutes if a skill misbehaves, without touching squads' machines |
 
-The control plane ships with its own test: `tools/guard/test_guard.py` feeds synthetic tool calls (an `sf org login`, a write to `force-app/`, a fetch to a blog) and asserts exit code 2 on each, runs the registered hook command itself, and runs the wrapper with no Python on PATH. CI runs it on a Linux and a Windows agent on every PR, and onboarding runs it once on each laptop.
+The control plane ships with its own test: `tools/guard/test_guard.py` feeds synthetic tool calls (an `sf org login`, a write to `force-app/`, a fetch to a blog) and asserts exit code 2 on each, runs the registered hook command itself, and runs the wrapper with no Python on PATH. The CI workflow is configured to run it on a Linux and a Windows agent on every PR, and onboarding runs it once on each laptop. The tests were developed and run on macOS; the Windows path had not been exercised when this was written.
 
 ### Modes
 
@@ -132,7 +132,7 @@ Every skill has the same anatomy, enforced by `tools/build/lint_skill.py`:
 | `SKILL.md` | Front-matter (`name`, `description` ≤ 200 chars stating what, when, and not-for) plus the method | Description is the routing signal; detail lives in the body, never the description |
 | `references/input-checklist.md` | Required and optional inputs, what each unlocks, what is recorded as unknown when missing | Ask once, continue with unknowns, cap confidence |
 | `references/*.md` | Domain detail, taxonomies, output templates | Loaded only when the method points to them |
-| `scripts/*.py` | Anything deterministic: queries, counts, docx/pptx/xlsx builders | stdlib only; `--version` flag; runs on Windows via `py -3` |
+| `scripts/*.py` | Anything deterministic: queries, counts, docx/pptx/xlsx builders | stdlib only; written to run on Windows via `py -3` |
 | `evals/cases/*.json` and `evals/expected/*` | Three to five synthetic inputs with expected outputs | Required to merge; run with variance (N=5) |
 
 Step 0 of the workflow comes before story-impact and pr-reference-check: **story-refine** turns one rough story into Given/When/Then acceptance criteria and edge cases seeded from the index, and writes a draft `story.json` and `story.md` (see "Story refinement"). Between understanding a story and sizing it, **solution-design** writes evidenced options, always including "do nothing", with one provisional recommendation; story-impact then sizes the recommended option. "Day-one workflow" below gives the order.
@@ -144,7 +144,7 @@ The first two skills, in order:
 
 Then, by demand and only once the first two are stable on one squad: release-impact (reads `inventory.json` against release notes), test-case-design, wiki-page. Each is a consumer of the same index and the same evidence taxonomy, so each is mostly method and templates. The discovery-pack backlog item is no longer on this list: story-refine absorbed it (see "Story refinement").
 
-Evals run on every PR touching `framework/skills/`. A case passes when the deterministic assertions hold on all five runs (every cited `path:line` exists, no banned phrases, evidence labels on every claim) and the rubric score is at or above the committed threshold on at least four.
+The target: evals run on every PR touching `framework/skills/`, and a case passes when the deterministic assertions hold on all five runs (every cited `path:line` exists, no banned phrases, evidence labels on every claim). Today no CI step runs eval cases: a contributor runs the skill and then `tools/evals/run_skill.py` by hand, the only live runner is the manual `live-consistency` job, and there is no rubric score or threshold. No golden outputs are committed yet (see "Evals, measurement and the walkthrough").
 
 ## Day-one workflow
 
@@ -701,7 +701,7 @@ The target is a versioned plugin, not a set of files squads copy. A squad pins a
 | Ownership | A guild of two or three people drawn from different squads, named in CODEOWNERS for `framework/`, `tools/` and the rendered trees. Every PR into those paths needs one guild reviewer. |
 | Contradiction protocol | When a squad's finding contradicts a fact file: PR records both claims with evidence, the file's owner arbitrates within the sprint, the superseded claim stays as a dated correction with the reason. The index settles anything countable automatically. |
 | Cadence | Fortnightly, 30 minutes, rotating chair: stale files (over 90 days), failed evals, open contradictions, skills proposed. Monthly: a one-page health note to squad leads with eval pass rates and usage. |
-| Onboarding | Fifteen minutes per person: install and pin, run `tools/guard/test_guard.py` on the laptop, run one golden eval, read the precedence rule, know the guild. A squad is not onboarded until every member has passed the guard test. |
+| Onboarding | Fifteen minutes per person: install and pin, run `tools/guard/test_guard.py` on the laptop, run one eval case (against a golden output once goldens are committed; none are yet), read the precedence rule, know the guild. A squad is not onboarded until every member has passed the guard test. |
 | Decommission | Any skill with no use in two sprints and no owner is moved to `framework/attic/` and removed from the render. The index and control plane are never retired while the repo exists. |
 
 What stays out: seed-memory (pointers only, no copies), org facts in agents or skills, any check a script could do, any output path other than `ai-context/`, and any automation that casts a vote, deploys or pushes.
@@ -749,7 +749,7 @@ This repository is the working implementation of this design, in stdlib Python w
 | `impacts/` | `squads.json` and the promoted records, one `<storyId>-<slug>/` folder each | The register, in git; records enter through an ordinary PR that a reviewer checks |
 | `.claude/settings.json` | The project hook on every tool, deny rules, the committed mode (`normal`) that doubles as the kill switch | Enforcement in the layer that runs everywhere |
 | `.gitattributes` | LF line endings for `*.sh`, `tools/guard/*.json` and `tools/guard/*.py`; CRLF for `*.cmd` | A Windows checkout must not break the shell wrapper or alter the guard files the tripwire compares |
-| `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan (`--tracked`), lint, render check, index build, the tool tests and validators, the rule check, agent evals and the walkthrough check; the `impact-checks` and gitleaks jobs; and a manual-only `live-consistency` job that is not a required check | Everything above, gated on every PR |
+| `.github/workflows/framework-ci.yml` | Matrix on Ubuntu and Windows: guard test, data scan (`--tracked`), lint, render check, index build, the tool tests and validators, the rule check, agent evals and the walkthrough check; the `impact-checks` and gitleaks jobs; and a manual-only `live-consistency` job that is not a required check | Everything above, configured to gate every PR |
 | `demo/` | A synthetic Sales/Service org (`demo/org`), its stories and their answer keys, and the empty greenfield skeleton (`demo/greenfield`); see `demo/README.md` | A realistic target for story-impact evals and for checking that the index finds what a human reviewer would |
 | `fixtures/` | Synthetic Account fields, Apex (one at API 45 and `without sharing`), a flow, a permission set, an LWC, three diff patches | Evals and CI never see real metadata |
 

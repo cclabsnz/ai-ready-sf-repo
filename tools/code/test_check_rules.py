@@ -22,6 +22,18 @@ RULES_MD = os.path.join(REPO, "framework", "rules", "10-apex.md")
 LEGACY = ("LegacyCaseMerge", "RenewalOutlookService", "ContractTermService")
 BANNED = ("we recommend", "should", "approve", "block")
 
+class Skip(Exception):
+    """The case cannot run here; counted apart from passes and failures."""
+
+
+def _symlink(src, dst):
+    """os.symlink, or Skip when this machine cannot create the link (Windows without the privilege)."""
+    try:
+        os.symlink(src, dst)
+    except (OSError, NotImplementedError) as exc:
+        raise Skip("symlinks unavailable: %s" % type(exc).__name__)
+
+
 TMP = tempfile.mkdtemp(prefix="check_rules_")
 atexit.register(shutil.rmtree, TMP, True)
 _MOD = []
@@ -380,7 +392,7 @@ def case_write_baseline_refuses_symlink():
     root = new_repo({cls_path("Old"): LEGACY_SRC})
     target = tempfile.mkdtemp(dir=TMP)
     os.makedirs(os.path.join(root, "tools"))
-    os.symlink(target, os.path.join(root, "tools", "code"))
+    _symlink(target, os.path.join(root, "tools", "code"))
     code, _, err = run(["--root", root, "--write-baseline"])
     assert code == 2 and "symlink" in err, err
     assert os.listdir(target) == []
@@ -540,16 +552,19 @@ def case_onboard_existing_writes_baseline():
 
 
 def main():
-    failures = 0
+    failures = skipped = 0
     names = [n for n, fn in sorted(globals().items()) if n.startswith("case_") and callable(fn)]
     for name in names:
         try:
             globals()[name]()
             print(f"PASS {name}")
+        except Skip as exc:
+            skipped += 1
+            print(f"SKIP {name}: {exc}")
         except Exception as exc:  # noqa: BLE001
             failures += 1
             print(f"FAIL {name}: {exc!r}"[:600])
-    print(f"{len(names) - failures} passed, {failures} failed")
+    print(f"{len(names) - failures - skipped} passed, {failures} failed, {skipped} skipped")
     return 1 if failures else 0
 
 

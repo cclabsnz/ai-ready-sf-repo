@@ -26,6 +26,18 @@ BASELINE = os.path.join("tools", "code", "baseline.json")
 CHECK_RULES = os.path.join(REPO, "tools", "code", "check_rules.py")
 BASELINE_GREENFIELD = "no baseline: rules are strict from the first commit"
 
+class Skip(Exception):
+    """The case cannot run here; counted apart from passes and failures."""
+
+
+def _symlink(src, dst):
+    """os.symlink, or Skip when this machine cannot create the link (Windows without the privilege)."""
+    try:
+        os.symlink(src, dst)
+    except (OSError, NotImplementedError) as exc:
+        raise Skip("symlinks unavailable: %s" % type(exc).__name__)
+
+
 TMP = tempfile.mkdtemp(prefix="onboard_")
 atexit.register(shutil.rmtree, TMP, True)
 
@@ -296,7 +308,7 @@ def case_baseline_symlink_refused():
     root = new_root(with_org=True)
     target = tempfile.mkdtemp(dir=TMP)
     os.makedirs(os.path.join(root, "tools"))
-    os.symlink(target, os.path.join(root, "tools", "code"))
+    _symlink(target, os.path.join(root, "tools", "code"))
     code, _, err = existing(root)
     assert code == 2 and "symlink" in err, err
     assert os.listdir(target) == [] and not os.path.exists(os.path.join(root, "index"))
@@ -306,7 +318,7 @@ def case_baseline_symlink_refused():
     with open(outside, "w", encoding="utf-8") as fh:
         fh.write("untouched\n")
     os.makedirs(os.path.join(file_link, "tools", "code"))
-    os.symlink(outside, os.path.join(file_link, BASELINE))
+    _symlink(outside, os.path.join(file_link, BASELINE))
     code, _, err = existing(file_link)
     assert code == 2 and "symlink" in err, err
     with open(outside, encoding="utf-8") as fh:
@@ -408,17 +420,17 @@ def case_refuses_outside_root_and_symlinks():
     assert code == 2 and "outside" in err, err
     target = tempfile.mkdtemp(dir=TMP)
     os.makedirs(os.path.join(root, "framework", "knowledge"))
-    os.symlink(target, os.path.join(root, STUBS))
+    _symlink(target, os.path.join(root, STUBS))
     code, _, err = existing(root)
     assert code == 2 and "symlink" in err, err
     assert os.listdir(target) == [] and not os.path.exists(os.path.join(root, "index"))
     linked = new_root()
-    os.symlink(target, os.path.join(linked, "app"))
+    _symlink(target, os.path.join(linked, "app"))
     code, _, err = run(["--starting-point", "greenfield", "--source-root", "app"], linked)
     assert code == 2 and "symlink" in err, err
     assert os.listdir(target) == []
     idx_link = new_root()
-    os.symlink(target, os.path.join(idx_link, "index"))
+    _symlink(target, os.path.join(idx_link, "index"))
     code, _, err = run(["--starting-point", "greenfield", "--source-root", "app"], idx_link)
     assert code == 2 and "symlink" in err, err
     assert os.listdir(target) == [] and not os.path.exists(os.path.join(idx_link, "app"))
@@ -428,7 +440,7 @@ def case_refuses_outside_root_and_symlinks():
         fh.write("untouched\n")
     os.makedirs(os.path.join(file_link, "index"))
     for name in ("metadata.json", "inventory.json"):
-        os.symlink(outside, os.path.join(file_link, "index", name))
+        _symlink(outside, os.path.join(file_link, "index", name))
         code, _, err = run(["--starting-point", "greenfield", "--source-root", "app"], file_link)
         assert code == 2 and "symlink" in err, (name, err)
         with open(outside, encoding="utf-8") as fh:
@@ -456,17 +468,20 @@ def case_bad_usage_exits_2():
 
 
 def main():
-    failures = 0
+    failures = skipped = 0
     for name, fn in sorted(globals().items()):
         if name.startswith("case_") and callable(fn):
             try:
                 fn()
                 print(f"PASS {name}")
+            except Skip as exc:
+                skipped += 1
+                print(f"SKIP {name}: {exc}")
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 print(f"FAIL {name}: {exc!r}"[:600])
     total = sum(1 for n in globals() if n.startswith("case_"))
-    print(f"{total - failures} passed, {failures} failed")
+    print(f"{total - failures - skipped} passed, {failures} failed, {skipped} skipped")
     return 1 if failures else 0
 
 

@@ -603,7 +603,7 @@ def main():
     ap.add_argument("--index", default=DEFAULT_INDEX,
                     help="index dir for edge-seed recompute and design checks (default <checkout>/index)")
     ap.add_argument("--package", default=None,
-                    help="build-package.json for the implement-story assertions (none is committed)")
+                    help="build-package.json for the implement-story assertions")
     a = ap.parse_args()
     case_path = os.path.join(ROOT, "framework", "skills", a.skill, "evals", "cases", a.case + ".json")
     with open(case_path) as fh:

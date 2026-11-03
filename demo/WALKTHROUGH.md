@@ -111,8 +111,9 @@ py -3 tools/guard/test_guard.py
 ```
 
 It takes a couple of minutes and prints one `[PASS] ...` line per case. Read the last line.
-Expected: `<n> passed, 0 failed`. On Windows, symlink and POSIX-only cases print `[SKIP]`, and the
-last line adds `, <n> skipped`. The registered-hook cases need Git for Windows' bash. If any case
+Expected: `<n> passed, 0 failed`. On Windows, symlink and POSIX-only cases print `[SKIP]`. The
+last line may add `, <n> skipped`, but that count covers only some kinds of skip, so it can be
+lower than the number of `[SKIP]` lines; read those lines rather than the count. The registered-hook cases need Git for Windows' bash. If any case
 fails, stop here: nothing below is safe to rely on.
 
 Then record the tripwire baseline, once, before you open Claude Code in the repo. Run it yourself
@@ -166,8 +167,11 @@ python3 tools/index/query.py consumers Account.Service_Level__c --hops 3 | grep 
 Windows (PowerShell):
 
 ```powershell
-py -3 tools/index/query.py consumers Account.Service_Level__c --hops 3 | ConvertFrom-Json | Select-Object -ExpandProperty consumers | Where-Object hop -eq 3
+py -3 tools/index/query.py consumers Account.Service_Level__c --hops 3 | ConvertFrom-Json | Select-Object -ExpandProperty consumers | Where-Object hop -eq 3 | ForEach-Object { '"api": "{0}", "type": "{1}", "via": "{2}", "target": "{3}", "hop": {4}' -f $_.api, $_.type, $_.via, $_.target, $_.hop }
 ```
+
+The last stage formats each object as the same line the macOS `grep` prints (Inferred: not run on
+Windows).
 
 Expected, from a real run on macOS. The line order follows the index build's file walk, which is
 sorted, so it is the same on other systems (Inferred: only macOS has run it):

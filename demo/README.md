@@ -176,12 +176,12 @@ The demo is built to avoid these; a real org will not be.
 - Apex name matching is case-sensitive, though Apex itself is not.
 - A relationship name that equals an unrelated object's name can resolve to that object.
 
-## Line endings and owner patches
+## Line endings
 
-The demo's line endings are pinned to LF (`demo/org/** text eol=lf` in `.gitattributes`, delivered as
-`ai-context/ws1/patches/gitattributes-ws1.patch`) so the filler `--check`, which compares bytes,
-passes on a Windows checkout. Apply that patch together with `ai-context/ws1/patches/ci-ws1.patch`:
-the CI patch adds the `--check` step to the Windows job, which fails without the LF pin.
+The demo's line endings are pinned to LF (`demo/org/** text eol=lf` in `.gitattributes`) so the
+filler `--check`, which compares bytes, passes on a Windows checkout. CI runs that `--check` on the
+Windows job as well; without the LF pin it would fail there. Both changes are already in the
+repository.
 
 ## Before deploying (Unverifiable here; nothing was deployed)
 

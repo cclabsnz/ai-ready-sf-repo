@@ -141,10 +141,9 @@ before using a skill.
   `maintain` writes do not. Raising a Salesforce CLI
   level (`sf.mode_level`, `sf.allowed_orgs`) is such a patch. The human applies and commits guard
   files together.
-- The WS1 owner patches, `ai-context/ws1/patches/ci-ws1.patch` and
-  `ai-context/ws1/patches/gitattributes-ws1.patch`, must be applied together. The CI patch adds the
-  byte-comparing filler `--check` on Windows too; without the LF pin in `.gitattributes` a Windows
-  checkout converts `demo/org/` to CRLF and that step fails.
+- The WS1 owner patches went on together and are applied: the CI step that runs the
+  byte-comparing filler `--check` on Windows too, and the LF pin in `.gitattributes`, without which a
+  Windows checkout converts `demo/org/` to CRLF and that step fails.
 - The WS2 owner patches (`ai-context/ws2/patches/`: `.gitignore`, the guard policy and its tests,
   and the CI workflow) went on after the WS1 patches; both sets are applied in `3fb9e73`.
 - The WS11 owner patches (`ai-context/ws11/patches/`: the guard policy, its cases and the guard's

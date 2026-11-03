@@ -33,6 +33,14 @@ class Skip(Exception):
     pass
 
 
+def _symlink(src, dst):
+    """os.symlink, or Skip when this machine cannot create the link (Windows without the privilege)."""
+    try:
+        os.symlink(src, dst)
+    except (OSError, NotImplementedError) as exc:
+        raise Skip("symlinks unavailable: %s" % type(exc).__name__)
+
+
 STUB = '''
 import os
 def read_package(root, active):
@@ -150,7 +158,7 @@ def case_symlinked_active_story_refused():
     victim = os.path.join(tmpdir(), "victim.txt")
     with open(victim, "w") as fh:
         fh.write("keep\n")
-    os.symlink(victim, os.path.join(root, "ai-context", ".active-story"))
+    _symlink(victim, os.path.join(root, "ai-context", ".active-story"))
     code, _, err = run([STORY, "--root", root], core_dir=stub_dir())
     assert code == 1 and "symlink" in err, (code, err)
     with open(victim) as fh:
@@ -182,7 +190,7 @@ def case_symlinked_ai_context_refused():
     root = make_repo()
     elsewhere = tmpdir()
     os.rmdir(os.path.join(root, "ai-context"))
-    os.symlink(elsewhere, os.path.join(root, "ai-context"))
+    _symlink(elsewhere, os.path.join(root, "ai-context"))
     code, out, err = run([STORY, "--root", root], core_dir=stub_dir())
     assert code == 1 and "symlink" in err and out == "", (code, err)
     assert os.listdir(elsewhere) == [], os.listdir(elsewhere)

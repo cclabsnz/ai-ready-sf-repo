@@ -31,6 +31,14 @@ class Skip(Exception):
     """The case cannot run here; counted apart from passes and failures."""
 
 
+def _symlink(src, dst):
+    """os.symlink, or Skip when this machine cannot create the link (Windows without the privilege)."""
+    try:
+        os.symlink(src, dst)
+    except (OSError, NotImplementedError) as exc:
+        raise Skip("symlinks unavailable: %s" % type(exc).__name__)
+
+
 TMP = tempfile.mkdtemp(prefix="check_trace_")
 atexit.register(shutil.rmtree, TMP, True)
 
@@ -377,7 +385,7 @@ def case_symlinked_test_escaping_root_exits_2():
     outside = tempfile.mkdtemp(prefix="outside_", dir=TMP)
     write(outside, "x_Test.cls", "// AC-1\n")
     root = make_root(pkg={"criteria": [{"id": "AC-1"}], "scope": {"tests": ["link/x_Test.cls"]}})
-    os.symlink(outside, os.path.join(root, "link"))
+    _symlink(outside, os.path.join(root, "link"))
     code, out, err = run([STORY, "--root", root])
     assert code == 2 and "outside" in err, (code, err)
 

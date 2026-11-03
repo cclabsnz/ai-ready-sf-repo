@@ -59,15 +59,16 @@ Six principles, in order of precedence:
   (`promote.py --option`). Solution-design, and story-impact on a design option, have run
   once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it (see
   [Day-one workflow](docs/DESIGN.md#day-one-workflow)). The assistant runs `validate_design.py`
-  and `framework_config.py` in `normal`, `build` and `maintain`, and CI runs the WS10 test scripts.
+  and `framework_config.py` in `normal`, `build` and `maintain`, and the CI workflow runs the WS10
+  test scripts.
   Onboarding an existing codebase now also writes its rule baseline, `tools/code/baseline.json`.
 - **Story refinement** (`tools/stories/`, WS11): the `story.json` schema
   (`validate_story.py`), a vague-criteria check (`check_ac.py`), and confirmation by the product
   owner, who promotes the story into `impacts/` (`promote.py --story`). Story-refine has run
   once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it; its eval assertions are tested on a hand-built draft only (see
   [Story refinement](docs/DESIGN.md#story-refinement)). The assistant runs
-  `check_ac.py` and `validate_story.py` in `normal`, `build` and `maintain`, and CI runs the story
-  checks.
+  `check_ac.py` and `validate_story.py` in `normal`, `build` and `maintain`, and the CI workflow
+  runs the story checks.
 - **Impact record and register** (`tools/impacts/`, `impacts/`): a validated `impact.json`
   schema, a human promotion step into `impacts/`, and the register of in-flight stories. Two
   overlap checks read it. At story time, story-impact lists the other stories that touch the same
@@ -195,7 +196,7 @@ To set a repo up for this workflow, see [Two starting points](#two-starting-poin
 ## Prerequisites
 
 - **Python 3**, standard library only. CI uses Python 3.12
-  (`.github/workflows/framework-ci.yml:13`).
+  (`.github/workflows/framework-ci.yml:17`).
 - **git**.
 - **Claude Code**, needed only for the AI steps (quick start step 8 and the optional end of
   step 9). Every other step is plain Python.
@@ -998,9 +999,9 @@ only the `live-consistency` job runs then; the other jobs run on pull requests o
   owner decision. Before any first run the owner also pins the Claude Code version it installs
   and limits the job to the owner's repository; the committed job does neither yet.
 
-Findings are comments unless `.ai-framework.json` sets them to `fail`. Until a remote exists, the
-comment step is Unverifiable. This repository has no remote yet, so none of these jobs has run
-on a GitHub runner.
+Findings are comments unless `.ai-framework.json` sets them to `fail`. These jobs were written and
+their steps run locally on macOS; the PR-only jobs (`impact-checks`, `secrets`) and the Windows job
+had not run on a GitHub runner when this was written, so treat their first runs as the test.
 
 ## Scoped code writing
 
