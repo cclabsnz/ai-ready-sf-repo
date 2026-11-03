@@ -22,6 +22,8 @@ from story_md import render_md  # noqa: E402
 
 PROMOTE = os.path.join(HERE, "promote.py")
 SCAN = os.path.join(REPO, "tools", "guard", "scan_data.py")
+# A synthetic 18-character Salesforce Account ID, a default-pack hit. Built at run time so this file holds no hit.
+DATA_HIT = "".join(["001", "5g00000AbCdE", "FGH"])
 CLS = "force-app/main/default/classes/WidgetService.cls"
 DRAFT = "ai-context/DEMO-903-widget-change"
 DEST = "impacts/DEMO-903-widget-change"
@@ -126,9 +128,8 @@ def case_refuses_data_scan_hit():
     spec = importlib.util.spec_from_file_location("scan_data", SCAN)
     scan = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scan)
-    bank = "-".join(["12", "3456", "7890123", "00"])
-    assert scan.load_patterns()["nz_bank_account"].search(bank), "test string no longer matches the pattern"
-    root = make_root(md=MD + "Account " + bank + "\n")
+    assert scan.load_patterns()["salesforce_id_18"].search(DATA_HIT), "test string no longer matches the pattern"
+    root = make_root(md=MD + "Account " + DATA_HIT + "\n")
     code, out = run(root)
     assert code == 1, out
     assert not os.path.exists(os.path.join(root, DEST))
@@ -335,7 +336,7 @@ def case_story_final_md_scanned():
 
     The draft scan catches it first; scan_final then runs on the rendered md bytes as well."""
     doc = story_doc()
-    doc["openQuestions"][0]["answer"] = "Account " + "-".join(["12", "3456", "7890123", "00"])
+    doc["openQuestions"][0]["answer"] = "Account " + DATA_HIT
     root = make_story_root(doc)
     code, out = story_run(root)
     assert code == 1 and "data guard" in out, out
@@ -387,8 +388,7 @@ def case_story_refuses_bad_evidence():
 
 @story_cleanup
 def case_story_refuses_data_scan_hit():
-    bank = "-".join(["12", "3456", "7890123", "00"])
-    root = make_story_root(md=SMD + "Account " + bank + "\n")
+    root = make_story_root(md=SMD + "Account " + DATA_HIT + "\n")
     code, out = story_run(root)
     assert code == 1, out
     assert not os.path.exists(os.path.join(root, SDEST))
@@ -758,7 +758,7 @@ def case_design_symlink_refused():
 @story_cleanup
 def case_design_data_hit_refused():
     d = design_doc()
-    d["options"][1]["summary"] = "Account " + "-".join(["12", "3456", "7890123", "00"])
+    d["options"][1]["summary"] = "Account " + DATA_HIT
     root = make_design_root(design=d)
     code, out = design_run(root)
     assert code == 1 and "data guard" in out, out
