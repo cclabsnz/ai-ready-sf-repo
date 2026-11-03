@@ -209,13 +209,15 @@ def promoted_with_design():
 
 
 def test_impact_without_design_unchanged():
-    """DEMO-202's committed record carries none of the WS10 fields and still validates."""
+    """A promoted record with none of the WS10 fields still validates, as does DEMO-202's, which carries them."""
     path = os.path.join(REPO, "impacts", "DEMO-202-round-robin-assignment", "impact.json")
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
+    assert doc["designOption"] == "OPT-2" and doc["chosenOption"] == "OPT-2"
+    assert V.validate(doc, "promoted", REPO, check_evidence=True) == []
     for k in ("designOption", "chosenOption"):
-        assert k not in doc, k
-    assert "recommendedBy" not in doc["provenance"]
+        del doc[k]
+    del doc["provenance"]["recommendedBy"]
     assert V.validate(doc, "promoted", REPO, check_evidence=True) == []
     p = subprocess.run([sys.executable, CLI, "--all"], capture_output=True, text=True)
     assert p.returncode == 0, (p.stdout, p.stderr)

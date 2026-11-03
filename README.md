@@ -56,16 +56,16 @@ Six principles, in order of precedence:
   skeleton.
 - **Solution design** (`tools/designs/`, WS10): the `design.json` schema
   (`validate_design.py`), and the owner's choice of option at promotion
-  (`promote.py --option`). No model has run solution-design, or story-impact on a design option,
-  under Claude Code yet: they are shown only by writer smoke tests (see
+  (`promote.py --option`). Solution-design, and story-impact on a design option, have run
+  once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it (see
   [Day-one workflow](docs/DESIGN.md#day-one-workflow)). The assistant runs `validate_design.py`
   and `framework_config.py` in `normal`, `build` and `maintain`, and CI runs the WS10 test scripts.
   Onboarding an existing codebase now also writes its rule baseline, `tools/code/baseline.json`.
 - **Story refinement** (`tools/stories/`, WS11): the `story.json` schema
   (`validate_story.py`), a vague-criteria check (`check_ac.py`), and confirmation by the product
-  owner, who promotes the story into `impacts/` (`promote.py --story`). No model has run
-  story-refine under Claude Code yet; its writer and eval assertions are tested on a hand-built
-  draft only (see [Story refinement](docs/DESIGN.md#story-refinement)). The assistant runs
+  owner, who promotes the story into `impacts/` (`promote.py --story`). Story-refine has run
+  once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it; its eval assertions are tested on a hand-built draft only (see
+  [Story refinement](docs/DESIGN.md#story-refinement)). The assistant runs
   `check_ac.py` and `validate_story.py` in `normal`, `build` and `maintain`, and CI runs the story
   checks.
 - **Impact record and register** (`tools/impacts/`, `impacts/`): a validated `impact.json`
@@ -81,10 +81,10 @@ Six principles, in order of precedence:
   `framework/skills/implement-story/`, `framework/agents/builder.md`, WS8). The guard's scope
   lock and tests-first are in place in `build` mode. `check_rules.py`, the deterministic Apex rule
   check, runs on the demo with its committed baseline and exits 0 (see
-  [Scoped code writing](#scoped-code-writing) for the real output). `package.py`, `start.py` and
-  `check_trace.py` run, but there is no build package yet: one needs the owner to confirm the
-  DEMO-202 story, design and impact first. Until a package is committed and a human runs
-  `start.py`, `build` writes no source in this repo.
+  [Scoped code writing](#scoped-code-writing) for the real output). DEMO-202 has a committed build
+  package, made from its confirmed story, design and impact. `build` writes source only after a
+  human runs `start.py`. implement-story has run once on that package. Its Apex has not compiled
+  or run, and `main` keeps the story unimplemented so you can run it yourself.
 - **Framework build**: `render.py` turns `framework/` into the `.claude/` and `.github/` trees,
   and `lint.py` checks the framework rules.
 - **Evals**: `run_agent.py` (trajectory assertions over a tool-call log), `run_skill.py`
@@ -129,9 +129,8 @@ workspace):
     scan packs, and whether to add a schedule;
 - the GitHub settings (private vulnerability reporting, branch protection with the required
   checks) and the full-history scans before the repository goes public;
-- the confirmations the code walkthroughs need (items 10 and 11: confirm the DEMO-202 story,
-  design and impact, run `package.py` and commit the package, then run `start.py` in a terminal;
-  the greenfield walkthrough needs the same for DEMO-301);
+- the confirmations the greenfield code walkthrough needs (item 11: confirm the DEMO-301 story,
+  design and impact, run `package.py` and commit the package, then run `start.py` in a terminal);
 - picking the plugin layout, placing the drafted plugin manifest and tagging the first release;
 - the live `run_all.py` series and any golden outputs from them.
 
@@ -186,9 +185,9 @@ promotions run in your own terminal.
 
 **What is proven.** The scripts behind each step have tests. The quick start below runs the
 index and the refinement checks on the demo, and has you run story-impact on one demo story in
-Claude Code. No model has run story-refine,
-solution-design or story-impact's assessment of a design option under Claude Code yet. Their
-writers and eval assertions are shown only by writer smoke tests on hand-built drafts. A story
+Claude Code. Story-refine, solution-design and
+story-impact's assessment of a design option have run once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it. Their eval assertions are
+shown only by writer smoke tests on hand-built drafts. A story
 can skip the design step: story-impact without a `design.json` sizes the story as before.
 
 To set a repo up for this workflow, see [Two starting points](#two-starting-points).
@@ -332,7 +331,7 @@ Expected (`<commit>` is the commit you have checked out):
 {
   "impactJson": "./ai-context/DEMO-201-premium-escalation-key/impact.json",
   "impactMd": "./ai-context/DEMO-201-premium-escalation-key/impact.md",
-  "overlaps": 3,
+  "overlaps": 6,
   "registerCommit": "<commit>"
 }
 ```
@@ -347,9 +346,12 @@ grep '| watch |' ai-context/DEMO-201-premium-escalation-key/impact.md
 Expected:
 
 ```
-| `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
-| `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
-| `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `121a920` |
+| `Case.Premium_Support` | watch | DEMO-202 | Service Ops | in-flight | review | `86de149` |
+| `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `86de149` |
+| `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `86de149` |
+| `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `86de149` |
+| `Service_Agent` | watch | DEMO-202 | Service Ops | in-flight | modify | `86de149` |
+| `Team_Lead` | watch | DEMO-202 | Service Ops | in-flight | modify | `86de149` |
 ```
 
 - **Each row:** a component both stories list, and the other story's squad, status and change
@@ -358,8 +360,7 @@ Expected:
   the same until that record changes, or until history is rewritten. The commit hashes pasted on
   this page (here and in `registerCommit` above) come from the reference checkout; on your clone
   they can differ, for example after a rebase or on a fork.
-- **Why watches, not conflicts:** DEMO-202 modifies these components, while DEMO-201's key marks
-  them `review`. A conflict needs both stories to `new`, `modify` or `delete` the component.
+- **Why watches, not conflicts:** DEMO-201's key marks these components `review`. A conflict needs both stories to `new`, `modify` or `delete` the component.
 
 The draft is derived from the reviewed key, not from a model run. Its `provenance.model` in
 `impact.json` reads `none (derived from reviewed answer key)`. The slug `premium-escalation-key`
@@ -542,10 +543,9 @@ the command has nothing to read until you run the skill:
 python3 tools/evals/run_skill.py --skill story-refine --case 002-escalation-validation-rule --output ai-context/DEMO-201-<slug>/story.md
 ```
 
-**This part is unproven.** No model has run story-refine under Claude Code yet, so this page
-gives no expected output for it. Case 002 has passed only as a smoke test of the writer: a
-hand-built draft fed through `write_story.py`. That shows the writer and the assertions work, not
-that the skill does.
+**This part is unproven.** Story-refine has run once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it, so this page gives no expected
+output for it. Case 002 has passed only as a smoke test of the writer: a hand-built draft fed
+through `write_story.py`. That shows the writer and the assertions work, not that the skill does.
 
 ## Two starting points
 
@@ -850,9 +850,9 @@ Common reasons:
 | `promote.py` refuses with `story <id> already has a record in ...` | That story id is on record in another `impacts/` folder | Use the existing folder's slug (see [Confirming a refined story](#confirming-a-refined-story)) |
 | `query.py edge-seeds` gives no `picklist-value` seeds for a picklist field | The index predates version `0.5.0`, or the field uses a global value set (one `Unverifiable` seed) | Rebuild the index (quick start step 4) |
 | `promote.py` refuses with `impact assesses OPT-a; re-run story-impact for OPT-b before promoting` | The owner chose an option the draft impact did not assess | Re-run story-impact for the chosen option (see [Choosing a design option](#choosing-a-design-option)) |
-| `check_trace.py` exits 2 with `check_trace: no impacts/<storyId>-*/build-package.json under <repo>` | The story has no build package. In this repo no package exists yet | The owner confirms the story, design and impact, and a maintainer runs `package.py` and commits the package (`ai-context/OWNER-QUEUE.md` item 10) |
+| `check_trace.py` exits 2 with `check_trace: no impacts/<storyId>-*/build-package.json under <repo>` | The story has no build package. In this repo only DEMO-202 has one | The owner confirms the story, design and impact, and a maintainer runs `package.py` and commits the package |
 | `start.py` exits 2 with `run start.py yourself in a terminal; the assistant cannot start a build session` | start.py needs a real terminal, and the guard refuses it from the assistant in every mode | Run it yourself in a terminal |
-| `package.py` refuses with `story.json is missing; nothing written` (or the design or impact is not confirmed) | A build package is made only from a confirmed story, design and impact in one `impacts/<storyId>-<slug>/` folder. DEMO-202's folder holds only its impact today | The owner confirms the missing records first (`ai-context/OWNER-QUEUE.md` item 10) |
+| `package.py` refuses with `story.json is missing; nothing written` (or the design or impact is not confirmed) | A build package is made only from a confirmed story, design and impact in one `impacts/<storyId>-<slug>/` folder | The owner confirms the missing records first |
 | In `build`, a source write is blocked with `no active story scope (ai-context/.active-story is absent)` | No build session has been started | Start one with `start.py` in your terminal, add the env lines it prints and restart Claude Code |
 | In `build`, a source write is blocked with `is not in the build package of the active story` or `tests first: write to ... waits until every criterion has a referencing test` | The scope lock admits only the exact paths in the committed package, and code waits until every criterion id is named in a `scope.tests` file | Write the tests first. For a file outside scope, file `ai-context/<id>-<slug>/scope-request.md`; scope changes only through a new impact and package |
 | `build_index.py --from-config` exits 2 | `.ai-framework.json` is invalid (an unknown key, a bad value, or a `sourceRoot` outside the repo or not a folder), or `--root` or `--out` was given too | Fix the config; `python3 tools/config/framework_config.py source-root` prints the error. Drop `--root` and `--out` |
@@ -1049,21 +1049,22 @@ shown):
 A finding outside the baseline lands in `new` and the exit is 1. Which demo classes the
 baselined findings are in, and why, is in [demo/README.md](demo/README.md#signs-of-age).
 
-**What exists but cannot run end to end yet:**
+**What runs on the DEMO-202 package:**
 
 - `tools/impacts/package.py <storyId>` builds the package from a confirmed story, design and
-  impact. There is no package in this repo: `python3 tools/impacts/package.py DEMO-202` refuses
-  with `story.json is missing; nothing written`, because `impacts/DEMO-202-round-robin-assignment/`
-  holds only its impact.
+  impact. `impacts/DEMO-202-round-robin-assignment/build-package.json` is committed.
 - `tools/impacts/start.py <storyId>` needs a committed package, and refuses without a terminal.
   The guard refuses it from the assistant in every mode.
-- `tools/code/check_trace.py DEMO-202` exits 2 with
-  `check_trace: no impacts/DEMO-202-*/build-package.json under <repo>`.
-- `implement-story` and the `builder` agent have not run under Claude Code: they need a package.
+- `tools/code/check_trace.py DEMO-202` exits 1 on `main` and lists every criterion under
+  `missingCriteria`, because `main` keeps the story unimplemented for you to run. It exits 0 once
+  the tests are written.
+- `implement-story` and the `builder` agent have run once on this package, and the offline done
+  commands exited 0. That code is not in this repo's `main`. Its Apex has not compiled or run and
+  no named reviewer has reviewed it, so it shows the scope lock and the flow, not working Apex.
 
 **What waits on the owner:**
 
-- the confirmations for the code walkthrough (`ai-context/OWNER-QUEUE.md` items 10 and 11);
+- the confirmations for the greenfield code walkthrough (`ai-context/OWNER-QUEUE.md` item 11);
 - the open WS8 decisions, listed under "Waits on the owner" in [Status](#status): `maintain`
   writing the source root, when the CI trace check runs and whether it fails the job, committed
   versus reviewed packages, the `.active-story` side effect on writes to the `ai-context` folder

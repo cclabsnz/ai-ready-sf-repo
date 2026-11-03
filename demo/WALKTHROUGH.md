@@ -251,16 +251,18 @@ last changed DEMO-202's record):
 {
   "impactJson": "./ai-context/DEMO-201-premium-escalation-key/impact.json",
   "impactMd": "./ai-context/DEMO-201-premium-escalation-key/impact.md",
-  "overlaps": 3,
+  "overlaps": 6,
   "registerCommit": "<commit>"
 }
+| `Case.Premium_Support` | watch | DEMO-202 | Service Ops | in-flight | review | `<commit>` |
 | `CaseTrigger` | watch | DEMO-202 | Service Ops | in-flight | modify | `<commit>` |
 | `CaseTriggerHandler` | watch | DEMO-202 | Service Ops | in-flight | modify | `<commit>` |
 | `CaseTriggerHandler_Test` | watch | DEMO-202 | Service Ops | in-flight | modify | `<commit>` |
+| `Service_Agent` | watch | DEMO-202 | Service Ops | in-flight | modify | `<commit>` |
+| `Team_Lead` | watch | DEMO-202 | Service Ops | in-flight | modify | `<commit>` |
 ```
 
-These rows are watches, not conflicts: DEMO-202 modifies the components, while DEMO-201's key
-marks them `review`. `walkthrough_check.py` does not run this stand-in, because it writes under
+These rows are watches, not conflicts: DEMO-201's key marks these components `review`. `walkthrough_check.py` does not run this stand-in, because it writes under
 `ai-context/`.
 
 ## 5. Promote the impact; open the register view
@@ -313,22 +315,16 @@ browser.
 
 *needs Claude Code*, *needs owner confirmations*
 
-This step cannot run end to end yet. The guard's scope lock and tests-first are in place, but
-there is no build package to scope a session. That waits on an owner item in
-`ai-context/OWNER-QUEUE.md`:
+DEMO-202's story, design and impact are confirmed, and its build package is committed in
+`impacts/DEMO-202-round-robin-assignment/`. The demo code on `main` stays unimplemented on purpose,
+so you can run this step yourself. Run it on a branch of your own, because it changes `demo/org`:
+that would make the package's index stamp stale, and the deterministic outputs in this walkthrough
+describe the unchanged code.
 
-- **The DEMO-202 confirmations** (item 10). A build package is made only from a confirmed story,
-  design and impact. For now `python3 tools/impacts/package.py DEMO-202` refuses with
-  `./impacts/DEMO-202-round-robin-assignment/story.json is missing; nothing written`.
-
-Once that is done, the sequence is:
-
-1. A maintainer runs `python3 tools/impacts/package.py DEMO-202` (Windows:
-   `py -3 tools/impacts/package.py DEMO-202`) and commits the package.
-2. You run `python3 tools/impacts/start.py DEMO-202` (Windows: `py -3 tools/impacts/start.py DEMO-202`)
+1. You run `python3 tools/impacts/start.py DEMO-202` (Windows: `py -3 tools/impacts/start.py DEMO-202`)
    in a real terminal, add the env lines it prints to `.claude/settings.local.json`, and
    restart Claude Code.
-3. In Claude Code, type the input of implement-story eval case 001:
+2. In Claude Code, type the input of implement-story eval case 001:
 
    ```
    /implement-story DEMO-202 Round-robin case assignment. Build mode is on for DEMO-202. Implement the story from impacts/DEMO-202-round-robin-assignment/build-package.json: new cases are assigned in turn across the assignment group when they are inserted.
@@ -339,8 +335,7 @@ the change in `ai-context/DEMO-202-round-robin-assignment/change.json` and `chan
 002 (`002-out-of-scope-needed`) covers a story that needs a file outside scope: the write is
 refused and the skill reports it. The guard's message for that case starts
 `write to '<path>' is not in the build package of the active story DEMO-202-round-robin-assignment;
-file a scope request`; no run has produced it here yet, because there is no package. Without a
-started session, a source write in `build` is refused with
+file a scope request`; no run of case 002 has produced it here yet. Without a started session, a source write in `build` is refused with
 `no active story scope (ai-context/.active-story is absent)`.
 
 ## 7. Code checks pass; the change summary maps every file to the impact
@@ -375,8 +370,11 @@ python3 tools/code/check_trace.py DEMO-202
 python3 tools/evals/run_skill.py --skill implement-story --case 001-assignment-on-insert --output ai-context/DEMO-202-round-robin-assignment/change.md --package impacts/DEMO-202-round-robin-assignment/build-package.json
 ```
 
-(Windows: the same lines with `py -3`.) Until the package exists, `check_trace.py` exits 2 with
-`check_trace: no impacts/DEMO-202-*/build-package.json under <repo>`.
+(Windows: the same lines with `py -3`.) Until step 6 has written the tests, `check_trace.py` exits
+1 and lists every criterion under `missingCriteria`.
+
+The one recorded run of this step had all three done commands exit 0. Those are offline text
+checks: Apex compiles and runs only in an org-connected CI, and that run's Apex has not.
 
 ## 8. "Log into UAT and check": the guard blocks it
 
@@ -508,16 +506,26 @@ Expected, from a real run:
     "Escalation_Agents"
   ],
   "missed": [],
-  "extra": [],
+  "extra": [
+    "Round_Robin_State__c",
+    "Round_Robin_State__c.Last_Assigned_User__c",
+    "Service_Agent",
+    "Team_Lead",
+    "Case",
+    "Case.Premium_Support",
+    "CaseAccountSummaryController_Test"
+  ],
   "recall": 1.0,
-  "precision": 1.0
+  "precision": 0.46153846153846156
 }
 ```
 
-The committed DEMO-202 record was derived from its answer key (its `provenance.model` reads
-`none (derived from reviewed answer key)`), so it scores complete by construction. This shows the
-script works; it is not a measure of the assistant. Exact output:
-`demo/expected/04-score-demo-202.txt`.
+The committed DEMO-202 record comes from one story-impact run for the design option the owner
+confirmed. The `extra` entries are components of that design or review items. The key was written
+before the design existed and does not list them, and it stays unchanged, because a key edited
+after seeing a run is no longer a blind key. So the low precision says the key predates the design,
+not that those entries are wrong. This is one run, with the owner's answers along the way; it is
+not a measure of the assistant. Exact output: `demo/expected/04-score-demo-202.txt`.
 
 To score a skill run, point the script at the draft from step 3 or 4:
 

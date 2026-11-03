@@ -36,7 +36,7 @@ Only output of these scripts on the committed demo, each with its command and so
 
 - Command: `python3 demo/measure/score.py impacts/DEMO-202-round-robin-assignment/impact.json --key demo/stories/DEMO-202.answer.json`
 - Source: `impacts/DEMO-202-round-robin-assignment/impact.json` and `demo/stories/DEMO-202.answer.json`
-- Label: answer-key-derived record. The committed impact was built from the answer key, so it scores trivially. It shows the script works. It is not a measure of the assistant.
+- Label: one story-impact run for the design option the owner confirmed, with the owner's answers along the way. It is not a measure of the assistant. The `extra` entries are components of that design or review items. The key was written before the design existed and stays unchanged, because a key edited after seeing a run is no longer a blind key. So the low precision says the key predates the design, not that those entries are wrong.
 
 ```
 {
@@ -49,9 +49,17 @@ Only output of these scripts on the committed demo, each with its command and so
     "Escalation_Agents"
   ],
   "missed": [],
-  "extra": [],
+  "extra": [
+    "Round_Robin_State__c",
+    "Round_Robin_State__c.Last_Assigned_User__c",
+    "Service_Agent",
+    "Team_Lead",
+    "Case",
+    "Case.Premium_Support",
+    "CaseAccountSummaryController_Test"
+  ],
   "recall": 1.0,
-  "precision": 1.0
+  "precision": 0.46153846153846156
 }
 ```
 

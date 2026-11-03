@@ -50,15 +50,19 @@ def rec(*apis):
     return write("rec.json", {"components": [{"api": a} for a in apis]})
 
 
-def test_demo202_found_equals_key():
+def test_demo202_finds_the_whole_key():
     code, out, _ = run(IMPACT, "--key", KEY)
     result = json.loads(out)
     with open(KEY, encoding="utf-8") as fh:
         want = [c["api"] for c in json.load(fh)["components"]]
+    with open(IMPACT, encoding="utf-8") as fh:
+        record = [c["api"] for c in json.load(fh)["components"]]
     assert code == 0
     assert sorted(result["found"]) == sorted(want)
-    assert result["missed"] == [] and result["extra"] == []
-    assert result["recall"] == 1.0 and result["precision"] == 1.0
+    assert result["missed"] == [] and result["recall"] == 1.0
+    # The key predates the design, so components of the chosen design and review items are extras.
+    assert sorted(result["extra"]) == sorted(set(record) - set(want))
+    assert result["precision"] == len(want) / len(record)
 
 
 def test_extra_is_listed():

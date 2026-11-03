@@ -167,9 +167,9 @@ The steps continue into code (see "Scoped code writing"). Steps 6 and 7 are huma
 | 8. Build | Tests first, then code, only inside the package scope; then the package's done commands | `implement-story` (the `builder` agent) | `check_trace.py --skeletons`, `check_rules.py --from-config`, `check_trace.py`, `write_change.py` | Code and tests in scope; `change.json` and `change.md` in `ai-context/<id>-<slug>/` |
 | 9. Review | The developer opens a PR. A named reviewer reviews it; CI re-runs the checks | none (a human step) | CI | A reviewed merge, or not |
 
-Steps 7 and 8 need a committed build package. Without one, start.py refuses and build mode allows no source write. This repo has none yet: DEMO-202's story, design and impact wait on the owner's confirmation.
+Steps 7 and 8 need a committed build package. Without one, start.py refuses and build mode allows no source write. In this repo, DEMO-202 has one.
 
-The `analyst` agent runs solution-design and story-impact; the `discovery-lead` agent runs story-refine; the `builder` agent runs implement-story. Design is optional for a story: story-impact without a `design.json` sizes the story as it did before WS10, its impact carries no `designOption`, and promotion works as before. WS2's DEMO-202 record on the register is such an impact.
+The `analyst` agent runs solution-design and story-impact; the `discovery-lead` agent runs story-refine; the `builder` agent runs implement-story. Design is optional for a story: story-impact without a `design.json` sizes the story as it did before WS10, its impact carries no `designOption`, and promotion works as before. WS2's DEMO-202 record, now in git history, was such an impact.
 
 ### `.ai-framework.json`
 
@@ -246,7 +246,7 @@ In CI, `guard-and-lint` builds the index with `--from-config` before `validate.p
 
 ### Honest limits
 
-- **No Claude Code run yet.** No model has run solution-design, or story-impact's Assess step, under Claude Code. Both are shown only by writer smoke tests: hand-built drafts fed through `write_design.py` and `write_report.py`, then scored with `run_skill.py`. That shows the writers and the assertions work, not that the skills do.
+- **One Claude Code run.** Solution-design and story-impact's Assess step have run once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it. Their assertions are shown only by writer smoke tests: hand-built drafts fed through `write_design.py` and `write_report.py`, then scored with `run_skill.py`.
 - **Stubs are leads, not knowledge.** Nothing checks a stub until a human moves it up a level.
 - **The patches are untested by `git apply`.** The guard does not allowlist it; `APPLY.md` lists what was checked instead and what is Unverifiable (the new CI steps on `windows-latest` and on a GitHub runner).
 
@@ -336,8 +336,8 @@ The WS1 and WS2 owner patches are applied (`3fb9e73`), and so are the later owne
 - **Identity is the `api` string only.** Two records match only when they spell an API name the same way. Two components of different types with one name count as one. A renamed component shows no overlap with its old name.
 - **The CI index root comes from the base branch.** `impact-checks` reads `sourceRoot` from the base branch's `.ai-framework.json` (`framework_config.py source-root --root base`, which exits 2 when that folder is missing from the base checkout, `tools/config/framework_config.py:98-99`). A PR that moves the source out of the base branch's `sourceRoot` is therefore checked at the old path until the move is merged. Inferred: the index and rule-check steps then look at a folder the PR no longer has. The index step most likely fails the job first, because `build_index.walk` lists the root with no existence check (`tools/index/build_index.py:112-113`). If it did not, `check_rules.py` would return no findings for the missing folder rather than failing (`tools/code/check_rules.py:263-264`). The workflow's `paths` filter skips `pkg-*/` and `manifest/`, and an adopter whose `sourceRoot` lies outside the listed paths adds it there.
 - **The PR comment step is Unverifiable until a remote exists.** It is unclear whether `gh pr comment --edit-last` edits the right comment (it edits the token user's last comment, which may come from another workflow). Fork PRs, the `files` field of `gh pr list` and the base checkout are also unchecked. `APPLY.md` lists each one.
-- **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks `CaseTrigger`, `CaseTriggerHandler` and `CaseTriggerHandler_Test` as `review`, so its overlaps with DEMO-202 are watches.
-- **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because the register was empty when it was drafted.
+- **A `review` overlap is only a watch.** When one story marks a component `review` and another modifies it, the result is a watch, not a conflict, even if the review later turns into a change. DEMO-201's answer key marks every component it shares with DEMO-202 as `review`, so those overlaps are watches.
+- **The left check is a snapshot.** A record written before another story was promoted does not list that story. DEMO-202's own `impact.md` says `none in the register` because no other story was on the register when it was drafted.
 
 ## Story refinement
 
@@ -460,9 +460,9 @@ The skill's eval cases are in `framework/skills/story-refine/evals/cases/`: a va
 **The scan is not ground truth until recomputed.** The skill writes `scan/edge-seeds.json` itself, so a skill that omits or invents a seed there could pass the seed assertions. For `must_keep_edge`, `must_become_criterion`, `edges_from_seeds_only` and `seeds_accounted`, `run_skill.py` recomputes `edge_seeds(load(<index>), story.json seeds, <checkout>)` from `tools/index/query.py` (`--index`, default `<checkout>/index`). It fails when the saved scan differs, comparing parsed JSON with order ignored. The index must be the one the skill ran against (for the demo cases, built with `--root demo/org`).
 - `must_list_overlap`: as story-impact's `must_flag_overlap`, for `story.md`.
 
-No case asserts an overlap: DEMO-201's natural seeds share no component with DEMO-202, the only story on the register.
+No case asserts an overlap. DEMO-202, the only story on the register, lists `Case` and `Case.Premium_Support` for review, so a DEMO-201 run that seeds either one lists it.
 
-**Not proven yet.** No model has run story-refine under Claude Code. The only evidence for case 002 is a smoke test of the writer: a hand-built draft fed through `write_story.py` and then `run_skill.py`. That shows the writer and the assertions work. It is not evidence that the skill works under Claude Code. Consistency across repeated runs (WS3) is not built.
+**Not proven yet.** Story-refine has run once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it. The only evidence for case 002 is a smoke test of the writer: a hand-built draft fed through `write_story.py` and then `run_skill.py`. That shows the writer and the assertions work. It is not evidence that the skill works under Claude Code. Consistency across repeated runs (WS3) is not built.
 
 ### Tracing criteria to tests
 
@@ -475,10 +475,10 @@ WS8 lets the assistant write Salesforce code, but only inside one story's confir
 **What runs, and what waits.** The guard-owned pieces (the scope lock, tests-first, and the cores `tools/guard/trace_core.py` and `tools/guard/scope_core.py`) came in the WS8 owner patch (`ai-context/ws8/patches/`), applied after the WS11 and WS10 ones. In this repo:
 
 - `check_rules.py` runs, and on the demo every finding is baselined (exit 0; the README shows the output).
-- `package.py` runs, but no package exists. `impacts/DEMO-202-round-robin-assignment/` holds only `impact.json` and `impact.md`, so `python3 tools/impacts/package.py DEMO-202` refuses with `story.json is missing; nothing written`. A package needs the owner to confirm the DEMO-202 story, design and impact first (`ai-context/OWNER-QUEUE.md` items 10 and 11 hold the demo and greenfield walkthroughs).
-- `check_trace.py DEMO-202` exits 2 with `check_trace: no impacts/DEMO-202-*/build-package.json under <repo>`, because there is no package.
+- `package.py` built DEMO-202's committed package from its confirmed story, design and impact.
+- `check_trace.py DEMO-202` exits 1 on `main` and lists every criterion under `missingCriteria`, because `main` keeps the story unimplemented so a reader can run the build.
 - `start.py` refuses without a terminal, and without a committed package.
-- So build mode writes no source here yet. With no `ai-context/.active-story`, a write under the source root is blocked with `no active story scope (ai-context/.active-story is absent); a human runs tools/impacts/start.py <storyId> in a terminal, adds the env lines it prints and restarts the session` (`tools/guard/guard.py:65-66`).
+- Build mode writes source only after a human starts a session. With no `ai-context/.active-story`, a write under the source root is blocked with `no active story scope (ai-context/.active-story is absent); a human runs tools/impacts/start.py <storyId> in a terminal, adds the env lines it prints and restarts the session` (`tools/guard/guard.py:65-66`).
 
 ### The build package
 
@@ -509,7 +509,7 @@ It refuses (exit 1, naming the reason, nothing written) unless:
 
 `register.py scope <storyId>` prefers the package when one exists. It then returns the package's paths with `source: "build-package"`, and otherwise the impact's components with `source: "impact"`.
 
-No package is committed for the evals. A committed fixture carrying `confirmedBy` would be a fabricated confirmation. `run_skill.py --package <path>` takes the real package once the owner steps are done.
+The evals commit no fixture package, because one carrying `confirmedBy` would be a fabricated confirmation. `run_skill.py --package <path>` takes a real package: DEMO-202's for cases 001 and 002. Case 003 needs DEMO-301's, once its owner steps are done.
 
 ### Rule checks and the baseline: `check_rules.py`
 
@@ -591,7 +591,7 @@ On any finding it writes nothing (exit 1). It fills in `schemaVersion`, `slug` a
 
 The `builder` agent (`framework/agents/builder.md`) is the only posture that writes code. It runs implement-story and refuses these actions: org calls, deploys, pushes and merges; approving or promoting its own work; writing outside the package scope or `ai-context/`; widening scope (editing the package, running `package.py`, asking for the guard to be relaxed); and starting its own session. Its trajectory spec is `framework/agents/evals/builder.json`.
 
-The skill's eval cases are in `framework/skills/implement-story/evals/cases/`. No model has run implement-story or the builder under Claude Code: there is no package to run them on until the owner's confirmations exist.
+The skill's eval cases are in `framework/skills/implement-story/evals/cases/`. Implement-story and the builder have run once under Claude Code, on DEMO-202's package. The offline done commands exited 0, the Apex has not compiled or run, no named reviewer has reviewed it, and no eval has scored it.
 
 ### Where it runs
 
@@ -671,7 +671,7 @@ The runs committed in `demo/expected/consistency-fixture/` are hand-built to sho
 
 ### Measurement kit (WS4)
 
-`demo/measure/` measures impact analysis the same way for an assistant run and for a person. `score.py` compares an `impact.json`'s components with a reviewed answer key and prints found, missed, extra, recall and precision. `timing.py` reads a Claude Code session transcript and prints its start, end, duration and tool-call count. `baseline-template.md` is an empty template for a manual baseline. The kit publishes no time-saved figure: one appears only after a measured baseline is committed with its source, computed from the committed rows. The only published score is DEMO-202's committed record against its key, and that record was derived from the key, so it shows the script works and measures nothing about the assistant (`demo/measure/README.md`). The scripts live under `demo/`, so in Claude Code they run only in `maintain`.
+`demo/measure/` measures impact analysis the same way for an assistant run and for a person. `score.py` compares an `impact.json`'s components with a reviewed answer key and prints found, missed, extra, recall and precision. `timing.py` reads a Claude Code session transcript and prints its start, end, duration and tool-call count. `baseline-template.md` is an empty template for a manual baseline. The kit publishes no time-saved figure: one appears only after a measured baseline is committed with its source, computed from the committed rows. The only published score is DEMO-202's committed record against its key. That record is one run with the owner's answers along the way, and the key predates the design, so it measures nothing general about the assistant (`demo/measure/README.md`). The scripts live under `demo/`, so in Claude Code they run only in `maintain`.
 
 ### The walkthrough and its deterministic check (WS5)
 

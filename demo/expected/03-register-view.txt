@@ -3,6 +3,36 @@ command: python3 tools/impacts/register.py view
 exit: 0
 {
   "components": {
+    "Case": [
+      {
+        "changeType": "review",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "CustomObject"
+      }
+    ],
+    "Case.Premium_Support": [
+      {
+        "changeType": "review",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "RecordType"
+      }
+    ],
+    "CaseAccountSummaryController_Test": [
+      {
+        "changeType": "review",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "ApexClass"
+      }
+    ],
     "CaseAssignmentService": [
       {
         "changeType": "modify",
@@ -61,6 +91,46 @@ exit: 0
         "status": "in-flight",
         "storyId": "DEMO-202",
         "type": "Queue"
+      }
+    ],
+    "Round_Robin_State__c": [
+      {
+        "changeType": "new",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "CustomObject"
+      }
+    ],
+    "Round_Robin_State__c.Last_Assigned_User__c": [
+      {
+        "changeType": "new",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "CustomField"
+      }
+    ],
+    "Service_Agent": [
+      {
+        "changeType": "modify",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "PermissionSet"
+      }
+    ],
+    "Team_Lead": [
+      {
+        "changeType": "modify",
+        "commit": "<commit>",
+        "squad": "Service Ops",
+        "status": "in-flight",
+        "storyId": "DEMO-202",
+        "type": "PermissionSet"
       }
     ]
   },

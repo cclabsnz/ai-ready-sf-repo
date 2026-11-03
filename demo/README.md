@@ -70,31 +70,28 @@ global value set's name, and a formula flag; `query.py edge-seeds` reads them.
 
 ## The DEMO-202 impact record
 
-`impacts/DEMO-202-round-robin-assignment/` holds DEMO-202's promoted impact record (`impact.json`)
-and its report (`impact.md`). It gives the overlap checks a real story to find. It came through
-the real pipeline:
+`impacts/DEMO-202-round-robin-assignment/` holds DEMO-202's confirmed story, design and impact and
+its build package. It gives the overlap checks a real story to find, and the code walkthrough a
+package to build from. It came through the real pipeline, once:
 
-1. `tools/demo/answer_to_draft.py --key demo/stories/DEMO-202.answer.json --slug round-robin-assignment --index index`
-   turned the reviewed answer key into `classified.json` and `meta.json` and ran story-impact's
-   writer, `write_report.py`, which wrote the draft to `ai-context/DEMO-202-round-robin-assignment/`.
-2. The owner reviewed the draft and ran `tools/impacts/promote.py` on it, confirming it with
-   their own `--confirmed-by`. The assistant did not run the promotion or supply the confirmation.
+1. story-refine drafted the story, and the owner answered or deferred its open questions and ran
+   `tools/impacts/promote.py --story`.
+2. solution-design drafted the options, and story-impact assessed the option the owner chose.
+   The owner ran `promote.py --option OPT-2 --replace`, which replaced an earlier record derived
+   from the answer key; that one stays in git history.
+3. A maintainer ran `tools/impacts/package.py DEMO-202` and committed the package.
 
-The record is **key-derived, not a model run**: its `provenance.model` reads
-`none (derived from reviewed answer key)` and `provenance.assistantVersion` reads `n/a`. Its
-components, change types and hops come from the key.
+The assistant did not run a promotion or supply a confirmation. This is **one run with the owner's
+answers along the way**, not a measure of the assistant. The answer key predates the design, so
+the record scores low precision against it (`demo/measure/README.md`).
 
-- **Evidence:** index components take their evidence from the index. The judgement component
-  `Escalation_Agents` takes the key's own cite. `:1` is added only when that cite has no line
-  number.
-- **Impact and confidence:** the script maps them (`tools/demo/answer_to_draft.py:37`,
-  `:84-87`). `modify` gives Medium and `review` gives Low. A judgement component is Inferred and
-  an index component Confirmed.
+`demo/org` stays unimplemented for this story on `main`, so you can run the build yourself
+(`demo/WALKTHROUGH.md` step 6).
 
 Its `impact.md` says `none in the register` under "Overlaps with other stories". That is correct
 for when it was written: the overlap section is a snapshot taken at write time, and the register
-was empty then. A DEMO-201 draft written now lists DEMO-202 (README quick start step 7). The
-overlaps there are watches, not conflicts, because DEMO-201's key marks the shared components
+held only DEMO-202 then. A DEMO-201 draft written now lists DEMO-202 (README quick start step 7).
+The overlaps there are watches, not conflicts, because DEMO-201's key marks the shared components
 `review`.
 
 ## Answer keys

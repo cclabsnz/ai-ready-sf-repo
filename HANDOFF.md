@@ -25,8 +25,8 @@ without a written reason in the PR.
 **Built, with tests:** the guard and its modes (WS0); the demo org, index and answer keys (WS1);
 the impact record, register and PR check (WS2); story refinement (WS11), starting points and
 solution design (WS10) and scoped code writing (WS8), with their guard and CI patches applied
-(`build` writes source only once a story's package is committed and a human runs `start.py`, and
-no package exists here yet); the consistency comparer and the live-run
+(`build` writes source only once a story's package is committed and a human runs `start.py`;
+DEMO-202 has a committed package); the consistency comparer and the live-run
 collector (WS3); the measurement kit (WS4); the walkthrough with its deterministic check and the
 adoption guide (WS5); `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md`. `CHANGELOG.md` lists
 what each workstream delivered.
@@ -50,11 +50,11 @@ no guard; see "Copilot today" in `docs/DESIGN.md`.
   - the `live-consistency` job, the `nz` and `ncino` scan packs for this repo, and a schedule;
 - set up GitHub (private vulnerability reporting, branch protection with the required checks)
   and run the full-history scans before the repository goes public;
-- confirm the DEMO-202 story, design and impact, build and commit its package, and start a
-  build session, so the code walkthrough can run (and the same for the greenfield DEMO-301);
+- confirm the greenfield DEMO-301's story, design and impact, build and commit its package, and
+  start a build session, so its code walkthrough can run;
 - pick the plugin layout, place the drafted plugin manifest and tag the first release;
-- run the live `run_all.py` series and any skill runs under Claude Code; no model has run
-  story-refine, solution-design or implement-story here yet.
+- run the live `run_all.py` series; story-refine, solution-design and implement-story have run
+  only once each here, on DEMO-202.
 
 ## Smoke test (run before anything else)
 
@@ -155,7 +155,7 @@ before using a skill.
   Inferred from the policy; no story-refine run has gone through the guard in `normal` yet.
 - Story promotion (`promote.py --story`) is the product owner's confirmation. The assistant never
   runs it to confirm a story and never supplies `--confirmed-by`.
-- No model has run story-refine under Claude Code yet. Its eval case 002 has passed only on a
+- Story-refine has run once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it. Its eval case 002 has passed only on a
   hand-built draft fed through the writer, a smoke test of the writer, not of the skill.
 - The WS10 owner patches (`ai-context/ws10/patches/`: the guard policy, its cases, the guard's
   modelling of `build_index.py --from-config` and `write_design.py`'s output, and the CI
@@ -165,8 +165,8 @@ before using a skill.
   `build_index.py --from-config`, which the guard models as writing `index/`; with `--root` or
   `--out` alongside it is blocked. `onboard.py` is `maintain`-only; run it in your own terminal.
 - The day-one workflow (refine, understand, design, assess, confirm) is in `docs/DESIGN.md`,
-  "Day-one workflow". No model has run solution-design, or story-impact on a design option,
-  under Claude Code yet; both are shown only by writer smoke tests. The owner's choice of option
+  "Day-one workflow". Solution-design, and story-impact on a design option, have run
+  once under Claude Code, on DEMO-202, with the owner answering and confirming along the way. That is one run, not a consistency figure, and no eval has scored it; their assertions are shown only by writer smoke tests. The owner's choice of option
   is `promote.py --option`, a human step like every promotion.
 - Onboarding an existing codebase writes the rule baseline, `tools/code/baseline.json`, from
   `check_rules.py`; the baseline only shrinks. Onboarding's knowledge stubs go to
@@ -175,9 +175,9 @@ before using a skill.
   the guard-owned cores `tools/guard/trace_core.py` and `scope_core.py`, `.active-story` always
   blocked, the modelling of `start.py` and `write_change.py`, the `check_rules`/`check_trace`
   allowlist patterns, their cases, and the CI steps) are applied. `ai-context/ws8/patches/APPLY.md`
-  lists the owner decisions still open. `check_trace.py` and `start.py` run, but with no committed
-  package in this repo, `check_trace.py DEMO-202` exits 2 (no build package) and `build` writes no
-  source.
+  lists the owner decisions still open. `check_trace.py` and `start.py` run. DEMO-202's package is
+  committed, and `check_trace.py DEMO-202` exits 1 on `main`, which keeps the story unimplemented so
+  a reader can run the build.
 - The publish owner patches (`ai-context/publish/patches/`: scanner packs and
   `tools/guard/scan_packs.json`, `scan_data.py --tracked`, the guard's refusal of
   `tools/evals/run_all.py` in every mode, and the CI steps and the manual `live-consistency` job)
@@ -185,10 +185,10 @@ before using a skill.
   are open (`ai-context/publish/patches/APPLY.md`).
 - `tools/impacts/package.py` and `start.py` are human steps: a maintainer builds the package
   from a confirmed story, design and impact and commits it; a human runs `start.py` in a real
-  terminal and pastes the env lines. No package exists until the owner confirms DEMO-202's story,
-  design and impact (`ai-context/OWNER-QUEUE.md` items 10 and 11). The builder never runs either.
-- No model has run implement-story or the `builder` agent under Claude Code yet; they need a
-  committed package. See "Scoped code writing" in `docs/DESIGN.md` for the honest limits.
+  terminal and pastes the env lines. The builder never runs either.
+- Implement-story and the `builder` agent have run once under Claude Code, on DEMO-202's package.
+  The Apex has not compiled or run, and no named reviewer has reviewed it. See "Scoped code
+  writing" in `docs/DESIGN.md` for the honest limits.
 - After applying guard patches, a human runs `python3 tools/guard/guard.py --rebaseline` once from a
   terminal, and again whenever `.git/config` or `.git/hooks/` legitimately change, and once inside
   every new git worktree (each worktree keeps its own baseline). Until then the tripwire blocks
@@ -262,8 +262,8 @@ before using a skill.
 - [x] `tools/code/check_trace.py` (WS8): built, with its core in `tools/guard/trace_core.py`.
 - [x] `implement-story` and the `builder` agent (WS8): skill, `write_change.py`, eval cases 001,
       002 and 003, `framework/agents/evals/builder.json`.
-- [ ] `implement-story`: run it through the builder under Claude Code on each eval case once the
-      owner's confirmations and a committed package exist, and record the results.
+- [ ] `implement-story`: run it through the builder under Claude Code on each eval case and record
+      the results. DEMO-202's package exists; case 003 needs DEMO-301's.
 - [x] `solution-design` and starting points (WS10): skill, writer, eval cases 001, 002 and 003,
       `tools/designs/`, `tools/config/`, `tools/onboard/`, `demo/greenfield/`, the option choice
       at promotion.

@@ -90,7 +90,7 @@ The first published version. Each entry names what a workstream delivered; the c
   `tools/guard/scope_core.py`. `check_rules.py --from-config` and `check_trace.py` join the
   `normal` and `build` allowlists.
 - The `implement-story` skill and the `builder` agent, which write tests first inside the package
-  scope. No package is committed in this repo yet, so neither has run.
+  scope. They have run once, on DEMO-202's package; the Apex has not compiled or run.
 - CI runs the code tests, the builder's sample eval and `check_rules.py --from-config` in
   `guard-and-lint`. `impact-checks` fails on a new rule finding or a grown baseline, and runs the
   trace check, report-only, for each changed build package.
