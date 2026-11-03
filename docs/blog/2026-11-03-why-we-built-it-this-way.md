@@ -54,9 +54,13 @@ The assistant cannot switch modes itself. A person runs `tools/impacts/start.py`
 
 The laptop guard is best effort, and we say so. Someone determined can work around a local hook. The control that holds is CI with branch protection and code owners. The checks that matter for a merge run again on the pull request: the real-data scan, the Apex rules, the criterion-to-test trace for changed build packages, and the impact and overlap checks. The hook catches mistakes early; CI is what blocks a merge.
 
+![Two layers of control: the guard hook on the laptop catches mistakes early; CI and branch protection on the pull request decide what merges.](../images/two-layers-of-control.svg)
+
 ## The chain, from story to code
 
 Each step has one owner and leaves a reviewed file behind:
+
+![The chain from story to code: the assistant drafts with story-refine, solution-design and story-impact, and a person confirms each; a maintainer builds the package, a developer starts the session, the assistant writes tests first and code inside scope, and a named reviewer reviews the pull request.](../images/story-to-code-chain.svg)
 
 1. **story-refine** (assistant) turns a rough story into acceptance criteria, edge cases seeded from the index, and open questions, each with an owner role. A person answers or defers each question and promotes the story.
 2. **solution-design** (assistant) writes two to four options, always including "do nothing", with evidence-backed trade-offs and one provisional recommendation. A person chooses.

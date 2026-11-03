@@ -1,20 +1,80 @@
 # AI-ready Salesforce repo (reference)
 
-A reference way of working for large Salesforce programmes that let AI assistants (Claude Code
-now, GitHub Copilot next) analyse and, later, build. It is for enterprise architects and squad
-leads deciding whether and how to adopt AI across several build squads. Everything a squad wants
-from the assistant (impact analysis, PR review, discovery) consumes one capability: a
-deterministic, commit-stamped index of the checkout. A guard on every tool call keeps the
-assistant inside fixed limits. You clone it, run it on a synthetic org on your own laptop, and
-take what you need into your own repo.
+**A reference repo for large Salesforce programmes that let an AI assistant analyse stories and
+write code, without losing track of what changed, why, and who agreed to it.** Claude Code today;
+GitHub Copilot gets the same rules as text, without the guard. MIT-licensed, Python standard
+library only, and it runs offline on a synthetic org on your laptop.
 
-- **Try it:** [demo/WALKTHROUGH.md](demo/WALKTHROUGH.md) goes step by step through the framework on
-  the demo org. Each step says whether it is plain Python, needs Claude Code, or waits on an owner
-  confirmation. `python3 tools/demo/walkthrough_check.py` re-runs the deterministic steps and
-  diffs them against `demo/expected/`.
-- **Adopt it:** [docs/ADOPTING.md](docs/ADOPTING.md) takes the framework into your own Salesforce
-  repo: install routes, policy and modes, server-side controls, onboarding and what Copilot users
-  get today.
+[Walkthrough](demo/WALKTHROUGH.md) · [Adopt it](docs/ADOPTING.md) ·
+[Design](docs/DESIGN.md) · [Why it is built this way](docs/blog/2026-11-03-why-we-built-it-this-way.md) ·
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
+## Why it exists
+
+In a large org, writing the trigger is the easy part. The hard parts are knowing what a change
+will touch, knowing which other squad is changing the same class, and knowing that someone with
+the authority to say yes actually said yes. An AI assistant makes the easy part cheaper and the
+hard parts worse: it answers confidently about metadata it never opened, counts things it
+guessed, and will try to "check in UAT" if asked.
+
+This repo answers with three rules, each enforced by a script, a hook or a CI check rather than a
+prompt:
+
+| Rule | How it is enforced |
+| --- | --- |
+| **The build is the only evidence.** | `tools/index/` builds a commit-stamped dependency index of the checkout. Every claim cites `path:line` and carries a label (Confirmed, Inferred or Unverifiable), and the validators reject reports without them. Counts come from `query.py`, never from the model. |
+| **The assistant recommends; a named person confirms.** | Stories, designs and impacts become records in `impacts/` only when a person runs `promote.py --confirmed-by "<role>"`. Open questions, vague criteria, broken evidence and real-data hits block promotion. |
+| **Guardrails live in code.** | A hook (`tools/guard/`) runs before every tool call, with four modes. It blocks org calls, deploys, pushes and out-of-scope writes. The same checks run again on every pull request, where branch protection decides what merges. |
+
+![Two layers of control: the guard hook on the laptop catches mistakes early; CI and branch protection on the pull request decide what merges.](docs/images/two-layers-of-control.svg)
+
+## How a story moves from idea to code
+
+![The chain from story to code: the assistant drafts with story-refine, solution-design and story-impact, and a person confirms each; a maintainer builds the package, a developer starts the session in a real terminal, the assistant writes tests first and code inside scope, and a named reviewer reviews the pull request.](docs/images/story-to-code-chain.svg)
+
+Each step leaves a reviewed file behind, and each needs the one above it confirmed.
+[The day-one workflow](#the-day-one-workflow) below gives the commands. None of the steps
+deploys anything: Apex compiles and runs in your own org-connected CI, after a named reviewer
+approves the pull request.
+
+## What is in the box
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Guard | `tools/guard/` | PreToolUse hook: modes, allowlists, scope lock, tripwire over its own files, real-data scanner |
+| Metadata index | `tools/index/` | Parses the checkout into nodes and edges; answers `exists`, `type`, `consumers` (to 3 hops) and `edge-seeds` |
+| Skills | `framework/skills/` | `story-refine`, `solution-design`, `story-impact`, `implement-story`, `pr-reference-check` |
+| Agents | `framework/agents/` | `discovery-lead`, `analyst`, `builder`, `reviewer`: posture and the skills each may run |
+| Register | `impacts/`, `tools/impacts/` | Confirmed stories, designs and impacts in git; overlap checks at story time and PR time; build packages |
+| Code checks | `tools/code/` | Deterministic Apex rules with a baseline; criterion-to-test trace |
+| Evals | `tools/evals/` | Output and trajectory assertions, and a consistency comparer for repeated runs |
+| Demo | `demo/` | A synthetic Sales/Service org, three stories with reviewed answer keys, a greenfield skeleton, and a walkthrough with expected outputs |
+| CI | `.github/workflows/framework-ci.yml` | Guard tests, lint, render check, data scan, every tool's tests, impact and PR checks, gitleaks |
+
+## Try it in five minutes
+
+No Claude Code, Node or Salesforce CLI needed for this part:
+
+```sh
+git clone https://github.com/cclabsnz/ai-ready-sf-repo.git
+cd ai-ready-sf-repo
+python3 tools/guard/test_guard.py          # last line: <n> passed, 0 failed
+python3 tools/demo/walkthrough_check.py    # last line: 6 passed, 0 failed
+```
+
+Then follow the [Quick start](#quick-start) below, or [demo/WALKTHROUGH.md](demo/WALKTHROUGH.md)
+for the full path with Claude Code.
+
+## Honest limits
+
+- No Apex in this repo has been compiled or run, the DEMO-202 build included; that happens in an
+  adopter's org-connected CI.
+- No live model eval has been scored yet, so there are no golden outputs or consistency figures.
+- Tested on macOS. CI is configured for Ubuntu and Windows; Windows has not had a green run yet.
+- The guard is a laptop control, best effort. The control that holds is CI with branch
+  protection and code owners (see [Contributing and safety](#contributing-and-safety)).
+
+## Principles
 
 Six principles, in order of precedence:
 
@@ -214,7 +274,7 @@ contains `<n>`, the number depends on the commit; this page never fixes counts.
 **1. Clone.**
 
 ```sh
-git clone <repo-url> ai-ready-sf-repo
+git clone https://github.com/cclabsnz/ai-ready-sf-repo.git
 cd ai-ready-sf-repo
 ```
 
