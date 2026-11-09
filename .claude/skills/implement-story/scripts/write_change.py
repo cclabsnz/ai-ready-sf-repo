@@ -329,6 +329,14 @@ def usage(msg):
     return 2
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Write change.json and change.md for one story's build.",
                                  allow_abbrev=False)
@@ -382,7 +390,7 @@ def main(argv=None):
 
     top = os.path.realpath(a.root)
     real_pkg = os.path.realpath(pkg_path)
-    rel_pkg = (os.path.relpath(real_pkg, top) if os.path.commonpath([top, real_pkg]) == top
+    rel_pkg = (os.path.relpath(real_pkg, top) if _inside(top, real_pkg)
                else real_pkg).replace(os.sep, "/")
     doc.update({"schemaVersion": 1, "slug": a.slug, "package": {"path": rel_pkg, "sha1": sha}})
     jbytes = (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")

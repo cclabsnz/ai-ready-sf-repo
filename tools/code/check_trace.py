@@ -84,6 +84,14 @@ def find_package(root, story):
     return path
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def load_package(path, root):
     rel = os.path.relpath(path, root).replace("\\", "/")
     try:
@@ -108,7 +116,7 @@ def load_package(path, root):
         if not t or t.startswith("/") or "\\" in t or ".." in parts or "" in parts:
             raise Unusable("%s: scope.tests entry %s is not a repo-relative path" % (rel, json.dumps(t)))
         real = os.path.realpath(os.path.join(top, t))
-        if os.path.commonpath([top, real]) != top:
+        if not _inside(top, real):
             raise Unusable("%s: scope.tests entry %s resolves outside the repo" % (rel, json.dumps(t)))
     return rel, criteria, tests
 

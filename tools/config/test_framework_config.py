@@ -26,6 +26,15 @@ DEFAULT_CHECKS = {"noImpact": "comment", "outOfScope": "comment"}
 APEX = "public with sharing class %s {}\n"
 
 
+def test_inside_never_raises():
+    # commonpath raises ValueError on paths from different Windows drives; mixing absolute and relative
+    # raises it on every OS, so this exercises the same branch here.
+    top = os.path.realpath(CHECKOUT)
+    assert framework_config._inside(top, os.path.join(top, "tools")) is True
+    assert framework_config._inside(top, "relative") is False
+    assert framework_config._inside(top, os.path.dirname(top)) is False
+
+
 def tmp_repo(config=None):
     base = os.path.join(CHECKOUT, "ai-context")
     os.makedirs(base, exist_ok=True)

@@ -72,6 +72,14 @@ def index_stamp(idx):
     return {"commit": "unknown", "error": "index stamp has no commit"}
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def resolve_source_root(root, given):
     """(repo-relative path with forward slashes, None) or (None, problem text).
 
@@ -87,7 +95,7 @@ def resolve_source_root(root, given):
         if not given.strip() or os.path.isabs(given) or given.startswith(("/", "\\")):
             return None, "--source-root '%s' is not a path relative to --root" % given
         path = os.path.realpath(os.path.join(top, given))
-        if os.path.commonpath([top, path]) != top:
+        if not _inside(top, path):
             return None, "--source-root '%s' resolves outside --root" % given
         if not os.path.isdir(path):
             return None, "--source-root '%s' is not a directory under --root" % given

@@ -152,6 +152,14 @@ def _resolved(top, rel):
         return None
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def _parse_config(top, entry):
     """(source_root, None) or (None, error) from the cat-file result for HEAD:.ai-framework.json."""
     if entry is None:
@@ -181,7 +189,7 @@ def _parse_config(top, entry):
     if ".." in src.split("/"):
         return None, "%s at HEAD: sourceRoot %s contains '..'" % (CONFIG, _show(src))
     real = os.path.realpath(os.path.join(top, src))
-    if os.path.commonpath([top, real]) != top:
+    if not _inside(top, real):
         return None, "%s at HEAD: sourceRoot %s resolves outside the repo" % (CONFIG, _show(src))
     if not os.path.isdir(real):
         return None, "%s at HEAD: sourceRoot %s is not a directory" % (CONFIG, _show(src))

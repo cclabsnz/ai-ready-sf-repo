@@ -1654,6 +1654,24 @@ def check_run_all_refused():
     return all(results)
 
 
+def check_core_inside():
+    """scope_core._inside answers False instead of raising when commonpath cannot compare the paths (different
+    Windows drives; absolute against relative on every OS), so a sourceRoot linked to another drive fails closed."""
+    check, results = checker()
+
+    def body():
+        spec = importlib.util.spec_from_file_location("scope_core_inside", os.path.join(HERE, "scope_core.py"))
+        core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(core)
+        top = os.path.realpath(HERE)
+        check("scope_core._inside: a child is inside", core._inside(top, os.path.join(top, "x")) is True)
+        check("scope_core._inside: an uncomparable path is outside, no raise", core._inside(top, "relative") is False)
+        check("scope_core._inside: the parent is outside", core._inside(top, os.path.dirname(top)) is False)
+
+    guarded(check, "scope_core._inside", body)
+    return all(results)
+
+
 def check_source_root_drift():
     """The guard's sourceRoot reading (scope_core via Scope) equals tools/config/framework_config.source_root for a set of
     committed configs. Excluded, by design: a missing file or a missing sourceRoot key (framework_config defaults to ".",
@@ -2967,6 +2985,7 @@ def main():
                  + SCOPE_CASES + SCOPE_BASH_CASES + list(no_allowlist_variants(SCOPE_BASH_CASES)) + PUBLISH_CASES):
         results.append(report(case, *run_case(case)))
     results.append(check_core_units())
+    results.append(check_core_inside())
     results.append(check_source_root_drift())
     results.append(check_package_drift())
     results.append(check_scope_lazy())
