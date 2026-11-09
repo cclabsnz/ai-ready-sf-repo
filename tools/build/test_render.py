@@ -16,6 +16,8 @@ _spec = importlib.util.spec_from_file_location("render", os.path.join(HERE, "ren
 render = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(render)
 
+# ai-context/ is git-ignored, so a fresh clone (and every CI runner) starts without it.
+os.makedirs(os.path.join(REPO, "ai-context"), exist_ok=True)
 TMP = tempfile.mkdtemp(prefix="render_", dir=os.path.join(REPO, "ai-context"))
 FRESH = os.path.join(TMP, "fresh")
 render.render(FRESH)
