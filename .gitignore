@@ -2,6 +2,9 @@
 data/
 /ai-context/
 
+# Maintainers' private specs and plans; kept out even without a personal global ignore
+/docs/superpowers/
+
 # Generated index: rebuilt in CI, never trusted from git.
 # Anchored with "/": a bare "index/" also ignores tools/index/, the index builder itself.
 /index/

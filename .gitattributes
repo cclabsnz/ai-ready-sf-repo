@@ -3,3 +3,5 @@
 tools/guard/*.json text eol=lf
 tools/guard/*.py text eol=lf
 demo/org/** text eol=lf
+.ai-framework.json text eol=lf
+tools/code/baseline.json text eol=lf
