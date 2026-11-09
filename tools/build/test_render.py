@@ -114,3 +114,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+# CI smoke test: this branch is closed without merging.
