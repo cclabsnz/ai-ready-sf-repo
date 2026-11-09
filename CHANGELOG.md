@@ -3,7 +3,7 @@
 All notable changes to this framework are recorded here. Versions follow `VERSION`. A release
 date is set when the release is tagged.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-10
 
 The first published version. Each entry names what a workstream delivered; the commits and
 `docs/DESIGN.md` hold the detail.
@@ -150,3 +150,23 @@ The first published version. Each entry names what a workstream delivered; the c
   `guard-and-lint`, on Ubuntu and Windows. An optional `live-consistency` job can be started by
   hand from the default branch. It has not run, and on a fresh runner the guard has no baseline,
   so it is not expected to produce skill outputs; what to do with it is an owner decision.
+
+### First CI runs on GitHub, Windows included
+
+- **Release prep:** `.ai-framework.json` and `tools/code/baseline.json` are pinned to LF, and
+  `/docs/superpowers/` is ignored in the repo itself. CI runs `tools/build/test_render.py`, which
+  now creates `ai-context/` in a fresh clone. The `live-consistency` job runs only for the
+  repository owner and installs a pinned Claude Code version.
+- **MCP writes:** the guard's MCP write pattern adds `batch`, `bulk`, `import`, `sync`, `publish`,
+  `drop`, `clear`, `reset`, `purge` and `grant`. A Docs connector's `batch` call had written a doc
+  while `update` was blocked.
+- **`secrets` job:** gitleaks gets the workflow token, with `pull-requests: read` and PR comments
+  off.
+- **Windows:** `guard-and-lint (windows-latest)` passes for the first time. The fixes:
+  - the guard accepts an `ai-context/.active-story` ending in CRLF;
+  - `--rebaseline` needs a real console on Windows, where `isatty()` is also true for `NUL`;
+  - a folder target ending in a backslash counts as a folder;
+  - path-containment checks and the walkthrough's messages no longer crash when two paths are on
+    different drives;
+  - the impact validator rejects a NUL in an evidence path before resolving it;
+  - test fixtures are written with LF, and a promotion test compares normalised paths.
