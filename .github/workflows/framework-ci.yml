@@ -27,6 +27,8 @@ jobs:
         run: python tools/build/lint.py
       - name: Rendered outputs are current
         run: python tools/build/render.py --check
+      - name: Render check tests
+        run: python tools/build/test_render.py
       - name: Build index on fixtures
         run: python tools/index/build_index.py --root fixtures --out ../index-ci
       - name: Index evidence opens from the repo root
@@ -260,7 +262,7 @@ jobs:
   # run_all.py runs one case N times, consistency.py compares the run folders, and the folders are uploaded for review.
   # Golden outputs are committed by a human after review, never by this job.
   live-consistency:
-    if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch && github.actor == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -274,13 +276,13 @@ jobs:
         with: { python-version: "3.12" }
       - uses: pnpm/action-setup@v4
         with: { version: 10 }
-      # Pin an exact, reviewed version before the first run: this package later receives the API key.
+      # An exact, reviewed version: this package later receives the API key. Change it only by a reviewed PR.
       - name: Install Claude Code
         env:
           PNPM_HOME: /home/runner/.pnpm-global
         run: |
           export PATH="$PNPM_HOME:$PATH"
-          pnpm add -g @anthropic-ai/claude-code
+          pnpm add -g @anthropic-ai/claude-code@2.1.300
           echo "$PNPM_HOME" >> "$GITHUB_PATH"
       # The secret reaches only this step, the one that calls claude.
       - name: Live runs for one case

@@ -117,7 +117,7 @@
       "ListAgents",
       "SendMessage"
     ],
-    "mcp_write_pattern": "(?i)(write|edit|create|delete|remove|move|rename|update|upload|send|post|put|patch|apply|push|deploy|trash|forward|reply|label|archive|set|add|insert|execute|run|install|copy|save|store|commit|merge|mkdir|upsert|cancel|untrash|unlabel|mark|unmark|respond|pause|resume|approve|accept|revoke|rollback|promote|buy|invalidate|stop|kill|transfer|share|assign|schedule|enable|disable|activate|input|fill|submit|click|type|navigate|upgrade|restore)"
+    "mcp_write_pattern": "(?i)(write|edit|create|delete|remove|move|rename|update|upload|send|post|put|patch|apply|push|deploy|trash|forward|reply|label|archive|set|add|insert|execute|run|install|copy|save|store|commit|merge|mkdir|upsert|cancel|untrash|unlabel|mark|unmark|respond|pause|resume|approve|accept|revoke|rollback|promote|buy|invalidate|stop|kill|transfer|share|assign|schedule|enable|disable|activate|input|fill|submit|click|type|navigate|upgrade|restore|batch|bulk|import|sync|publish|drop|clear|reset|purge|grant)"
   },
   "tripwire_paths": [
     "tools/guard",

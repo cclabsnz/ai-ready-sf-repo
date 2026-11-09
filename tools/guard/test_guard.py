@@ -1165,6 +1165,12 @@ EXTRA_CASES = [
     Case("R3f: mcp form_input blocked", tool("mcp__chrome__form_input"), 2),
     Case("R3f: mcp camelCase restoreBackup blocked", tool("mcp__x__restoreBackup"), 2),
     Case("R3f: mcp get_dataset still allowed", tool("mcp__x__get_dataset"), 0),
+    Case("P1: mcp Docs batch blocked (it writes like update)", tool("mcp__claude_ai_Claude_Docs__batch"), 2),
+    Case("P1: mcp bulk_import blocked", tool("mcp__x__bulk_import"), 2),
+    Case("P1: mcp publish blocked", tool("mcp__x__publish_page"), 2),
+    Case("P1: mcp grant blocked", tool("mcp__x__grant_access"), 2),
+    Case("P1: mcp Docs read still allowed", tool("mcp__claude_ai_Claude_Docs__read"), 0),
+    Case("P1: mcp Docs query still allowed", tool("mcp__claude_ai_Claude_Docs__query"), 0),
 ]
 NO_PYTHON_CASE = Case("no interpreter fails closed", bash("git status"), 2, stderr_has="no Python interpreter found")
 FAKE_PYTHON_CASES = [
