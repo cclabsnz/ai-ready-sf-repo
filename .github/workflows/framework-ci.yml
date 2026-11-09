@@ -257,6 +257,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          # gitleaks-action v2 needs the token to list a pull request's commits.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   # Optional live consistency run: started by hand (workflow_dispatch) from the default branch only, never on
   # pull_request. It calls the model with the ANTHROPIC_API_KEY repository secret, so it is not a required check.
   # run_all.py runs one case N times, consistency.py compares the run folders, and the folders are uploaded for review.

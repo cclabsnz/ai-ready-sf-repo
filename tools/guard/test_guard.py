@@ -1306,6 +1306,10 @@ SCOPE_CASES = [
     sc("build: write to a scope.modify file after skeletons exist", write(S_CLS), 0),
     sc("build: write to a scope.create path after skeletons exist", write(S_NEW), 0),
     sc("build: Edit on an in-scope file", edits(S_CLS, "Edit"), 0),
+    sc("build: .active-story ending in CRLF (edited on Windows) still matches", write(S_NEW), 0,
+       post={"ai-context/.active-story": S + "\r\n"}),
+    sc("build: .active-story with a stray CR inside does not match", write(S_NEW), 2,
+       post={"ai-context/.active-story": S + "\r\r\n"}),
     sc("build: MultiEdit on an in-scope file", edits(S_CLS, "MultiEdit"), 0),
     sc("build: write to a source file not in scope", write(S_OTHER), 2, stderr_has="scope request"),
     sc("build: A.cls in scope, A.cls-meta.xml not: write the meta", write(S_META), 2, stderr_has="scope request"),
@@ -2315,7 +2319,8 @@ def git(project, *args):
 def put(project, rel, text):
     path = os.path.join(project, *rel.split("/"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # newline="\n": a Windows text-mode write would turn every "\n" into CRLF, unlike the files the tests stand in for.
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
 
