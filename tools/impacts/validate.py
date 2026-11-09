@@ -84,6 +84,9 @@ def split_evidence(ev):
 
 def check_evidence_file(root, path, line):
     """Return a problem string for an evidence path:line, or None when it checks out."""
+    # POSIX raises ValueError on a NUL; Windows' realpath does not, so check it here for the same answer on both.
+    if "\0" in path:
+        return "evidence path unreadable: %r" % path
     try:
         base = os.path.realpath(root)
         full = os.path.realpath(os.path.join(base, path))

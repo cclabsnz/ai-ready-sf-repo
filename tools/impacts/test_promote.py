@@ -300,7 +300,9 @@ def case_story_prints_deferrals_and_answers_before_writing():
     code, out = story_run(root)
     assert code == 0, out
     lines = out.splitlines()
-    dest_line = lines.index(os.path.join(root, SDEST))
+    # normpath: SDEST uses "/", and promote.py prints the destination with the OS separator.
+    dest = os.path.normpath(os.path.join(root, SDEST))
+    dest_line = [os.path.normpath(l) if l.startswith(root) else l for l in lines].index(dest)
     want = ["- OQ-2 (owner role: Product Owner; deferred by: Product Owner): Label wording?",
             "- OQ-3 (owner role: Salesforce Admin; deferred by: Product Owner): Retire size XL?",
             "- OQ-1 (owner role: Product Owner): Which sizes are retired? -> answer: None"]

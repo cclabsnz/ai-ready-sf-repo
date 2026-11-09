@@ -131,6 +131,9 @@ Windows (PowerShell):
 py -3 tools/guard/guard.py --rebaseline
 ```
 
+On Windows the guard accepts only a console window, such as PowerShell or Command Prompt. Git Bash's
+default window (mintty) is not a console, so the guard most likely refuses there (Inferred; not run).
+
 Expected: `baseline recorded in the git directory (ai-guard-baseline)`.
 
 `walkthrough_check.py` does not run this step. The summary line is the check.

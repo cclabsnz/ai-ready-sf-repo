@@ -169,6 +169,14 @@ def expected_path(expected_dir, index, name):
     return os.path.join(expected_dir, "%02d-%s.txt" % (index, name))
 
 
+def shown(path):
+    """path relative to the repo for a message; the full path when it is on another Windows drive."""
+    try:
+        return os.path.relpath(path, REPO)
+    except ValueError:
+        return path
+
+
 def compare(expected_dir, results):
     """results: [(name, rendered)] in step order. Returns [(name, ok, diff lines)]."""
     out = []
@@ -179,11 +187,11 @@ def compare(expected_dir, results):
             with open(path, encoding="utf-8-sig") as fh:
                 want = fh.read()
         except OSError:
-            out.append((name, False, ["no expected file at %s" % os.path.relpath(path, REPO)]))
+            out.append((name, False, ["no expected file at %s" % shown(path)]))
             continue
         except UnicodeDecodeError:
             out.append((name, False, ["%s is not UTF-8 (a PowerShell > redirect writes UTF-16)"
-                                      % os.path.relpath(path, REPO)]))
+                                      % shown(path)]))
             continue
         want = want.replace("\r\n", "\n")
         if want == rendered:

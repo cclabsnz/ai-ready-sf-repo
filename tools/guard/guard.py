@@ -359,12 +359,25 @@ def write_baseline(root):
         f.write(digest + "\n")
 
 
+def stdin_is_terminal():
+    """True only for a real terminal. On Windows isatty() is also True for NUL and other character devices, so
+    stdin must be a console too: GetConsoleMode succeeds only on a console handle."""
+    try:
+        if not sys.stdin.isatty():
+            return False
+        if os.name != "nt":
+            return True
+        import ctypes
+        import msvcrt
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(ctypes.c_uint32())))
+    except Exception:
+        return False
+
+
 def rebaseline(start):
     """Human-run: record the current git config and hooks as the baseline. Needs a terminal, so the hook cannot reach it."""
-    try:
-        interactive = sys.stdin.isatty()
-    except (OSError, ValueError):
-        interactive = False
+    interactive = stdin_is_terminal()
     if not interactive:
         block("--rebaseline must be run by a human in a terminal, not through a hook or a script.")
     try:
@@ -458,7 +471,11 @@ class Scope:
         if len(data) > MAX_ACTIVE_STORY:
             return None, f"{ACTIVE_STORY} is longer than {MAX_ACTIVE_STORY} bytes; failing closed."
         text = data.decode("utf-8", "replace")
-        return (text[:-1] if text.endswith("\n") else text), None
+        # start.py writes LF; a file edited on Windows may end in CRLF, which is one newline too.
+        for end in ("\r\n", "\n"):
+            if text.endswith(end):
+                return text[:-len(end)], None
+        return text, None
 
     def load(self):
         """({"story", "paths", "tests", "ids"}, None) for the active story's valid committed package, else (None, reason)."""
@@ -1677,8 +1694,10 @@ def target_block_reason(t, mode, policy, scope, root):
     rel = rel_path(root, t)
     if rel is None:
         return f"write to {t!r} is on a different drive from the repo."
-    # A directory is written as a prefix of its contents, so "docs" must read as "docs/".
-    reason = write_block_reason(rel + "/" if t.endswith("/") or os.path.isdir(t) else rel, mode, policy, scope)
+    # A directory is written as a prefix of its contents, so "docs" must read as "docs/". On Windows,
+    # os.path.join(dest, "") ends in a backslash, so both separators mark a directory.
+    is_dir = t.endswith(("/", os.sep)) or os.path.isdir(t)
+    reason = write_block_reason(rel + "/" if is_dir else rel, mode, policy, scope)
     # A glob that matched nothing stays a pattern; only concrete paths can be ancestors.
     if reason is None and not GLOB_CHARS.search(rel) and (hit := protected_overlap(rel, policy)):
         reason = f"write to {rel!r} would take {hit!r} with it, which is never allowed. Guard, settings, CI and git internals change by human-applied patch."

@@ -249,7 +249,11 @@ def check_file(path, src):
 # ---- scanning a tree and the baseline ----------------------------------------------------------
 
 def _inside(top, path):
-    return os.path.commonpath([top, path]) == top
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
 
 
 def scan(root, source_root):

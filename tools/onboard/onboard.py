@@ -70,6 +70,14 @@ class Refused(Exception):
     """Bad usage or an unsafe target. The CLI prints it on stderr and exits 2."""
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def checked(top, path, alias=None):
     """Absolute path of `path` (absolute, or relative to top) under the real path top.
     `alias` is the root as given, so an absolute path spelled through it (macOS /var for
@@ -79,7 +87,7 @@ def checked(top, path, alias=None):
     raw = os.path.abspath(raw)
     rel = None
     for base in (top,) + ((alias,) if alias else ()):
-        if os.path.commonpath([base, raw]) == base:
+        if _inside(base, raw):
             rel = os.path.relpath(raw, base)
             break
     if rel is None:
@@ -91,7 +99,7 @@ def checked(top, path, alias=None):
         cur = os.path.join(cur, part)
         if os.path.islink(cur):
             raise Refused("%s passes through a symlink at %s" % (path, os.path.relpath(cur, top)))
-    if os.path.commonpath([top, os.path.realpath(cur)]) != top:
+    if not _inside(top, os.path.realpath(cur)):
         raise Refused("%s resolves outside the root %s" % (path, top))
     return cur
 

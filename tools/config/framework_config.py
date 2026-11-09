@@ -88,12 +88,20 @@ def load(root):
     return {"startingPoint": starting, "sourceRoot": source, "impactChecks": _impact_checks(data)}
 
 
+def _inside(top, path):
+    """True when path is top or below it. On Windows, paths on different drives are never inside."""
+    try:
+        return os.path.commonpath([top, path]) == top
+    except ValueError:
+        return False
+
+
 def source_root(root):
     """Absolute real path of sourceRoot. ValueError when it resolves outside root or is no folder."""
     source = load(root)["sourceRoot"]
     top = os.path.realpath(root)
     path = os.path.realpath(os.path.join(top, source))
-    if os.path.commonpath([top, path]) != top:
+    if not _inside(top, path):
         raise ValueError("%s: sourceRoot %s resolves outside the repo" % (FILENAME, _show(source)))
     if not os.path.isdir(path):
         raise ValueError("%s: sourceRoot %s is not a directory" % (FILENAME, _show(source)))
