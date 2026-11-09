@@ -163,6 +163,21 @@ def test_missing_expected_file_is_a_difference():
     assert got[0][1] is False and "no expected file" in got[0][2][0], got
 
 
+def test_missing_expected_file_on_another_drive():
+    # Windows: relpath raises ValueError when the expected folder is on another drive from the repo.
+    d = fresh("otherdrive")
+    real = os.path.relpath
+
+    def other_drive(path, start=None):
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+    os.path.relpath = other_drive
+    try:
+        got = wc.compare(d, [("s", "anything\n")])
+    finally:
+        os.path.relpath = real
+    assert got[0][1] is False and wc.expected_path(d, 1, "s") in got[0][2][0], got
+
+
 def test_commit_change_alone_is_not_a_difference():
     d = fresh("commit")
     write(wc.expected_path(d, 1, "s"), wc.render("s", "c", 0, "at 1a2b3c4d\n"))
