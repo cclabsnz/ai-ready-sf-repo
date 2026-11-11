@@ -3,6 +3,27 @@
 All notable changes to this framework are recorded here. Versions follow `VERSION`. A release
 date is set when the release is tagged.
 
+## [Unreleased]
+
+### First deploy of the demo org
+
+The demo metadata had never been deployed. A by-hand deploy to a scratch org found three faults,
+now fixed:
+
+- `LegacyCaseMerge` used `group`, a reserved word in Apex, as a variable name.
+- The `Case_Agent_Console` FlexiPage set `mode` Replace on its regions, which a page with no parent
+  rejects.
+- The `Service_Agent` permission set did not grant read on `Case.EntitlementId`, so
+  `CaseEscalationService`'s user-mode query of the case's entitlement failed for agents.
+
+All 252 components deploy and the 183 Apex tests pass. The walkthrough's expected index output
+gains one edge, and the FlexiPage evidence line moves from 120 to 119.
+
+These are the first changes under `demo/org` since DEMO-202's index stamp, so that stamp is now
+stale: `package.py` refuses to re-package DEMO-202 until it is re-assessed. Its confirmed records
+are left as promoted. Their `Service_Agent` citations (lines 44 to 49) point at the file as it
+was at the stamp; in the current file those lines sit five lower.
+
 ## [0.1.0] - 2026-11-10
 
 The first published version. Each entry names what a workstream delivered; the commits and
