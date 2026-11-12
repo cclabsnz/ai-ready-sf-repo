@@ -67,10 +67,13 @@ for the full path with Claude Code.
 
 ## Honest limits
 
-- No Apex in this repo has been compiled or run, the DEMO-202 build included; that happens in an
-  adopter's org-connected CI.
+- The demo org's metadata has been deployed once, by hand, to a Developer Edition scratch org with
+  entitlements enabled, and its 183 Apex tests passed. Nothing in this repo deploys it, and CI does
+  not compile Apex. The DEMO-202 build has not compiled or run; that happens in an adopter's
+  org-connected CI.
 - No live model eval has been scored yet, so there are no golden outputs or consistency figures.
-- Tested on macOS. CI is configured for Ubuntu and Windows; Windows has not had a green run yet.
+- The Claude Code walkthrough has been followed on macOS only. The deterministic checks pass in CI
+  on Ubuntu and Windows.
 - The guard is a laptop control, best effort. The control that holds is CI with branch
   protection and code owners (see [Contributing and safety](#contributing-and-safety)).
 

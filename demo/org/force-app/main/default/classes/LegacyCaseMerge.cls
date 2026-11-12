@@ -42,9 +42,9 @@ public without sharing class LegacyCaseMerge {
      */
     public static List<Task> completeDuplicates(List<Task> tasks) {
         List<Task> duplicates = new List<Task>();
-        for (List<Task> group : groupBySubject(tasks).values()) {
-            for (Integer i = 1; i < group.size(); i++) {
-                duplicates.add(new Task(Id = group[i].Id, Status = 'Completed'));
+        for (List<Task> taskGroup : groupBySubject(tasks).values()) {
+            for (Integer i = 1; i < taskGroup.size(); i++) {
+                duplicates.add(new Task(Id = taskGroup[i].Id, Status = 'Completed'));
             }
         }
         if (!duplicates.isEmpty()) {
